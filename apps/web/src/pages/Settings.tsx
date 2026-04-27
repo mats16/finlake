@@ -1,4 +1,21 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import {
+  Alert,
+  AlertDescription,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  Input,
+  Spinner,
+} from '@databricks/appkit-ui/react';
+import { CheckCircle2, AlertCircle } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { useI18n } from '../i18n';
 import { useAppSettings, useUpdateAppSettings } from '../api/hooks';
@@ -36,44 +53,60 @@ export function Settings() {
   return (
     <>
       <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
-      <form className="card" style={{ marginBottom: 16 }} onSubmit={onSubmit}>
-        <h3 style={{ marginTop: 0, fontSize: 14, color: 'var(--muted)' }}>
-          {t('settings.mainCatalogHeading')}
-        </h3>
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
-          {t('settings.mainCatalogDesc')}
-        </p>
-        <input
-          type="text"
-          value={catalog}
-          placeholder={t('settings.mainCatalogPlaceholder')}
-          onChange={(e) => setCatalog(e.target.value)}
-          disabled={settings.isLoading || saving}
-          style={{
-            width: '100%',
-            maxWidth: 420,
-            padding: '8px 10px',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            background: 'var(--bg)',
-            color: 'var(--fg)',
-          }}
-        />
-        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button type="submit" disabled={!dirty || saving}>
-            {saving ? t('common.saving') : t('settings.save')}
-          </button>
-          {savedAt && !dirty && !saving ? (
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t('settings.saved')}</span>
-          ) : null}
-          {errorMessage ? (
-            <span style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>{errorMessage}</span>
-          ) : null}
-        </div>
+      <form onSubmit={onSubmit}>
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle>{t('settings.mainCatalogHeading')}</CardTitle>
+            <CardDescription>{t('settings.mainCatalogDesc')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="catalog-name">{t('settings.mainCatalogHeading')}</FieldLabel>
+                <Input
+                  id="catalog-name"
+                  type="text"
+                  value={catalog}
+                  placeholder={t('settings.mainCatalogPlaceholder')}
+                  onChange={(e) => setCatalog(e.target.value)}
+                  disabled={settings.isLoading || saving}
+                  className="max-w-md"
+                />
+                <FieldDescription>{t('settings.mainCatalogDesc')}</FieldDescription>
+              </Field>
+              <div className="flex items-center gap-3">
+                <Button type="submit" disabled={!dirty || saving}>
+                  {saving ? (
+                    <>
+                      <Spinner /> {t('common.saving')}
+                    </>
+                  ) : (
+                    t('settings.save')
+                  )}
+                </Button>
+                {savedAt && !dirty && !saving ? (
+                  <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                    <CheckCircle2 className="size-3.5 text-(--success)" />
+                    {t('settings.saved')}
+                  </span>
+                ) : null}
+              </div>
+              {errorMessage ? (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>{errorMessage}</AlertDescription>
+                </Alert>
+              ) : null}
+            </FieldGroup>
+          </CardContent>
+        </Card>
       </form>
-      <div className="card">
-        <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t('settings.body')}</p>
-      </div>
+
+      <Card>
+        <CardContent>
+          <p className="text-muted-foreground text-sm">{t('settings.body')}</p>
+        </CardContent>
+      </Card>
     </>
   );
 }

@@ -1,4 +1,32 @@
 import { useState } from 'react';
+import {
+  Alert,
+  AlertDescription,
+  Button,
+  Card,
+  CardContent,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Field,
+  FieldGroup,
+  FieldLabel,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Spinner,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@databricks/appkit-ui/react';
+import { AlertCircle, Plus, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { useBudgets, useCreateBudget } from '../api/hooks';
 import type { CreateBudgetInput } from '@lakecost/shared';
@@ -36,108 +64,160 @@ export function Budgets() {
   return (
     <>
       <PageHeader title={t('budgets.title')} subtitle={t('budgets.subtitle')} />
-      <div className="card" style={{ marginBottom: 16 }}>
-        <button type="button" className="btn" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? t('common.cancel') : t('budgets.newBudget')}
-        </button>
-        {showForm ? (
-          <form
-            onSubmit={onSubmit}
-            style={{ marginTop: 16, display: 'grid', gap: 12, maxWidth: 480 }}
+      <Card className="mb-4">
+        <CardContent>
+          <Button
+            type="button"
+            variant={showForm ? 'outline' : 'default'}
+            onClick={() => setShowForm((v) => !v)}
           >
-            <input
-              required
-              placeholder={t('budgets.namePlaceholder')}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={inputStyle}
-            />
-            <input
-              required
-              type="number"
-              min={1}
-              placeholder={t('budgets.amountPlaceholder')}
-              value={amountUsd}
-              onChange={(e) => setAmountUsd(Number(e.target.value))}
-              style={inputStyle}
-            />
-            <select
-              value={scopeType}
-              onChange={(e) => setScopeType(e.target.value as CreateBudgetInput['scopeType'])}
-              style={inputStyle}
-            >
-              <option value="account">{t('budgets.scope.account')}</option>
-              <option value="workspace">{t('budgets.scope.workspace')}</option>
-              <option value="sku">{t('budgets.scope.sku')}</option>
-              <option value="tag">{t('budgets.scope.tag')}</option>
-            </select>
-            <input
-              required
-              placeholder={t('budgets.scope.valuePlaceholder')}
-              value={scopeValue}
-              onChange={(e) => setScopeValue(e.target.value)}
-              style={inputStyle}
-            />
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value as CreateBudgetInput['period'])}
-              style={inputStyle}
-            >
-              <option value="monthly">{t('budgets.period.monthly')}</option>
-              <option value="quarterly">{t('budgets.period.quarterly')}</option>
-            </select>
-            <button type="submit" className="btn" disabled={create.isPending}>
-              {create.isPending ? t('common.saving') : t('budgets.create')}
-            </button>
-            {create.isError ? (
-              <div className="banner error">{(create.error as Error).message}</div>
-            ) : null}
-          </form>
-        ) : null}
-      </div>
+            {showForm ? (
+              <>
+                <X /> {t('common.cancel')}
+              </>
+            ) : (
+              <>
+                <Plus /> {t('budgets.newBudget')}
+              </>
+            )}
+          </Button>
+          {showForm ? (
+            <form onSubmit={onSubmit} className="mt-4 max-w-lg">
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="budget-name">{t('budgets.namePlaceholder')}</FieldLabel>
+                  <Input
+                    id="budget-name"
+                    required
+                    placeholder={t('budgets.namePlaceholder')}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </Field>
 
-      <div className="card">
-        <h3 style={{ marginTop: 0, fontSize: 14, color: 'var(--muted)' }}>
-          {t('budgets.existing')}
-        </h3>
-        {list.isLoading ? (
-          <div className="banner unknown">{t('common.loading')}</div>
-        ) : !list.data || list.data.items.length === 0 ? (
-          <div className="banner unknown">{t('budgets.empty')}</div>
-        ) : (
-          <table className="simple">
-            <thead>
-              <tr>
-                <th>{t('budgets.columns.name')}</th>
-                <th>{t('budgets.columns.scope')}</th>
-                <th>{t('budgets.columns.period')}</th>
-                <th style={{ textAlign: 'right' }}>{t('budgets.columns.amount')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.data.items.map((b) => (
-                <tr key={b.id}>
-                  <td>{b.name}</td>
-                  <td>
-                    {b.scopeType}: {b.scopeValue}
-                  </td>
-                  <td>{t(`budgets.period.${b.period}`)}</td>
-                  <td style={{ textAlign: 'right' }}>{formatUsd(b.amountUsd)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                <Field>
+                  <FieldLabel htmlFor="budget-amount">{t('budgets.amountPlaceholder')}</FieldLabel>
+                  <Input
+                    id="budget-amount"
+                    required
+                    type="number"
+                    min={1}
+                    placeholder={t('budgets.amountPlaceholder')}
+                    value={amountUsd}
+                    onChange={(e) => setAmountUsd(Number(e.target.value))}
+                  />
+                </Field>
+
+                <Field>
+                  <FieldLabel>{t('budgets.columns.scope')}</FieldLabel>
+                  <Select
+                    value={scopeType}
+                    onValueChange={(v) => setScopeType(v as CreateBudgetInput['scopeType'])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="account">{t('budgets.scope.account')}</SelectItem>
+                      <SelectItem value="workspace">{t('budgets.scope.workspace')}</SelectItem>
+                      <SelectItem value="sku">{t('budgets.scope.sku')}</SelectItem>
+                      <SelectItem value="tag">{t('budgets.scope.tag')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="budget-scope-value">
+                    {t('budgets.scope.valuePlaceholder')}
+                  </FieldLabel>
+                  <Input
+                    id="budget-scope-value"
+                    required
+                    placeholder={t('budgets.scope.valuePlaceholder')}
+                    value={scopeValue}
+                    onChange={(e) => setScopeValue(e.target.value)}
+                  />
+                </Field>
+
+                <Field>
+                  <FieldLabel>{t('budgets.columns.period')}</FieldLabel>
+                  <Select
+                    value={period}
+                    onValueChange={(v) => setPeriod(v as CreateBudgetInput['period'])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">{t('budgets.period.monthly')}</SelectItem>
+                      <SelectItem value="quarterly">{t('budgets.period.quarterly')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Button type="submit" disabled={create.isPending}>
+                  {create.isPending ? (
+                    <>
+                      <Spinner /> {t('common.saving')}
+                    </>
+                  ) : (
+                    t('budgets.create')
+                  )}
+                </Button>
+                {create.isError ? (
+                  <Alert variant="destructive">
+                    <AlertCircle />
+                    <AlertDescription>{(create.error as Error).message}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </FieldGroup>
+            </form>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <h3 className="text-muted-foreground mt-0 mb-3 text-sm font-medium">
+            {t('budgets.existing')}
+          </h3>
+          {list.isLoading ? (
+            <div className="text-muted-foreground inline-flex items-center gap-2 text-sm">
+              <Spinner /> {t('common.loading')}
+            </div>
+          ) : !list.data || list.data.items.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>{t('budgets.empty')}</EmptyTitle>
+                <EmptyDescription>{t('budgets.subtitle')}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('budgets.columns.name')}</TableHead>
+                  <TableHead>{t('budgets.columns.scope')}</TableHead>
+                  <TableHead>{t('budgets.columns.period')}</TableHead>
+                  <TableHead className="text-right">{t('budgets.columns.amount')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {list.data.items.map((b) => (
+                  <TableRow key={b.id}>
+                    <TableCell className="font-medium">{b.name}</TableCell>
+                    <TableCell>
+                      {b.scopeType}: {b.scopeValue}
+                    </TableCell>
+                    <TableCell>{t(`budgets.period.${b.period}`)}</TableCell>
+                    <TableCell className="text-right">{formatUsd(b.amountUsd)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg)',
-  color: 'var(--text)',
-  border: '1px solid var(--border)',
-  padding: '8px 12px',
-  borderRadius: 6,
-  fontSize: 13,
-};

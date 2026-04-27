@@ -1,8 +1,24 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
+import {
+  Alert,
+  AlertDescription,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  Spinner,
+} from '@databricks/appkit-ui/react';
+import { Info } from 'lucide-react';
 import { useRunSetupCheck } from '../../api/hooks';
 import { StepResult } from '../SetupWizard/StepResult';
 import type { DataSourceDefinition } from './dataSourceCatalog';
-import { useState } from 'react';
 import type { SetupCheckResult, SetupStepId } from '@lakecost/shared';
 import { useI18n } from '../../i18n';
 
@@ -13,40 +29,28 @@ interface Props {
 
 export function DataSourceDrawer({ source, onClose }: Props) {
   const { t } = useI18n();
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    if (source) window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [source, onClose]);
-
   if (!source) return null;
-
   const description = t(`dataSources.catalog.${source.id}.description`);
 
   return (
-    <>
-      <div className="drawer-backdrop" onClick={onClose} role="presentation" />
-      <aside className="drawer" role="dialog" aria-label={source.name}>
-        <header className="drawer-head">
-          <div>
-            <h3>{source.name}</h3>
-            <p>{description}</p>
-          </div>
-          <button type="button" className="drawer-close" onClick={onClose}>
-            {t('common.close')}
-          </button>
-        </header>
-        <div className="drawer-body">
+    <Sheet open onOpenChange={(open) => (open ? null : onClose())}>
+      <SheetContent side="right" className="w-full max-w-(--container-md) sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>{source.name}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col gap-4 overflow-auto px-4 pb-6">
           {source.available ? (
             <Configurator source={source} />
           ) : (
-            <div className="banner unknown">{t('dataSources.drawer.notImplemented')}</div>
+            <Alert>
+              <Info />
+              <AlertDescription>{t('dataSources.drawer.notImplemented')}</AlertDescription>
+            </Alert>
           )}
         </div>
-      </aside>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -67,25 +71,17 @@ function Configurator({ source }: { source: DataSourceDefinition }) {
       {source.id === 'databricks-system-tables' ? (
         <>
           <Section title={t('dataSources.systemTables.step1')}>
-            <button
-              type="button"
-              className="btn"
-              disabled={check.isPending}
-              onClick={() => run('systemTables')}
-            >
+            <Button type="button" disabled={check.isPending} onClick={() => run('systemTables')}>
+              {check.isPending ? <Spinner /> : null}
               {t('dataSources.systemTables.verifySchemas')}
-            </button>
+            </Button>
             <StepResult result={results.systemTables ?? null} />
           </Section>
           <Section title={t('dataSources.systemTables.step2')}>
-            <button
-              type="button"
-              className="btn"
-              disabled={check.isPending}
-              onClick={() => run('permissions')}
-            >
+            <Button type="button" disabled={check.isPending} onClick={() => run('permissions')}>
+              {check.isPending ? <Spinner /> : null}
               {t('dataSources.systemTables.verifySelect')}
-            </button>
+            </Button>
             <StepResult result={results.permissions ?? null} />
           </Section>
         </>
@@ -93,22 +89,21 @@ function Configurator({ source }: { source: DataSourceDefinition }) {
 
       {source.id === 'aws-cur' ? (
         <Section title={t('dataSources.awsCur.title')}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <input
-              className="input-inline"
+          <div className="mb-2 flex items-center gap-2">
+            <Input
               placeholder={t('dataSources.awsCur.placeholder')}
               value={bucket}
               onChange={(e) => setBucket(e.target.value)}
-              style={{ flex: 1 }}
+              className="flex-1"
             />
-            <button
+            <Button
               type="button"
-              className="btn"
               disabled={check.isPending}
               onClick={() => run('awsCur', { bucket: bucket || undefined })}
             >
+              {check.isPending ? <Spinner /> : null}
               {t('dataSources.awsCur.verify')}
-            </button>
+            </Button>
           </div>
           <StepResult result={results.awsCur ?? null} />
         </Section>
@@ -116,22 +111,21 @@ function Configurator({ source }: { source: DataSourceDefinition }) {
 
       {source.id === 'azure-cost-management' ? (
         <Section title={t('dataSources.azure.title')}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <input
-              className="input-inline"
+          <div className="mb-2 flex items-center gap-2">
+            <Input
               placeholder={t('dataSources.azure.placeholder')}
               value={storageAccount}
               onChange={(e) => setStorageAccount(e.target.value)}
-              style={{ flex: 1 }}
+              className="flex-1"
             />
-            <button
+            <Button
               type="button"
-              className="btn"
               disabled={check.isPending}
               onClick={() => run('azureExport', { storageAccount: storageAccount || undefined })}
             >
+              {check.isPending ? <Spinner /> : null}
               {t('dataSources.azure.verify')}
-            </button>
+            </Button>
           </div>
           <StepResult result={results.azureExport ?? null} />
         </Section>
@@ -139,14 +133,10 @@ function Configurator({ source }: { source: DataSourceDefinition }) {
 
       {source.id === 'tagging-policy' ? (
         <Section title={t('dataSources.tagging.title')}>
-          <button
-            type="button"
-            className="btn"
-            disabled={check.isPending}
-            onClick={() => run('tagging')}
-          >
+          <Button type="button" disabled={check.isPending} onClick={() => run('tagging')}>
+            {check.isPending ? <Spinner /> : null}
             {t('dataSources.tagging.verify')}
-          </button>
+          </Button>
           <StepResult result={results.tagging ?? null} />
         </Section>
       ) : null}
@@ -156,9 +146,11 @@ function Configurator({ source }: { source: DataSourceDefinition }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="card">
-      <h4 style={{ margin: '0 0 12px', fontSize: 14 }}>{title}</h4>
-      {children}
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }

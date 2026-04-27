@@ -4,10 +4,31 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
 } from 'recharts';
+import {
+  Alert,
+  AlertDescription,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@databricks/appkit-ui/react';
+import { AlertCircle } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { useUsageBySku, useUsageDaily } from '../api/hooks';
 import { useCurrencyUsd, useI18n } from '../i18n';
@@ -43,96 +64,153 @@ export function Dashboard() {
     <>
       <PageHeader title={t('dashboard.title')} subtitle={t('dashboard.subtitle')} />
 
-      <div className="kpi-grid">
-        <div className="card kpi-card">
-          <div className="label">{t('dashboard.totalSpend')}</div>
-          <div className="value">{formatUsd(totalUsd)}</div>
-          <div className="delta">
-            {daily.isLoading
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          label={t('dashboard.totalSpend')}
+          value={formatUsd(totalUsd)}
+          delta={
+            daily.isLoading
               ? t('common.loading')
               : daily.data
                 ? t('dashboard.usageRows', { count: daily.data.rows.length })
-                : emDash}
-          </div>
-        </div>
-        <div className="card kpi-card">
-          <div className="label">{t('dashboard.distinctSkus')}</div>
-          <div className="value">{bySku.data?.rows.length ?? emDash}</div>
-          <div className="delta">
-            {bySku.isLoading ? t('common.loading') : t('dashboard.systemBilling')}
-          </div>
-        </div>
-        <div className="card kpi-card">
-          <div className="label">{t('dashboard.activeBudgets')}</div>
-          <div className="value">{emDash}</div>
-          <div className="delta">{t('dashboard.configureInBudgets')}</div>
-        </div>
-        <div className="card kpi-card">
-          <div className="label">{t('dashboard.setupStatus')}</div>
-          <div className="value">{emDash}</div>
-          <div className="delta">{t('dashboard.runSetupWizard')}</div>
-        </div>
+                : emDash
+          }
+          loading={daily.isLoading}
+        />
+        <KpiCard
+          label={t('dashboard.distinctSkus')}
+          value={bySku.data?.rows.length.toString() ?? emDash}
+          delta={bySku.isLoading ? t('common.loading') : t('dashboard.systemBilling')}
+          loading={bySku.isLoading}
+        />
+        <KpiCard
+          label={t('dashboard.activeBudgets')}
+          value={emDash}
+          delta={t('dashboard.configureInBudgets')}
+        />
+        <KpiCard
+          label={t('dashboard.setupStatus')}
+          value={emDash}
+          delta={t('dashboard.runSetupWizard')}
+        />
       </div>
 
-      <div className="section-grid">
-        <div className="card">
-          <h3 style={{ marginTop: 0, fontSize: 14, color: 'var(--muted)' }}>
-            {t('dashboard.dailySpend')}
-          </h3>
-          {daily.isError ? (
-            <div className="banner error">{t('dashboard.failedToLoad')}</div>
-          ) : dailyChartData.length === 0 ? (
-            <div className="banner unknown">{t('dashboard.noData')}</div>
-          ) : (
-            <div style={{ width: '100%', height: 280 }}>
-              <ResponsiveContainer>
-                <LineChart data={dailyChartData}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="date" stroke="var(--muted)" fontSize={11} />
-                  <YAxis stroke="var(--muted)" fontSize={11} />
-                  <Tooltip
-                    contentStyle={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-                    formatter={(value: number) => formatUsd(value)}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="cost"
-                    stroke="var(--accent)"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">{t('dashboard.dailySpend')}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {daily.isError ? (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertDescription>{t('dashboard.failedToLoad')}</AlertDescription>
+              </Alert>
+            ) : daily.isLoading ? (
+              <Skeleton className="h-72 w-full" />
+            ) : dailyChartData.length === 0 ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>{t('dashboard.noData')}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <div className="h-72 w-full">
+                <ResponsiveContainer>
+                  <LineChart data={dailyChartData}>
+                    <CartesianGrid stroke="var(--border)" />
+                    <XAxis dataKey="date" stroke="var(--muted-foreground)" fontSize={11} />
+                    <YAxis stroke="var(--muted-foreground)" fontSize={11} />
+                    <RechartsTooltip
+                      contentStyle={{
+                        background: 'var(--popover)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--popover-foreground)',
+                        borderRadius: 6,
+                      }}
+                      formatter={(value: number) => formatUsd(value)}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="cost"
+                      stroke="var(--primary)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-        <div className="card">
-          <h3 style={{ marginTop: 0, fontSize: 14, color: 'var(--muted)' }}>
-            {t('dashboard.topSkus')}
-          </h3>
-          {bySku.data?.rows && bySku.data.rows.length > 0 ? (
-            <table className="simple">
-              <thead>
-                <tr>
-                  <th>{t('dashboard.sku')}</th>
-                  <th style={{ textAlign: 'right' }}>{t('dashboard.cost')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bySku.data.rows.slice(0, 10).map((row) => (
-                  <tr key={row.skuName}>
-                    <td>{row.skuName}</td>
-                    <td style={{ textAlign: 'right' }}>{formatUsd(row.costUsd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="banner unknown">{t('dashboard.noSkuBreakdown')}</div>
-          )}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">{t('dashboard.topSkus')}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {bySku.isLoading ? (
+              <div className="grid gap-2">
+                <Skeleton className="h-6 w-full" />
+                <Skeleton className="h-6 w-full" />
+                <Skeleton className="h-6 w-3/4" />
+              </div>
+            ) : bySku.data?.rows && bySku.data.rows.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('dashboard.sku')}</TableHead>
+                    <TableHead className="text-right">{t('dashboard.cost')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {bySku.data.rows.slice(0, 10).map((row) => (
+                    <TableRow key={row.skuName}>
+                      <TableCell>{row.skuName}</TableCell>
+                      <TableCell className="text-right">{formatUsd(row.costUsd)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>{t('dashboard.noSkuBreakdown')}</EmptyTitle>
+                  <EmptyDescription>{t('dashboard.systemBilling')}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  delta,
+  loading,
+}: {
+  label: string;
+  value: string;
+  delta?: string;
+  loading?: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription className="text-[11px] tracking-wider uppercase">{label}</CardDescription>
+        <CardTitle className="text-3xl font-semibold">
+          {loading ? <Skeleton className="h-8 w-24" /> : value}
+        </CardTitle>
+      </CardHeader>
+      {delta ? (
+        <CardContent>
+          <p className="text-muted-foreground text-xs">{delta}</p>
+        </CardContent>
+      ) : null}
+    </Card>
   );
 }

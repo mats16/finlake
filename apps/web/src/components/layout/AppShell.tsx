@@ -1,5 +1,20 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@databricks/appkit-ui/react';
+import { ExternalLink, Globe, Settings as SettingsIcon } from 'lucide-react';
 import { useI18n, type Locale } from '../../i18n';
 import { useMe } from '../../api/hooks';
 
@@ -102,35 +117,6 @@ function AccountMenu() {
   const { t, locale, setLocale } = useI18n();
   const navigate = useNavigate();
   const me = useMe();
-  const [open, setOpen] = useState(false);
-  const [langOpen, setLangOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocMouseDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setLangOpen(false);
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        setLangOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', onDocMouseDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) setLangOpen(false);
-  }, [open]);
 
   const email = me.data?.email ?? null;
   const userName = me.data?.userName ?? null;
@@ -138,124 +124,66 @@ function AccountMenu() {
   const initial = (email ?? userName ?? 'U').trim().charAt(0).toUpperCase() || 'U';
   const workspaceUrl = me.data?.workspaceUrl ?? null;
 
-  const selectLocale = (l: Locale) => {
-    setLocale(l);
-    setLangOpen(false);
-    setOpen(false);
-  };
-
-  const goToSettings = () => {
-    setOpen(false);
-    setLangOpen(false);
-    navigate('/settings');
-  };
-
   return (
-    <div className="account-menu" ref={ref}>
-      <button
-        type="button"
-        className="account-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={t('account.openMenu')}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="avatar" aria-hidden="true">
-          {initial}
-        </span>
-      </button>
-      {open ? (
-        <div className="account-popover" role="menu">
-          <div className="account-header">
-            <div className="account-name" title={displayName}>
-              {displayName}
-            </div>
-            {userName && email && userName !== email ? (
-              <div className="account-sub">{userName}</div>
-            ) : null}
-          </div>
-
-          <div className="account-section">
-            <div className="account-section-label">{t('account.sectionApp')}</div>
-            <button type="button" role="menuitem" className="account-item" onClick={goToSettings}>
-              <span className="account-item-icon" aria-hidden="true">
-                ⚙
-              </span>
-              <span className="account-item-label">{t('account.settings')}</span>
-            </button>
-          </div>
-
-          <div className="account-divider" />
-
-          <div className="account-section">
-            <button
-              type="button"
-              role="menuitem"
-              aria-haspopup="menu"
-              aria-expanded={langOpen}
-              className={`account-item account-item-expandable ${langOpen ? 'active' : ''}`}
-              onClick={() => setLangOpen((v) => !v)}
-            >
-              <span className="account-item-icon" aria-hidden="true">
-                🌐
-              </span>
-              <span className="account-item-label">{t('common.language')}</span>
-              <span className="account-item-current">
-                {locale === 'ja' ? t('common.japanese') : t('common.english')}
-              </span>
-              <span className="account-item-chevron" aria-hidden="true">
-                ›
-              </span>
-            </button>
-            {langOpen ? (
-              <div className="account-submenu" role="menu">
-                {(['en', 'ja'] as Locale[]).map((l) => {
-                  const active = locale === l;
-                  return (
-                    <button
-                      key={l}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      className="account-submenu-item"
-                      onClick={() => selectLocale(l)}
-                    >
-                      <span className="check" aria-hidden="true">
-                        {active ? '✓' : ''}
-                      </span>
-                      <span>{l === 'en' ? t('common.english') : t('common.japanese')}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-
-          {workspaceUrl ? (
-            <>
-              <div className="account-divider" />
-              <div className="account-section">
-                <a
-                  href={workspaceUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  role="menuitem"
-                  className="account-item"
-                  onClick={() => {
-                    setOpen(false);
-                    setLangOpen(false);
-                  }}
-                >
-                  <span className="account-item-icon" aria-hidden="true">
-                    ↗
-                  </span>
-                  <span className="account-item-label">{t('account.databricksConsole')}</span>
-                </a>
-              </div>
-            </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="account-trigger" aria-label={t('account.openMenu')}>
+          <span className="avatar" aria-hidden="true">
+            {initial}
+          </span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-72">
+        <DropdownMenuLabel className="flex flex-col gap-0.5">
+          <span className="truncate text-sm font-semibold" title={displayName}>
+            {displayName}
+          </span>
+          {userName && email && userName !== email ? (
+            <span className="text-muted-foreground text-xs">{userName}</span>
           ) : null}
-        </div>
-      ) : null}
-    </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+
+        <DropdownMenuLabel className="text-muted-foreground text-[10px] tracking-wider uppercase">
+          {t('account.sectionApp')}
+        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={() => navigate('/settings')}>
+            <SettingsIcon />
+            <span>{t('account.settings')}</span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Globe />
+            <span className="flex-1">{t('common.language')}</span>
+            <span className="text-muted-foreground text-xs">
+              {locale === 'ja' ? t('common.japanese') : t('common.english')}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={locale} onValueChange={(v) => setLocale(v as Locale)}>
+              <DropdownMenuRadioItem value="en">{t('common.english')}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="ja">{t('common.japanese')}</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        {workspaceUrl ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <a href={workspaceUrl} target="_blank" rel="noreferrer noopener">
+                <ExternalLink />
+                <span>{t('account.databricksConsole')}</span>
+              </a>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

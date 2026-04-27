@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { SetupCheckResult } from '@lakecost/shared';
+import { Input, Separator } from '@databricks/appkit-ui/react';
+import { ExternalLink } from 'lucide-react';
 import { useSetupState } from '../../api/hooks';
 import { DataSourceTile, type TileBadge, type TileMetric } from './DataSourceTile';
 import { DataSourceDrawer } from './DataSourceDrawer';
@@ -95,23 +97,27 @@ export function DataSources() {
 
   return (
     <>
-      <div className="section-divider" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
-        <h3>{t('dataSources.currentTitle')}</h3>
-        <div className="actions">
-          <a className="text-link" href="#" onClick={(e) => e.preventDefault()}>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <h3 className="m-0 text-base font-semibold">{t('dataSources.currentTitle')}</h3>
+        <div className="flex items-center gap-3">
+          <a
+            className="text-primary inline-flex items-center gap-1.5 text-sm hover:underline"
+            href="#"
+            onClick={(e) => e.preventDefault()}
+          >
             {t('dataSources.viewGold')}
+            <ExternalLink className="size-3.5" />
           </a>
-          <input
-            className="input-inline"
+          <Input
             placeholder={t('dataSources.filterPlaceholder')}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            style={{ width: 200 }}
+            className="h-9 w-52"
           />
         </div>
       </div>
 
-      <div className="tile-grid">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {current.map((s) => (
           <DataSourceTile
             key={s.id}
@@ -123,11 +129,11 @@ export function DataSources() {
         ))}
       </div>
 
-      <div className="section-divider">
-        <h3>{t('dataSources.addTitle')}</h3>
-      </div>
+      <Separator className="my-8" />
 
-      <div className="tile-grid">
+      <h3 className="mb-4 text-base font-semibold">{t('dataSources.addTitle')}</h3>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {candidates.map((s) => (
           <DataSourceTile
             key={s.id}
