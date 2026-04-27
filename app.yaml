@@ -1,0 +1,25 @@
+command:
+  - npm
+  - run
+  - start
+  - --workspace=apps/api
+
+env:
+  - name: NODE_ENV
+    value: production
+  - name: WEB_DIST_DIR
+    value: apps/web/dist
+  - name: MIGRATE_ON_BOOT
+    value: 'true'
+  # Default to SQLite at /home/app for regions where Lakebase is unavailable.
+  # Switch to lakebase by setting DB_BACKEND=lakebase and binding LAKEBASE_INSTANCE_NAME.
+  - name: DB_BACKEND
+    value: sqlite
+  - name: SQLITE_PATH
+    value: /home/app/data/lakecost.db
+  # Bind a SQL warehouse resource named "warehouse" in resources/app.yml
+  - name: SQL_WAREHOUSE_ID
+    valueFrom: warehouse
+  # Uncomment when Lakebase is available in your region and bound as resource "lakebase"
+  # - name: LAKEBASE_INSTANCE_NAME
+  #   valueFrom: lakebase

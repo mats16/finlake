@@ -1,0 +1,23 @@
+bundle:
+  name: lakecost
+
+include:
+  - resources/*.yml
+
+variables:
+  sql_warehouse_id:
+    description: ID of the Serverless SQL warehouse the app should use
+  lakebase_instance_name:
+    description: Optional Lakebase database instance name (leave empty to use SQLite)
+    default: ''
+
+targets:
+  dev:
+    mode: development
+    workspace:
+      host: ${DATABRICKS_HOST}
+
+  prod:
+    mode: production
+    workspace:
+      host: ${DATABRICKS_HOST}

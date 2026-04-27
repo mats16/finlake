@@ -1,0 +1,41 @@
+{
+  "name": "@lakecost/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "echo \"no tests yet\"",
+    "db:generate:sqlite": "drizzle-kit generate --config=drizzle.sqlite.config.ts",
+    "db:generate:pg": "drizzle-kit generate --config=drizzle.pg.config.ts",
+    "db:migrate": "echo 'Run migrations via the application boot path (MIGRATE_ON_BOOT=true) or call programmatically.'",
+    "db:studio": "drizzle-kit studio --config=drizzle.sqlite.config.ts"
+  },
+  "dependencies": {
+    "@lakecost/shared": "*",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.38.3",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0"
+  },
+  "optionalDependencies": {
+    "@databricks/lakebase": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.30.1",
+    "typescript": "^5.7.3"
+  }
+}

@@ -104,6 +104,15 @@ dist
 # vitepress cache directory
 **/.vitepress/cache
 
+# SQLite database files (lakecost local dev / fallback)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Turbo cache
+.turbo/
+
 # Docusaurus cache and generated files
 .docusaurus
 
