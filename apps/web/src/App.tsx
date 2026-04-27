@@ -3,9 +3,9 @@ import { AppShell } from './components/layout/AppShell';
 import { Dashboard } from './pages/Dashboard';
 import { CostExplorer } from './pages/CostExplorer';
 import { Budgets } from './pages/Budgets';
-import { Settings } from './pages/Settings';
 import { ConfigureLayout } from './pages/Configure/ConfigureLayout';
 import { DataSources } from './pages/Configure/DataSources';
+import { Admin } from './pages/Configure/Admin';
 import { Stub } from './pages/Configure/Stub';
 
 export function App() {
@@ -38,13 +38,10 @@ export function App() {
               />
             }
           />
-          <Route
-            path="admin"
-            element={<Stub titleKey="configure.admin.title" descKey="configure.admin.desc" />}
-          />
+          <Route path="admin" element={<Admin />} />
         </Route>
 
-        <Route path="/settings" element={<Settings />} />
+        <Route path="/settings" element={<Navigate to="/configure/admin" replace />} />
         <Route path="/setup" element={<Navigate to="/configure/data-sources" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

@@ -15,16 +15,16 @@ import {
   DropdownMenuTrigger,
 } from '@databricks/appkit-ui/react';
 import {
+  AppWindow,
   Bolt,
   ChevronDown,
-  CircleDollarSign,
   ExternalLink,
-  Folder,
   Globe,
   LayoutDashboard,
-  Library,
   LineChart,
+  Notebook,
   Settings as SettingsIcon,
+  Shapes,
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
@@ -45,7 +45,7 @@ interface NavGroup {
   matchPrefix: string;
 }
 
-const PRIMARY: NavItem[] = [{ to: '/dashboard', labelKey: 'nav.overview', icon: CircleDollarSign }];
+const PRIMARY: NavItem[] = [{ to: '/dashboard', labelKey: 'nav.overview', icon: AppWindow }];
 
 const CONFIGURE: NavGroup = {
   labelKey: 'nav.configure',
@@ -62,7 +62,6 @@ const CONFIGURE: NavGroup = {
 const SECONDARY: NavItem[] = [
   { to: '/explorer', labelKey: 'nav.costExplorer', icon: LineChart },
   { to: '/budgets', labelKey: 'nav.budgets', icon: Wallet },
-  { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon },
 ];
 
 interface ExternalNavItem {
@@ -76,10 +75,10 @@ function buildDatabricksItems(catalogName: string | null): ExternalNavItem[] {
     {
       path: catalogName ? `/explore/data/${encodeURIComponent(catalogName)}` : '/explore/data',
       labelKey: 'nav.catalog',
-      icon: Library,
+      icon: Shapes,
     },
     { path: '/sql/dashboards', labelKey: 'nav.dashboards', icon: LayoutDashboard },
-    { path: '/browse', labelKey: 'nav.workspace', icon: Folder },
+    { path: '/browse', labelKey: 'nav.workspace', icon: Notebook },
   ];
 }
 
@@ -121,6 +120,20 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
 
+          {SECONDARY.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => (isActive ? 'active' : '')}
+              >
+                {Icon ? <Icon className="nav-icon" aria-hidden="true" /> : null}
+                <span>{t(item.labelKey)}</span>
+              </NavLink>
+            );
+          })}
+
           <div className={`nav-group ${configureOpen ? 'open' : ''}`}>
             <div className="nav-group-row">
               <NavLink
@@ -154,20 +167,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             ) : null}
           </div>
-
-          {SECONDARY.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) => (isActive ? 'active' : '')}
-              >
-                {Icon ? <Icon className="nav-icon" aria-hidden="true" /> : null}
-                <span>{t(item.labelKey)}</span>
-              </NavLink>
-            );
-          })}
 
           {workspaceUrl ? (
             <>
@@ -236,7 +235,7 @@ function AccountMenu() {
           {t('account.sectionApp')}
         </DropdownMenuLabel>
         <DropdownMenuGroup>
-          <DropdownMenuItem onSelect={() => navigate('/settings')}>
+          <DropdownMenuItem onSelect={() => navigate('/configure/admin')}>
             <SettingsIcon />
             <span>{t('account.settings')}</span>
           </DropdownMenuItem>

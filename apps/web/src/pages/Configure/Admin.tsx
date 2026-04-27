@@ -16,13 +16,12 @@ import {
   Spinner,
 } from '@databricks/appkit-ui/react';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
-import { PageHeader } from '../components/PageHeader';
-import { useI18n } from '../i18n';
-import { useAppSettings, useUpdateAppSettings } from '../api/hooks';
+import { useI18n } from '../../i18n';
+import { useAppSettings, useUpdateAppSettings } from '../../api/hooks';
 
 const MAIN_CATALOG_KEY = 'catalog_name';
 
-export function Settings() {
+export function Admin() {
   const { t } = useI18n();
   const settings = useAppSettings();
   const updateSettings = useUpdateAppSettings();
@@ -52,7 +51,6 @@ export function Settings() {
 
   return (
     <>
-      <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
       <form onSubmit={onSubmit}>
         <Card className="mb-4">
           <CardHeader>
@@ -103,6 +101,10 @@ export function Settings() {
       </form>
 
       <Card>
+        <CardHeader>
+          <CardTitle>{t('configure.admin.title')}</CardTitle>
+          <CardDescription>{t('configure.admin.desc')}</CardDescription>
+        </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-sm">{t('settings.body')}</p>
         </CardContent>
