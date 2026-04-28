@@ -11,6 +11,8 @@ import type {
   BudgetsRepo,
   CachedAggregationValue,
   CachedAggregationsRepo,
+  DataSourceValue,
+  DataSourcesRepo,
   Repositories,
   SetupStateRepo,
   SetupStateValue,
@@ -20,8 +22,27 @@ import type {
 import { ensureParentDir } from './paths.js';
 import { logger } from './logger.js';
 import type { Budget, CreateBudgetInput, SetupCheckResult } from '@lakecost/shared';
+import {
+  ACCOUNT_PRICES_DEFAULT,
+  DATABRICKS_BILLING_SOURCE_ID,
+  FOCUS_VIEW_SCHEMA_DEFAULT,
+  FOCUS_VIEW_TABLE_DEFAULT,
+} from '@lakecost/shared';
 
 type Db = BetterSQLite3Database<typeof s>;
+
+const DEFAULT_DATA_SOURCES: ReadonlyArray<Omit<DataSourceValue, 'updatedAt'>> = [
+  {
+    id: DATABRICKS_BILLING_SOURCE_ID,
+    name: 'Databricks System Tables',
+    description: 'FOCUS 1.3 view materialized over system.billing.* and supporting system tables',
+    provider: 'Databricks',
+    tier: FOCUS_VIEW_SCHEMA_DEFAULT,
+    tableName: FOCUS_VIEW_TABLE_DEFAULT,
+    enabled: true,
+    config: { accountPricesTable: ACCOUNT_PRICES_DEFAULT },
+  },
+];
 
 export class SqliteClient implements DatabaseClient {
   readonly backend = 'sqlite' as const;
@@ -37,6 +58,7 @@ export class SqliteClient implements DatabaseClient {
       cachedAggregations: new SqliteCachedAggregationsRepo(db),
       setupState: new SqliteSetupStateRepo(db),
       appSettings: new SqliteAppSettingsRepo(db),
+      dataSources: new SqliteDataSourcesRepo(db),
     };
   }
 
@@ -102,6 +124,17 @@ export class SqliteClient implements DatabaseClient {
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS data_sources (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        provider TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        table_name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        config_json TEXT NOT NULL DEFAULT '{}',
+        updated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS setup_state (
         workspace_id TEXT PRIMARY KEY,
         system_tables_ok INTEGER NOT NULL DEFAULT 0,
@@ -112,7 +145,30 @@ export class SqliteClient implements DatabaseClient {
         details_json TEXT NOT NULL DEFAULT '{}'
       );
     `);
+    this.seedDataSources();
     logger.debug('SQLite schema bootstrap complete');
+  }
+
+  private seedDataSources(): void {
+    const stmt = this.raw.prepare(
+      `INSERT OR IGNORE INTO data_sources (
+        id, name, description, provider, tier, table_name, enabled, config_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const now = new Date().toISOString();
+    for (const row of DEFAULT_DATA_SOURCES) {
+      stmt.run(
+        row.id,
+        row.name,
+        row.description,
+        row.provider,
+        row.tier,
+        row.tableName,
+        row.enabled ? 1 : 0,
+        JSON.stringify(row.config),
+        now,
+      );
+    }
   }
 
   async healthCheck(): Promise<{ ok: true; backend: 'sqlite' }> {
@@ -346,6 +402,74 @@ class SqliteSetupStateRepo implements SetupStateRepo {
     if (result.step === 'azureExport') next.azureExportConfigured = result.status === 'ok';
     await this.upsert(next);
   }
+}
+
+class SqliteDataSourcesRepo implements DataSourcesRepo {
+  constructor(private db: Db) {}
+
+  async list(): Promise<DataSourceValue[]> {
+    const rows = await this.db.select().from(s.dataSources);
+    return rows.map(toDataSource);
+  }
+
+  async get(id: string): Promise<DataSourceValue | null> {
+    const rows = await this.db
+      .select()
+      .from(s.dataSources)
+      .where(eq(s.dataSources.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row ? toDataSource(row) : null;
+  }
+
+  async upsert(value: DataSourceValue): Promise<DataSourceValue> {
+    const row = {
+      id: value.id,
+      name: value.name,
+      description: value.description,
+      provider: value.provider,
+      tier: value.tier,
+      tableName: value.tableName,
+      enabled: value.enabled,
+      configJson: JSON.stringify(value.config),
+      updatedAt: value.updatedAt,
+    };
+    await this.db
+      .insert(s.dataSources)
+      .values(row)
+      .onConflictDoUpdate({
+        target: s.dataSources.id,
+        set: {
+          name: row.name,
+          description: row.description,
+          provider: row.provider,
+          tier: row.tier,
+          tableName: row.tableName,
+          enabled: row.enabled,
+          configJson: row.configJson,
+          updatedAt: row.updatedAt,
+        },
+      });
+    return value;
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.delete(s.dataSources).where(eq(s.dataSources.id, id));
+  }
+}
+
+function toDataSource(row: typeof s.dataSources.$inferSelect): DataSourceValue {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    provider: row.provider,
+    tier: row.tier,
+    tableName: row.tableName,
+    enabled: row.enabled,
+    config: JSON.parse(row.configJson) as Record<string, unknown>,
+    updatedAt: row.updatedAt,
+  };
 }
 
 class SqliteAppSettingsRepo implements AppSettingsRepo {

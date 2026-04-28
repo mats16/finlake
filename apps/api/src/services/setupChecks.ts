@@ -1,20 +1,35 @@
 import type { Env, SetupCheckResult, SetupStepId } from '@lakecost/shared';
-import { StatementExecutor } from './statementExecution.js';
-import { AppServicePrincipalTokenProvider } from '../auth/appServicePrincipal.js';
+import {
+  ACCOUNT_PRICES_DEFAULT,
+  CATALOG_SETTING_KEY,
+  DATABRICKS_BILLING_SOURCE_ID,
+  FOCUS_VIEW_SCHEMA_DEFAULT,
+  FOCUS_VIEW_TABLE_DEFAULT,
+  buildEnsureSchemaSql,
+  buildFocusViewSql,
+  focusViewFqn,
+  validateAccountPricesTable,
+} from '@lakecost/shared';
+import type { DatabaseClient } from '@lakecost/db';
+import { buildUserExecutor } from './statementExecution.js';
 import { z } from 'zod';
 
 export async function runSetupCheck(
   step: SetupStepId,
   env: Env,
   input: Record<string, unknown>,
+  db: DatabaseClient,
+  userToken?: string,
 ): Promise<SetupCheckResult> {
   const checkedAt = new Date().toISOString();
 
   switch (step) {
     case 'systemTables':
-      return await checkSystemTables(env, checkedAt);
+      return await checkSystemTables(env, checkedAt, userToken);
     case 'permissions':
-      return await checkPermissions(env, checkedAt);
+      return await checkPermissions(env, checkedAt, userToken);
+    case 'focusView':
+      return await checkFocusView(env, db, input, checkedAt, userToken);
     case 'awsCur':
       return checkAwsCur(input, checkedAt);
     case 'azureExport':
@@ -31,10 +46,14 @@ export async function runSetupCheck(
   }
 }
 
-async function checkSystemTables(env: Env, checkedAt: string): Promise<SetupCheckResult> {
-  const executor = tryBuildExecutor(env);
+async function checkSystemTables(
+  env: Env,
+  checkedAt: string,
+  userToken?: string,
+): Promise<SetupCheckResult> {
+  const executor = buildUserExecutor(env, userToken);
   if (!executor) {
-    return notConfigured('systemTables', checkedAt);
+    return notConfigured('systemTables', checkedAt, userToken);
   }
   try {
     const rows = await executor.run(
@@ -79,17 +98,33 @@ async function checkSystemTables(env: Env, checkedAt: string): Promise<SetupChec
   }
 }
 
-async function checkPermissions(env: Env, checkedAt: string): Promise<SetupCheckResult> {
-  const executor = tryBuildExecutor(env);
+async function checkPermissions(
+  env: Env,
+  checkedAt: string,
+  userToken?: string,
+): Promise<SetupCheckResult> {
+  const executor = buildUserExecutor(env, userToken);
   if (!executor) {
-    return notConfigured('permissions', checkedAt);
+    return notConfigured('permissions', checkedAt, userToken);
   }
-  const grantSql = [
-    'GRANT USE CATALOG ON CATALOG system TO `<app-service-principal>`;',
-    'GRANT USE SCHEMA  ON SCHEMA  system.billing TO `<app-service-principal>`;',
-    'GRANT SELECT      ON TABLE   system.billing.usage        TO `<app-service-principal>`;',
-    'GRANT SELECT      ON TABLE   system.billing.list_prices  TO `<app-service-principal>`;',
+  const ucGrantSql = [
+    '-- Unity Catalog grants (system.billing read access) for the calling user',
+    'GRANT USE CATALOG ON CATALOG system                      TO `<your-user-or-group>`;',
+    'GRANT USE SCHEMA  ON SCHEMA  system.billing              TO `<your-user-or-group>`;',
+    'GRANT SELECT      ON TABLE   system.billing.usage        TO `<your-user-or-group>`;',
+    'GRANT SELECT      ON TABLE   system.billing.list_prices  TO `<your-user-or-group>`;',
   ].join('\n');
+  const warehouseId = env.SQL_WAREHOUSE_ID ?? '<warehouse-id>';
+  const warehouseGrantCli = `# Workspace-level: SQL Warehouse "Can use" permission
+databricks permissions set sql/warehouses ${warehouseId} \\
+  --json '{"access_control_list":[{"user_name":"<your-user-or-group>","permission_level":"CAN_USE"}]}'`;
+  const warehouseTerraform = `resource "databricks_permissions" "lakecost_warehouse" {
+  sql_endpoint_id = "${warehouseId}"
+  access_control {
+    user_name        = "<your-user-or-group>"
+    permission_level = "CAN_USE"
+  }
+}`;
   try {
     await executor.run(
       'SELECT count(*) AS n FROM system.billing.usage LIMIT 1',
@@ -99,15 +134,134 @@ async function checkPermissions(env: Env, checkedAt: string): Promise<SetupCheck
     return {
       step: 'permissions',
       status: 'ok',
-      message: 'App service principal can read system.billing.usage',
+      message: 'Caller can read system.billing.usage',
+      checkedAt,
+    };
+  } catch (err) {
+    const message = (err as Error).message;
+    const isWarehousePermDenied =
+      /not authorized to use this warehouse|PERMISSION_DENIED.*warehouse/i.test(message);
+    return {
+      step: 'permissions',
+      status: 'error',
+      message: isWarehousePermDenied
+        ? `Cannot use SQL Warehouse ${warehouseId}: ${message}`
+        : `Cannot read system.billing.usage: ${message}`,
+      remediation: {
+        sql: ucGrantSql,
+        cli: warehouseGrantCli,
+        terraform: warehouseTerraform,
+      },
+      checkedAt,
+    };
+  }
+}
+
+async function checkFocusView(
+  env: Env,
+  db: DatabaseClient,
+  input: Record<string, unknown>,
+  checkedAt: string,
+  userToken?: string,
+): Promise<SetupCheckResult> {
+  const [catalogSetting, source] = await Promise.all([
+    db.repos.appSettings.get(CATALOG_SETTING_KEY),
+    db.repos.dataSources.get(DATABRICKS_BILLING_SOURCE_ID),
+  ]);
+  const pick = (key: string, fallback: string): string => {
+    const v = input[key];
+    return typeof v === 'string' && v.trim().length > 0 ? v.trim() : fallback;
+  };
+  const catalog = pick('catalog', (catalogSetting?.value ?? '').trim());
+  const tier = pick('tier', source?.tier ?? FOCUS_VIEW_SCHEMA_DEFAULT);
+  const tableName = pick('tableName', source?.tableName ?? FOCUS_VIEW_TABLE_DEFAULT);
+  const accountPricesTable = pick(
+    'accountPricesTable',
+    (source?.config.accountPricesTable as string | undefined) ?? ACCOUNT_PRICES_DEFAULT,
+  );
+
+  if (!catalog) {
+    return {
+      step: 'focusView',
+      status: 'warning',
+      message:
+        'Main catalog is not configured. Set it in Configure → Admin (catalog_name in app_settings) before creating the FOCUS view.',
+      checkedAt,
+    };
+  }
+
+  let viewSql: string;
+  let ensureSchemaSql: string;
+  let fqn: string;
+  let validatedAccountPrices: string;
+  try {
+    validatedAccountPrices = validateAccountPricesTable(accountPricesTable);
+    ensureSchemaSql = buildEnsureSchemaSql({ catalog, schema: tier });
+    viewSql = buildFocusViewSql({
+      catalog,
+      schema: tier,
+      table: tableName,
+      accountPricesTable: validatedAccountPrices,
+    });
+    fqn = focusViewFqn({ catalog, schema: tier, table: tableName });
+  } catch (err) {
+    return {
+      step: 'focusView',
+      status: 'error',
+      message: `Invalid view target: ${(err as Error).message}`,
+      details: { catalog, tier, tableName, accountPricesTable },
+      checkedAt,
+    };
+  }
+
+  const combinedRemediationSql = `${ensureSchemaSql};\n\n${viewSql};`;
+
+  const executor = buildUserExecutor(env, userToken);
+  if (!executor) {
+    return {
+      step: 'focusView',
+      status: 'unknown',
+      message: notConfiguredMessage(userToken),
+      details: { fqn, accountPricesTable: validatedAccountPrices },
+      remediation: { sql: combinedRemediationSql },
+      checkedAt,
+    };
+  }
+
+  try {
+    await executor.run(ensureSchemaSql, [], z.object({}).passthrough());
+    await executor.run(viewSql, [], z.object({}).passthrough());
+    await db.repos.dataSources.upsert({
+      id: DATABRICKS_BILLING_SOURCE_ID,
+      name: source?.name ?? 'Databricks System Tables',
+      description:
+        source?.description ??
+        'FOCUS 1.3 view materialized over system.billing.* and supporting system tables',
+      provider: source?.provider ?? 'Databricks',
+      tier,
+      tableName,
+      enabled: source?.enabled ?? true,
+      config: {
+        ...(source?.config ?? {}),
+        accountPricesTable: validatedAccountPrices,
+      },
+      updatedAt: checkedAt,
+    });
+    return {
+      step: 'focusView',
+      status: 'ok',
+      message: `Created or replaced FOCUS view ${fqn}`,
+      details: { fqn, accountPricesTable: validatedAccountPrices },
+      remediation: { sql: combinedRemediationSql },
       checkedAt,
     };
   } catch (err) {
     return {
-      step: 'permissions',
+      step: 'focusView',
       status: 'error',
-      message: `Cannot read system.billing.usage: ${(err as Error).message}`,
-      remediation: { sql: grantSql },
+      message: `Failed to create FOCUS view ${fqn}: ${(err as Error).message}`,
+      details: { fqn, accountPricesTable: validatedAccountPrices },
+      remediation: { sql: combinedRemediationSql },
       checkedAt,
     };
   }
@@ -190,23 +344,22 @@ function checkTagging(checkedAt: string): SetupCheckResult {
   };
 }
 
-function tryBuildExecutor(env: Env): StatementExecutor | undefined {
-  if (!env.DATABRICKS_HOST || !env.SQL_WAREHOUSE_ID) return undefined;
-  if (!env.DATABRICKS_CLIENT_ID || !env.DATABRICKS_CLIENT_SECRET) return undefined;
-  const tokenProvider = new AppServicePrincipalTokenProvider(env);
-  return new StatementExecutor({
-    host: env.DATABRICKS_HOST,
-    warehouseId: env.SQL_WAREHOUSE_ID,
-    tokenProvider: () => tokenProvider.getToken(),
-  });
-}
-
-function notConfigured(step: SetupStepId, checkedAt: string): SetupCheckResult {
+function notConfigured(
+  step: SetupStepId,
+  checkedAt: string,
+  userToken: string | undefined,
+): SetupCheckResult {
   return {
     step,
     status: 'unknown',
-    message:
-      'Databricks workspace credentials not configured (DATABRICKS_HOST, SQL_WAREHOUSE_ID, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET)',
+    message: notConfiguredMessage(userToken),
     checkedAt,
   };
+}
+
+function notConfiguredMessage(userToken: string | undefined): string {
+  if (!userToken) {
+    return 'Missing OBO access token. Run behind a proxy that forwards the `x-forwarded-access-token` header (Databricks Apps, or `databricks apps run-local`).';
+  }
+  return 'Databricks workspace credentials not configured (DATABRICKS_HOST, SQL_WAREHOUSE_ID).';
 }

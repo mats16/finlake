@@ -143,6 +143,17 @@ export const en = {
       verifySchemas: 'Verify system schemas',
       step2: 'Step 2 — App service principal grants',
       verifySelect: 'Verify SELECT permission',
+      step3: 'Step 3 — FOCUS view',
+      focusViewDesc:
+        'Materialize a FOCUS 1.3 mapping of system.billing.* into your catalog. The view path is <catalog>.<tier>.<table>.',
+      catalog: 'Catalog (from Admin)',
+      tier: 'Tier (schema)',
+      tableName: 'Table name',
+      accountPrices: 'Account prices table',
+      focusViewTarget: 'View target',
+      createView: 'Create FOCUS view',
+      saveTarget: 'Save target',
+      catalogMissing: 'Set the main catalog in Configure → Admin first.',
     },
     awsCur: {
       title: 'Configure AWS Cost & Usage Report',

@@ -1,75 +1,86 @@
-import { Router } from 'express';
+import { Router, type Request, type RequestHandler } from 'express';
 import { createHash } from 'node:crypto';
 import type { DatabaseClient } from '@lakecost/db';
 import type { Env, UsageRange } from '@lakecost/shared';
 import { UsageRangeSchema } from '@lakecost/shared';
-import { StatementExecutor } from '../services/statementExecution.js';
+import { buildUserExecutor } from '../services/statementExecution.js';
 import { UsageQueries } from '../services/usageQueries.js';
-import { AppServicePrincipalTokenProvider } from '../auth/appServicePrincipal.js';
-import { logger } from '../config/logger.js';
 
 const CACHE_TTL_SEC = 5 * 60;
+
+interface UserContext {
+  userId: string;
+  queries: UsageQueries;
+}
+
+interface RouteSpec<T> {
+  path: string;
+  cachePrefix: string;
+  fetch: (q: UsageQueries, range: UsageRange) => Promise<T>;
+  format: (data: T) => unknown;
+}
 
 export function usageRouter(db: DatabaseClient, env: Env): Router {
   const router = Router();
 
-  const queries = buildQueries(env);
-
-  router.get('/daily', async (req, res, next) => {
-    try {
-      const range = parseRange(req.query);
-      const data = await cached(db, 'usage:daily', range, () =>
-        queries ? queries.daily(range) : Promise.resolve([]),
-      );
-      res.json({
-        rows: data,
-        totalUsd: data.reduce((sum, r) => sum + r.costUsd, 0),
+  const routes: ReadonlyArray<RouteSpec<unknown>> = [
+    {
+      path: '/daily',
+      cachePrefix: 'usage:daily',
+      fetch: (q, range) => q.daily(range),
+      format: (rows) => ({
+        rows,
+        totalUsd: (rows as { costUsd: number }[]).reduce((sum, r) => sum + r.costUsd, 0),
         cachedAt: null,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
+      }),
+    },
+    {
+      path: '/by-sku',
+      cachePrefix: 'usage:bySku',
+      fetch: (q, range) => q.bySku(range),
+      format: (rows) => ({ rows }),
+    },
+    {
+      path: '/top-workloads',
+      cachePrefix: 'usage:topWorkloads',
+      fetch: (q, range) => q.topWorkloads(range),
+      format: (rows) => ({ rows }),
+    },
+  ];
 
-  router.get('/by-sku', async (req, res, next) => {
-    try {
-      const range = parseRange(req.query);
-      const data = await cached(db, 'usage:bySku', range, () =>
-        queries ? queries.bySku(range) : Promise.resolve([]),
-      );
-      res.json({ rows: data });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.get('/top-workloads', async (req, res, next) => {
-    try {
-      const range = parseRange(req.query);
-      const data = await cached(db, 'usage:topWorkloads', range, () =>
-        queries ? queries.topWorkloads(range) : Promise.resolve([]),
-      );
-      res.json({ rows: data });
-    } catch (err) {
-      next(err);
-    }
-  });
+  for (const route of routes) {
+    router.get(route.path, makeHandler(db, env, route));
+  }
 
   return router;
 }
 
-function buildQueries(env: Env): UsageQueries | undefined {
-  if (!env.DATABRICKS_HOST || !env.SQL_WAREHOUSE_ID) {
-    logger.warn('DATABRICKS_HOST or SQL_WAREHOUSE_ID not set; /api/usage will return empty rows');
-    return undefined;
-  }
-  const tokenProvider = new AppServicePrincipalTokenProvider(env);
-  const executor = new StatementExecutor({
-    host: env.DATABRICKS_HOST,
-    warehouseId: env.SQL_WAREHOUSE_ID,
-    tokenProvider: () => tokenProvider.getToken(),
-  });
-  return new UsageQueries(executor);
+function makeHandler<T>(db: DatabaseClient, env: Env, route: RouteSpec<T>): RequestHandler {
+  return async (req, res, next) => {
+    try {
+      const ctx = buildUserContext(req, env);
+      if (!ctx) {
+        res.status(401).json({ error: { message: 'Missing OBO access token' } });
+        return;
+      }
+      const range = parseRange(req.query);
+      const data = await cached(db, route.cachePrefix, ctx.userId, range, () =>
+        route.fetch(ctx.queries, range),
+      );
+      res.json(route.format(data));
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+function buildUserContext(req: Request, env: Env): UserContext | undefined {
+  const token = req.user?.accessToken;
+  const userId = req.user?.userId ?? req.user?.email;
+  if (!token || !userId) return undefined;
+  const executor = buildUserExecutor(env, token);
+  if (!executor) return undefined;
+  return { userId, queries: new UsageQueries(executor) };
 }
 
 function parseRange(query: unknown): UsageRange {
@@ -82,28 +93,44 @@ function parseRange(query: unknown): UsageRange {
   return parsed.data;
 }
 
+const inflight = new Map<string, Promise<unknown>>();
+
 async function cached<T>(
   db: DatabaseClient,
   prefix: string,
+  userId: string,
   range: UsageRange,
   compute: () => Promise<T>,
 ): Promise<T> {
-  const key = `${prefix}:${hashKey(range)}`;
+  // Cache key includes the user id because results are scoped to the caller's
+  // UC permissions — sharing across users would leak data they cannot read.
+  const key = `${prefix}:${shortHash(userId)}:${shortHash(JSON.stringify(range))}`;
   const hit = await db.repos.cachedAggregations.get(key);
   if (hit) return hit.payload as T;
 
-  const data = await compute();
-  const now = new Date();
-  await db.repos.cachedAggregations.set({
-    cacheKey: key,
-    queryHash: hashKey(range),
-    payload: data,
-    computedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + CACHE_TTL_SEC * 1000).toISOString(),
-  });
-  return data;
+  const existing = inflight.get(key);
+  if (existing) return existing as Promise<T>;
+
+  const promise = (async () => {
+    try {
+      const data = await compute();
+      const now = new Date();
+      await db.repos.cachedAggregations.set({
+        cacheKey: key,
+        queryHash: shortHash(JSON.stringify(range)),
+        payload: data,
+        computedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + CACHE_TTL_SEC * 1000).toISOString(),
+      });
+      return data;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, promise);
+  return promise;
 }
 
-function hashKey(range: UsageRange): string {
-  return createHash('sha256').update(JSON.stringify(range)).digest('hex').slice(0, 16);
+function shortHash(input: string, len = 16): string {
+  return createHash('sha256').update(input).digest('hex').slice(0, len);
 }

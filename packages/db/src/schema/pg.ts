@@ -63,6 +63,18 @@ export const appSettings = pgTable('app_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const dataSources = pgTable('data_sources', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  provider: text('provider').notNull(),
+  tier: text('tier').notNull(),
+  tableName: text('table_name').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  config: jsonb('config').notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const setupState = pgTable('setup_state', {
   workspaceId: text('workspace_id').primaryKey(),
   systemTablesOk: boolean('system_tables_ok').notNull().default(false),

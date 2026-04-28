@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const SetupStepIdSchema = z.enum([
   'systemTables',
   'permissions',
+  'focusView',
   'awsCur',
   'azureExport',
   'tagging',

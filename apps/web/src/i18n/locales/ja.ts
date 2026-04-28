@@ -147,6 +147,17 @@ export const ja: Dictionary = {
       verifySchemas: 'システムスキーマを検証',
       step2: 'ステップ 2 — アプリのサービスプリンシパル権限',
       verifySelect: 'SELECT 権限を検証',
+      step3: 'ステップ 3 — FOCUS ビュー',
+      focusViewDesc:
+        'system.billing.* を FOCUS 1.3 仕様でマッピングしたビューを作成します。配置先は <catalog>.<tier>.<table> です。',
+      catalog: 'カタログ（管理画面で設定）',
+      tier: 'ティア（スキーマ）',
+      tableName: 'テーブル名',
+      accountPrices: 'アカウント別料金テーブル',
+      focusViewTarget: 'ビューの配置先',
+      createView: 'FOCUS ビューを作成',
+      saveTarget: '設定を保存',
+      catalogMissing: '先に「構成 → 管理」でメインカタログを設定してください。',
     },
     awsCur: {
       title: 'AWS Cost & Usage Report の設定',

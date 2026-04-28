@@ -50,6 +50,25 @@ export interface SetupStateRepo {
   recordCheck(workspaceId: string, result: SetupCheckResult): Promise<void>;
 }
 
+export interface DataSourceValue {
+  id: string;
+  name: string;
+  description: string | null;
+  provider: string;
+  tier: string;
+  tableName: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  updatedAt: string;
+}
+
+export interface DataSourcesRepo {
+  list(): Promise<DataSourceValue[]>;
+  get(id: string): Promise<DataSourceValue | null>;
+  upsert(value: DataSourceValue): Promise<DataSourceValue>;
+  delete(id: string): Promise<void>;
+}
+
 export interface AppSettingValue {
   key: string;
   value: string;
@@ -69,4 +88,5 @@ export interface Repositories {
   cachedAggregations: CachedAggregationsRepo;
   setupState: SetupStateRepo;
   appSettings: AppSettingsRepo;
+  dataSources: DataSourcesRepo;
 }

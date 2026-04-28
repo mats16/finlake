@@ -30,7 +30,7 @@ export function setupRouter(db: DatabaseClient, env: Env): Router {
         typeof req.body?.workspaceId === 'string'
           ? req.body.workspaceId
           : (env.DATABRICKS_WORKSPACE_ID ?? 'unknown');
-      const result = await runSetupCheck(step, env, req.body ?? {});
+      const result = await runSetupCheck(step, env, req.body ?? {}, db, req.user?.accessToken);
       await db.repos.setupState.recordCheck(workspaceId, result);
       res.json(result);
     } catch (err) {

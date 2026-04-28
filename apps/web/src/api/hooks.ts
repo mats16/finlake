@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Budget,
   CreateBudgetInput,
+  DataSource,
+  DataSourceUpdateBody,
   SetupCheckResult,
   SetupStateResponse,
   SetupStepId,
@@ -117,6 +119,38 @@ export function useUpdateAppSettings() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(['appSettings'], data);
+    },
+  });
+}
+
+export function useDataSources() {
+  return useQuery({
+    queryKey: ['dataSources'],
+    queryFn: () => apiFetch<{ items: DataSource[] }>('/api/data-sources'),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useDataSource(id: string | undefined) {
+  return useQuery({
+    queryKey: ['dataSources', id],
+    enabled: Boolean(id),
+    queryFn: () => apiFetch<DataSource>(`/api/data-sources/${encodeURIComponent(id!)}`),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useUpdateDataSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: DataSourceUpdateBody }) =>
+      apiFetch<DataSource>(`/api/data-sources/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(['dataSources', data.id], data);
+      qc.invalidateQueries({ queryKey: ['dataSources'] });
     },
   });
 }

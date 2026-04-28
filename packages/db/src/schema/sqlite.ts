@@ -55,6 +55,18 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const dataSources = sqliteTable('data_sources', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  provider: text('provider').notNull(),
+  tier: text('tier').notNull(),
+  tableName: text('table_name').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  configJson: text('config_json').notNull().default('{}'),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const setupState = sqliteTable('setup_state', {
   workspaceId: text('workspace_id').primaryKey(),
   systemTablesOk: integer('system_tables_ok', { mode: 'boolean' }).notNull().default(false),

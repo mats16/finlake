@@ -1,5 +1,10 @@
+import { WorkspaceClient as SdkWorkspaceClient } from '@databricks/sdk-experimental';
+import { createHash } from 'node:crypto';
 import type { ZodType } from 'zod';
+import type { Env } from '@lakecost/shared';
 import { logger } from '../config/logger.js';
+
+export type WorkspaceClient = SdkWorkspaceClient;
 
 export type SqlParam = {
   name: string;
@@ -7,80 +12,152 @@ export type SqlParam = {
   type?: 'STRING' | 'INT' | 'BIGINT' | 'TIMESTAMP' | 'DATE';
 };
 
-interface StatementResponse {
-  statement_id: string;
-  status: { state: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED' | 'CLOSED' };
-  result?: {
-    data_array?: Array<Array<string | number | null>>;
-  };
-  manifest?: {
-    schema?: { columns?: Array<{ name: string; type_name?: string }> };
-  };
+export interface StatementExecutorOpts {
+  workspaceClient: WorkspaceClient;
+  warehouseId: string;
+  /** Server-side wait before returning PENDING/RUNNING. Max accepted by the API is 50s. */
+  waitTimeoutSec?: number;
+  /** Polling timeout (ms). Defaults to 5 minutes. */
+  pollTimeoutMs?: number;
 }
 
-export interface StatementExecutorOpts {
-  host: string;
-  warehouseId: string;
-  tokenProvider: () => Promise<string>;
-  fetchImpl?: typeof fetch;
-}
+const DEFAULT_WAIT_TIMEOUT_SEC = 30;
+const DEFAULT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const POLL_INITIAL_DELAY_MS = 500;
+const POLL_MAX_DELAY_MS = 5_000;
+
+type StatementResponse = Awaited<
+  ReturnType<WorkspaceClient['statementExecution']['executeStatement']>
+>;
 
 export class StatementExecutor {
-  private fetchImpl: typeof fetch;
-
-  constructor(private opts: StatementExecutorOpts) {
-    this.fetchImpl = opts.fetchImpl ?? fetch;
-  }
+  constructor(private opts: StatementExecutorOpts) {}
 
   async run<T>(sqlText: string, params: SqlParam[], rowSchema: ZodType<T>): Promise<T[]> {
-    const token = await this.opts.tokenProvider();
-    const body = {
-      warehouse_id: this.opts.warehouseId,
-      statement: sqlText,
-      wait_timeout: '30s',
-      on_wait_timeout: 'CONTINUE',
-      disposition: 'INLINE',
-      format: 'JSON_ARRAY',
-      parameters: params.map((p) => ({ name: p.name, value: p.value, type: p.type })),
-    };
-    const url = new URL('/api/2.0/sql/statements', this.opts.host).toString();
-    let res = await this.fetchImpl(url, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-    let payload = (await res.json()) as StatementResponse;
+    const wc = this.opts.workspaceClient;
+    const waitSec = this.opts.waitTimeoutSec ?? DEFAULT_WAIT_TIMEOUT_SEC;
+    const pollDeadline = Date.now() + (this.opts.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS);
 
-    while (payload.status.state === 'PENDING' || payload.status.state === 'RUNNING') {
-      await sleep(500);
-      const pollUrl = new URL(
-        `/api/2.0/sql/statements/${payload.statement_id}`,
-        this.opts.host,
-      ).toString();
-      res = await this.fetchImpl(pollUrl, {
-        headers: { authorization: `Bearer ${token}` },
+    let response: StatementResponse;
+    try {
+      response = await wc.statementExecution.executeStatement({
+        warehouse_id: this.opts.warehouseId,
+        statement: sqlText,
+        wait_timeout: `${waitSec}s`,
+        on_wait_timeout: 'CONTINUE',
+        disposition: 'INLINE',
+        format: 'JSON_ARRAY',
+        parameters: params.map((p) => ({
+          name: p.name,
+          // null -> omitted (interpreted as NULL by the API).
+          value: p.value === null ? undefined : String(p.value),
+          type: p.type,
+        })),
       });
-      payload = (await res.json()) as StatementResponse;
+    } catch (err) {
+      logger.error({ err }, 'executeStatement threw');
+      throw new Error(`Statement Execution failed: ${(err as Error).message}`);
     }
 
-    if (payload.status.state !== 'SUCCEEDED') {
-      logger.error({ payload }, 'Statement Execution failed');
-      throw new Error(`Statement failed: ${payload.status.state}`);
+    let delay = POLL_INITIAL_DELAY_MS;
+    while (response.status?.state === 'PENDING' || response.status?.state === 'RUNNING') {
+      if (Date.now() > pollDeadline) {
+        throw new Error(
+          `Statement Execution timed out after ${(this.opts.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS) / 1000}s`,
+        );
+      }
+      await sleep(delay);
+      delay = Math.min(delay * 2, POLL_MAX_DELAY_MS);
+      const id = response.statement_id;
+      if (!id) throw new Error('Statement Execution returned no statement_id');
+      try {
+        response = await wc.statementExecution.getStatement({ statement_id: id });
+      } catch (err) {
+        logger.error({ err, statementId: id }, 'getStatement threw');
+        throw new Error(`Statement Execution failed: ${(err as Error).message}`);
+      }
     }
 
-    const columns = payload.manifest?.schema?.columns ?? [];
-    const rows = payload.result?.data_array ?? [];
+    if (response.status?.state !== 'SUCCEEDED') {
+      logger.error({ response }, 'Statement Execution failed');
+      const detail =
+        response.status?.error?.message ??
+        response.status?.error?.error_code ??
+        response.status?.state ??
+        'unknown error';
+      throw new Error(`Statement Execution failed: ${detail}`);
+    }
+
+    const columns = response.manifest?.schema?.columns ?? [];
+    const rows = response.result?.data_array ?? [];
     return rows.map((rawRow) => {
       const obj: Record<string, unknown> = {};
       columns.forEach((col, i) => {
-        obj[snakeToCamel(col.name)] = coerce(rawRow[i], col.type_name);
+        const name = col.name ?? `column_${i}`;
+        obj[snakeToCamel(name)] = coerce(rawRow[i] ?? null, col.type_name);
       });
       return rowSchema.parse(obj);
     });
   }
+}
+
+interface CachedClient {
+  client: WorkspaceClient;
+  expiresAt: number;
+}
+const clientCache = new Map<string, CachedClient>();
+const CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLIENT_CACHE_MAX = 256;
+
+function tokenCacheKey(host: string, token: string): string {
+  return `${host}|${createHash('sha256').update(token).digest('hex')}`;
+}
+
+function pruneClientCache(now: number): void {
+  for (const [k, v] of clientCache) {
+    if (v.expiresAt <= now) clientCache.delete(k);
+  }
+  if (clientCache.size > CLIENT_CACHE_MAX) {
+    // Drop oldest insertion order until under the cap.
+    const drop = clientCache.size - CLIENT_CACHE_MAX;
+    let i = 0;
+    for (const k of clientCache.keys()) {
+      if (i++ >= drop) break;
+      clientCache.delete(k);
+    }
+  }
+}
+
+/**
+ * User-scoped (OBO) workspace client constructed from the token forwarded by
+ * Databricks Apps via `x-forwarded-access-token`. Cached per (host, tokenHash)
+ * for the request burst window so dashboard polls reuse one SDK client.
+ */
+export function buildUserWorkspaceClient(env: Env, token: string): WorkspaceClient | undefined {
+  if (!env.DATABRICKS_HOST) return undefined;
+  const now = Date.now();
+  const key = tokenCacheKey(env.DATABRICKS_HOST, token);
+  const cached = clientCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.client;
+  pruneClientCache(now);
+  const client = new SdkWorkspaceClient({
+    host: env.DATABRICKS_HOST,
+    token,
+    authType: 'pat',
+  });
+  clientCache.set(key, { client, expiresAt: now + CLIENT_CACHE_TTL_MS });
+  return client;
+}
+
+/** Build a `StatementExecutor` that runs as the calling user. */
+export function buildUserExecutor(
+  env: Env,
+  token: string | undefined,
+): StatementExecutor | undefined {
+  if (!token || !env.SQL_WAREHOUSE_ID) return undefined;
+  const wc = buildUserWorkspaceClient(env, token);
+  if (!wc) return undefined;
+  return new StatementExecutor({ workspaceClient: wc, warehouseId: env.SQL_WAREHOUSE_ID });
 }
 
 function sleep(ms: number): Promise<void> {

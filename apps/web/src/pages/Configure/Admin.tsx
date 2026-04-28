@@ -16,17 +16,16 @@ import {
   Spinner,
 } from '@databricks/appkit-ui/react';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { CATALOG_SETTING_KEY } from '@lakecost/shared';
 import { useI18n } from '../../i18n';
 import { useAppSettings, useUpdateAppSettings } from '../../api/hooks';
-
-const MAIN_CATALOG_KEY = 'catalog_name';
 
 export function Admin() {
   const { t } = useI18n();
   const settings = useAppSettings();
   const updateSettings = useUpdateAppSettings();
 
-  const remoteCatalog = settings.data?.settings[MAIN_CATALOG_KEY] ?? '';
+  const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
   const [catalog, setCatalog] = useState(remoteCatalog);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
@@ -37,7 +36,7 @@ export function Admin() {
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     updateSettings.mutate(
-      { [MAIN_CATALOG_KEY]: catalog.trim() },
+      { [CATALOG_SETTING_KEY]: catalog.trim() },
       { onSuccess: () => setSavedAt(Date.now()) },
     );
   };
