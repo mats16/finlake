@@ -94,7 +94,6 @@ export const en = {
   settings: {
     title: 'Settings',
     subtitle: 'Application configuration',
-    body: 'Application-wide settings are stored as key/value pairs in the app_settings table.',
     mainCatalogHeading: 'Main catalog',
     mainCatalogDesc:
       'Unity Catalog name to query by default (e.g. main, prod_finops). Saved to app_settings.',
@@ -108,15 +107,10 @@ export const en = {
       title: 'Transformations',
       desc: 'Author the medallion pipeline that normalizes raw cost feeds (CUR, Cost Mgmt) into the gold cost facts table.',
     },
-    admin: {
-      title: 'Admin',
-      desc: 'App service principal, OBO scopes, and operator-only settings.',
-    },
     stubBanner: 'Coming soon. Track progress in the LakeCost roadmap.',
   },
   dataSources: {
     currentTitle: 'Current data sources',
-    viewGold: '⧉ View Gold tables',
     filterPlaceholder: 'Filter sources…',
     addTitle: 'Add data source',
     tileNoHistory: 'no history yet',

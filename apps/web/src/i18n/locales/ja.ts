@@ -98,7 +98,6 @@ export const ja: Dictionary = {
   settings: {
     title: '設定',
     subtitle: 'アプリケーション設定',
-    body: 'アプリ全体の設定は app_settings テーブルに Key / Value 形式で保存されます。',
     mainCatalogHeading: 'メインカタログ',
     mainCatalogDesc:
       '既定で参照する Unity Catalog のカタログ名 (例: main, prod_finops)。app_settings に保存されます。',
@@ -112,15 +111,10 @@ export const ja: Dictionary = {
       title: '変換パイプライン',
       desc: 'CUR や Cost Management などの生データを Gold コストファクトテーブルへ正規化するメダリオンパイプラインを作成します。',
     },
-    admin: {
-      title: '管理',
-      desc: 'アプリのサービスプリンシパル、OBO スコープ、運用者向け設定。',
-    },
     stubBanner: '近日公開予定です。LakeCost のロードマップで進捗を追跡しています。',
   },
   dataSources: {
     currentTitle: '現在のデータソース',
-    viewGold: '⧉ Gold テーブルを表示',
     filterPlaceholder: 'データソースを絞り込み…',
     addTitle: 'データソースを追加',
     tileNoHistory: '履歴はまだありません',

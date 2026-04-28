@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { CATALOG_SETTING_KEY, FOCUS_VIEW_SCHEMA_DEFAULT, type DataSource } from '@lakecost/shared';
 import { Input, Separator } from '@databricks/appkit-ui/react';
-import { ExternalLink } from 'lucide-react';
 import { useAppSettings, useCreateDataSource, useDataSources } from '../../api/hooks';
 import { DataSourceTile, type TileBadge } from './DataSourceTile';
 import { DataSourceDrawer } from './DataSourceDrawer';
@@ -111,14 +110,6 @@ export function DataSources() {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <h3 className="m-0 text-base font-semibold">{t('dataSources.currentTitle')}</h3>
         <div className="flex items-center gap-3">
-          <a
-            className="text-primary inline-flex items-center gap-1.5 text-sm hover:underline"
-            href="#"
-            onClick={(e) => e.preventDefault()}
-          >
-            {t('dataSources.viewGold')}
-            <ExternalLink className="size-3.5" />
-          </a>
           <Input
             placeholder={t('dataSources.filterPlaceholder')}
             value={filter}

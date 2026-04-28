@@ -121,7 +121,10 @@ export function findTemplateForRow(row: {
   const leaf = row.tableName.split('.').pop() ?? row.tableName;
   const candidates = DATA_SOURCE_TEMPLATES.filter((t) => t.providerName === row.providerName);
   if (candidates.length <= 1) return candidates[0];
-  return candidates.find((t) => t.defaultTableName === leaf) ?? candidates[0];
+  // When multiple templates share the same providerName, require an exact
+  // defaultTableName match — falling back to the first candidate would cause
+  // tagging-policy rows to incorrectly resolve to databricks-system-tables.
+  return candidates.find((t) => t.defaultTableName === leaf);
 }
 
 /** Legacy names that should be treated as the template's canonical name. */

@@ -95,7 +95,7 @@ export function buildDataSourceId(
   billingAccountId: string | null | undefined,
 ): string {
   const base = providerName.toLowerCase();
-  return billingAccountId ? `${base}_${billingAccountId}` : base;
+  return billingAccountId ? `${base}--${billingAccountId}` : base;
 }
 
 export const DATABRICKS_FOCUS_VERSION = '1.3';

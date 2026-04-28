@@ -113,8 +113,18 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         res.status(404).json({ error: { message: 'Not found' } });
         return;
       }
-      await teardownFocusDataSource(env, req.user?.accessToken, existing);
+      const { skippedTeardown } = await teardownFocusDataSource(
+        env,
+        req.user?.accessToken,
+        existing,
+      );
       await db.repos.dataSources.delete(idParse.data);
+      if (skippedTeardown) {
+        console.warn(
+          `[dataSources] Deleted DB row ${idParse.data} but skipped Databricks resource teardown (missing OBO token or DATABRICKS_HOST). ` +
+            `jobId=${existing.jobId}, pipelineId=${existing.pipelineId}`,
+        );
+      }
       res.status(204).end();
     } catch (err) {
       next(err);

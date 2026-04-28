@@ -49,65 +49,53 @@ export function Admin() {
       : null;
 
   return (
-    <>
-      <form onSubmit={onSubmit}>
-        <Card className="mb-4">
-          <CardHeader>
-            <CardTitle>{t('settings.mainCatalogHeading')}</CardTitle>
-            <CardDescription>{t('settings.mainCatalogDesc')}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="catalog-name">{t('settings.mainCatalogHeading')}</FieldLabel>
-                <Input
-                  id="catalog-name"
-                  type="text"
-                  value={catalog}
-                  placeholder={t('settings.mainCatalogPlaceholder')}
-                  onChange={(e) => setCatalog(e.target.value)}
-                  disabled={settings.isLoading || saving}
-                  className="max-w-md"
-                />
-                <FieldDescription>{t('settings.mainCatalogDesc')}</FieldDescription>
-              </Field>
-              <div className="flex items-center gap-3">
-                <Button type="submit" disabled={!dirty || saving}>
-                  {saving ? (
-                    <>
-                      <Spinner /> {t('common.saving')}
-                    </>
-                  ) : (
-                    t('settings.save')
-                  )}
-                </Button>
-                {savedAt && !dirty && !saving ? (
-                  <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
-                    <CheckCircle2 className="size-3.5 text-(--success)" />
-                    {t('settings.saved')}
-                  </span>
-                ) : null}
-              </div>
-              {errorMessage ? (
-                <Alert variant="destructive">
-                  <AlertCircle />
-                  <AlertDescription>{errorMessage}</AlertDescription>
-                </Alert>
-              ) : null}
-            </FieldGroup>
-          </CardContent>
-        </Card>
-      </form>
-
+    <form onSubmit={onSubmit}>
       <Card>
         <CardHeader>
-          <CardTitle>{t('configure.admin.title')}</CardTitle>
-          <CardDescription>{t('configure.admin.desc')}</CardDescription>
+          <CardTitle>{t('settings.mainCatalogHeading')}</CardTitle>
+          <CardDescription>{t('settings.mainCatalogDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground text-sm">{t('settings.body')}</p>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="catalog-name">{t('settings.mainCatalogHeading')}</FieldLabel>
+              <Input
+                id="catalog-name"
+                type="text"
+                value={catalog}
+                placeholder={t('settings.mainCatalogPlaceholder')}
+                onChange={(e) => setCatalog(e.target.value)}
+                disabled={settings.isLoading || saving}
+                className="max-w-md"
+              />
+              <FieldDescription>{t('settings.mainCatalogDesc')}</FieldDescription>
+            </Field>
+            <div className="flex items-center gap-3">
+              <Button type="submit" disabled={!dirty || saving}>
+                {saving ? (
+                  <>
+                    <Spinner /> {t('common.saving')}
+                  </>
+                ) : (
+                  t('settings.save')
+                )}
+              </Button>
+              {savedAt && !dirty && !saving ? (
+                <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                  <CheckCircle2 className="size-3.5 text-(--success)" />
+                  {t('settings.saved')}
+                </span>
+              ) : null}
+            </div>
+            {errorMessage ? (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+          </FieldGroup>
         </CardContent>
       </Card>
-    </>
+    </form>
   );
 }

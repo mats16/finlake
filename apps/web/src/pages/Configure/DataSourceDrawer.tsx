@@ -138,7 +138,8 @@ function FocusViewSection({ row }: { row: DataSource }) {
   const jobId = result?.jobId ?? row.jobId;
   const pipelineId = result?.pipelineId ?? row.pipelineId;
   const workspaceUrl = me.data?.workspaceUrl ?? null;
-  const hasExistingSchedule = row.jobId !== null || result?.jobId != null;
+  // Use only the persisted row state so the label stays correct after first setup
+  const hadScheduleBeforeSetup = row.jobId !== null;
 
   useEffect(() => setTableName(tableLeafName(row.tableName)), [row.tableName]);
   useEffect(() => setAccountPrices(remoteAccountPrices), [remoteAccountPrices]);
@@ -221,7 +222,7 @@ function FocusViewSection({ row }: { row: DataSource }) {
           >
             {setupDs.isPending ? <Spinner /> : null}
             {t(
-              hasExistingSchedule
+              hadScheduleBeforeSetup
                 ? 'dataSources.systemTables.updateSchedule'
                 : 'dataSources.systemTables.setupAndSchedule',
             )}
@@ -255,7 +256,7 @@ function FocusViewSection({ row }: { row: DataSource }) {
             <Info />
             <AlertDescription>
               {t(
-                hasExistingSchedule
+                hadScheduleBeforeSetup
                   ? 'dataSources.systemTables.updateOk'
                   : 'dataSources.systemTables.setupOk',
                 {

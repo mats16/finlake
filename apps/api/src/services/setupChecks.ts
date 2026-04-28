@@ -1,5 +1,4 @@
 import type { Env, SetupCheckResult, SetupStepId } from '@lakecost/shared';
-import type { DatabaseClient } from '@lakecost/db';
 import { buildUserExecutor } from './statementExecution.js';
 import { z } from 'zod';
 
@@ -7,7 +6,6 @@ export async function runSetupCheck(
   step: SetupStepId,
   env: Env,
   input: Record<string, unknown>,
-  _db: DatabaseClient,
   userToken?: string,
 ): Promise<SetupCheckResult> {
   const checkedAt = new Date().toISOString();

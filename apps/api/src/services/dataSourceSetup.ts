@@ -222,13 +222,25 @@ export async function setupFocusDataSource(
   };
 }
 
-/** Best-effort cleanup of the Databricks-side pipeline+job for a data source. */
+/**
+ * Best-effort cleanup of the Databricks-side pipeline+job for a data source.
+ * Returns `true` if cleanup ran (or was unnecessary), `false` if skipped due
+ * to missing credentials — callers may want to warn the user.
+ */
 export async function teardownFocusDataSource(
   env: Env,
   userToken: string | undefined,
   source: { jobId: number | null; pipelineId: string | null; config: Record<string, unknown> },
-): Promise<void> {
-  if (!userToken || !env.DATABRICKS_HOST) return;
+): Promise<{ skippedTeardown: boolean }> {
+  const hasRemoteResources =
+    source.jobId !== null ||
+    source.pipelineId !== null ||
+    (typeof source.config.pipelineId === 'string' && source.config.pipelineId.length > 0) ||
+    (typeof source.config.workspacePath === 'string' && source.config.workspacePath.length > 0);
+
+  if (!userToken || !env.DATABRICKS_HOST) {
+    return { skippedTeardown: hasRemoteResources };
+  }
   const pipelineId =
     source.pipelineId ??
     (typeof source.config.pipelineId === 'string' && source.config.pipelineId.length > 0
@@ -238,14 +250,17 @@ export async function teardownFocusDataSource(
     typeof source.config.workspacePath === 'string' && source.config.workspacePath.length > 0
       ? source.config.workspacePath
       : null;
-  if (source.jobId === null && pipelineId === null && workspacePath === null) return;
+  if (source.jobId === null && pipelineId === null && workspacePath === null) {
+    return { skippedTeardown: false };
+  }
   const wc = buildUserWorkspaceClient(env, userToken);
-  if (!wc) return;
+  if (!wc) return { skippedTeardown: true };
   await deletePipelineSchedule(wc, {
     jobId: source.jobId,
     pipelineId,
     workspacePath,
   });
+  return { skippedTeardown: false };
 }
 
 export async function runDataSourceJob(
