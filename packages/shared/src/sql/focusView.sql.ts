@@ -14,6 +14,15 @@ export const FOCUS_VIEW_SCHEMA_DEFAULT = 'silver';
 export const FOCUS_VIEW_TABLE_DEFAULT = 'databricks_billing';
 export const ACCOUNT_PRICES_DEFAULT = 'system.billing.list_prices';
 
+/**
+ * Medallion schemas auto-provisioned alongside the catalog. `silver` houses the
+ * FOCUS materialized view (see `FOCUS_VIEW_SCHEMA_DEFAULT`); `bronze` is
+ * reserved for raw provider exports (CUR, Cost Mgmt) and `gold` for curated
+ * cost facts.
+ */
+export const MEDALLION_SCHEMAS = ['bronze', 'silver', 'gold'] as const;
+export type MedallionSchema = (typeof MEDALLION_SCHEMAS)[number];
+
 export interface FocusViewTarget {
   catalog: string;
   schema: string;

@@ -98,8 +98,26 @@ export const en = {
     mainCatalogDesc:
       'Unity Catalog name to query by default (e.g. main, prod_finops). Saved to app_settings.',
     mainCatalogPlaceholder: 'main',
+    catalogSelectPlaceholder: 'Select a catalog…',
+    catalogSearchPlaceholder: 'Search catalogs or type a new name…',
+    catalogEmpty: 'No catalogs found.',
+    catalogCreateOption: 'Create "{name}"',
+    catalogLoadFailed: 'Could not load catalogs',
     save: 'Save',
+    saveAndCreate: 'Create & save',
     saved: 'Saved',
+    provisionSuccess: 'Catalog ready',
+    provisionWarning: 'Saved with warnings',
+    provisionFailed: 'Provisioning had errors',
+    provisionAllOk:
+      'Catalog "{name}" already had bronze/silver/gold and the service principal grants in place.',
+    provisionCatalogCreated: 'Created catalog "{name}".',
+    provisionSchemaCreated: 'Created schema "{schema}".',
+    provisionSchemaFailed: 'Could not create schema "{schema}" — see warnings below.',
+    provisionGrantFailed: 'GRANT for {scope} failed: {message}',
+    provisionScopeCatalog: 'catalog',
+    provisionRemediationHint:
+      'DATABRICKS_CLIENT_ID is not set. Configure the App service principal so future saves can grant permissions automatically.',
   },
   configure: {
     title: 'Configure',

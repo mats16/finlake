@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Budget,
+  CatalogListResponse,
   CreateBudgetInput,
   DataSource,
   DataSourceCreateBody,
@@ -8,6 +9,7 @@ import type {
   DataSourceSetupBody,
   DataSourceSetupResult,
   DataSourceUpdateBody,
+  ProvisionResult,
   SetupCheckResult,
   SetupStateResponse,
   SetupStepId,
@@ -105,6 +107,15 @@ export interface AppSettingsResponse {
   settings: Record<string, string>;
 }
 
+export interface AppSettingsUpdateResponse extends AppSettingsResponse {
+  provision?: ProvisionResult;
+}
+
+export interface UpdateAppSettingsArgs {
+  settings: Record<string, string>;
+  provision?: { createIfMissing?: boolean };
+}
+
 export function useAppSettings() {
   return useQuery({
     queryKey: ['appSettings'],
@@ -116,14 +127,24 @@ export function useAppSettings() {
 export function useUpdateAppSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (settings: Record<string, string>) =>
-      apiFetch<AppSettingsResponse>('/api/settings/app', {
+    mutationFn: (args: UpdateAppSettingsArgs) =>
+      apiFetch<AppSettingsUpdateResponse>('/api/settings/app', {
         method: 'PUT',
-        body: JSON.stringify({ settings }),
+        body: JSON.stringify(args),
       }),
     onSuccess: (data) => {
-      qc.setQueryData(['appSettings'], data);
+      qc.setQueryData(['appSettings'], { settings: data.settings });
+      qc.invalidateQueries({ queryKey: ['catalogs'] });
     },
+  });
+}
+
+export function useCatalogs() {
+  return useQuery({
+    queryKey: ['catalogs'],
+    queryFn: () => apiFetch<CatalogListResponse>('/api/catalogs'),
+    staleTime: 60 * 1000,
+    retry: false,
   });
 }
 

@@ -102,8 +102,26 @@ export const ja: Dictionary = {
     mainCatalogDesc:
       '既定で参照する Unity Catalog のカタログ名 (例: main, prod_finops)。app_settings に保存されます。',
     mainCatalogPlaceholder: 'main',
+    catalogSelectPlaceholder: 'カタログを選択…',
+    catalogSearchPlaceholder: 'カタログを検索 / 新規名を入力…',
+    catalogEmpty: 'カタログが見つかりません。',
+    catalogCreateOption: '「{name}」を新規作成',
+    catalogLoadFailed: 'カタログ一覧を取得できませんでした',
     save: '保存',
+    saveAndCreate: '作成して保存',
     saved: '保存しました',
+    provisionSuccess: 'カタログを準備しました',
+    provisionWarning: '一部の処理がスキップされました',
+    provisionFailed: 'プロビジョニングでエラーが発生しました',
+    provisionAllOk:
+      'カタログ「{name}」には bronze/silver/gold スキーマとサービスプリンシパル権限が既に揃っています。',
+    provisionCatalogCreated: 'カタログ「{name}」を作成しました。',
+    provisionSchemaCreated: 'スキーマ「{schema}」を作成しました。',
+    provisionSchemaFailed: 'スキーマ「{schema}」を作成できませんでした。下の警告を確認してください。',
+    provisionGrantFailed: '{scope} への GRANT に失敗しました: {message}',
+    provisionScopeCatalog: 'catalog',
+    provisionRemediationHint:
+      'DATABRICKS_CLIENT_ID が未設定のため自動付与をスキップしました。App のサービスプリンシパルを設定すると、次回以降の保存で自動付与されます。',
   },
   configure: {
     title: '構成',
