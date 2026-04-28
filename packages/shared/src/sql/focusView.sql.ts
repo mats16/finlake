@@ -2,14 +2,15 @@
  * FOCUS 1.3 mapping over Databricks system tables.
  * Source: https://github.com/databricks-solutions/cloud-infra-costs/blob/main/aws/focus/focus_query.sql
  *
- * The FOCUS view is materialized as `<catalog>.<schema>.<table>` (defaults to
- * `<catalog>.bronze.databricks_billing`). Identifier parts and the
- * `accountPricesTable` (1- to 3-part identifier) are validated and inlined
- * directly into the SQL — no parameter markers are required, which keeps the
- * statement compatible with all DBSQL versions.
+ * The FOCUS table is exposed as a Unity Catalog Materialized View at
+ * `<catalog>.silver.<table>` (the schema is fixed at `silver`). A periodic
+ * refresh job is created via the Jobs API and stamped onto the data source
+ * row's `job_id` column. Identifier parts and the `accountPricesTable` (1- to
+ * 3-part identifier) are validated and inlined directly into the SQL — no
+ * parameter markers, so the statement is compatible with all DBSQL versions.
  */
 
-export const FOCUS_VIEW_SCHEMA_DEFAULT = 'bronze';
+export const FOCUS_VIEW_SCHEMA_DEFAULT = 'silver';
 export const FOCUS_VIEW_TABLE_DEFAULT = 'databricks_billing';
 export const ACCOUNT_PRICES_DEFAULT = 'system.billing.list_prices';
 
@@ -52,90 +53,12 @@ function quoteQualified(value: string): string {
     .join('.');
 }
 
-const FOCUS_SELECT_BODY = /* sql */ `
-WITH pipeline_names AS (
-  SELECT account_id, workspace_id, pipeline_id, name AS pipeline_name
-  FROM system.lakeflow.pipelines
-  QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY account_id, workspace_id, pipeline_id ORDER BY create_time DESC
-  ) = 1
-),
-cluster_names AS (
-  SELECT account_id, workspace_id, cluster_id, cluster_name
-  FROM system.compute.clusters
-  QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY account_id, workspace_id, cluster_id ORDER BY change_time DESC
-  ) = 1
-),
-warehouse_names AS (
-  SELECT account_id, workspace_id, warehouse_id, warehouse_name
-  FROM system.compute.warehouses
-  QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY account_id, workspace_id, warehouse_id ORDER BY change_time DESC
-  ) = 1
-),
-list_prices AS (
-  SELECT COALESCE(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, *
-  FROM system.billing.list_prices
-  WHERE currency_code = 'USD'
-),
-account_prices AS (
-  SELECT COALESCE(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, *
-  FROM __ACCOUNT_PRICES__
-  WHERE currency_code = 'USD'
-),
-usage_with_pricing AS (
-  SELECT
-    u.record_id,
-    u.account_id,
-    u.workspace_id,
-    w.workspace_name,
-    u.sku_name,
-    u.cloud,
-    u.usage_start_time,
-    u.usage_end_time,
-    u.usage_date,
-    u.usage_quantity,
-    u.usage_unit,
-    u.usage_type,
-    u.custom_tags,
-    u.usage_metadata,
-    u.product_features,
-    u.billing_origin_product,
-    pip.pipeline_name,
-    cl.cluster_name,
-    wh.warehouse_name,
-    lp.currency_code,
-    lp.price_start_time,
-    CAST(lp.pricing.default AS DECIMAL(30, 15)) AS list_unit_price,
-    CAST(ap.pricing.default AS DECIMAL(30, 15)) AS account_unit_price
-  FROM system.billing.usage u
-    LEFT JOIN list_prices lp
-      ON u.sku_name = lp.sku_name
-      AND u.usage_unit = lp.usage_unit
-      AND u.account_id = lp.account_id
-      AND u.usage_end_time BETWEEN lp.price_start_time AND lp.coalesced_price_end_time
-    LEFT JOIN account_prices ap
-      ON u.sku_name = ap.sku_name
-      AND u.usage_unit = ap.usage_unit
-      AND u.account_id = ap.account_id
-      AND u.usage_end_time BETWEEN ap.price_start_time AND ap.coalesced_price_end_time
-    LEFT JOIN system.access.workspaces_latest w
-      ON u.account_id = w.account_id
-      AND u.workspace_id = w.workspace_id
-    LEFT JOIN pipeline_names pip
-      ON u.account_id = pip.account_id
-      AND u.workspace_id = pip.workspace_id
-      AND u.usage_metadata.dlt_pipeline_id = pip.pipeline_id
-    LEFT JOIN cluster_names cl
-      ON u.account_id = cl.account_id
-      AND u.workspace_id = cl.workspace_id
-      AND u.usage_metadata.cluster_id = cl.cluster_id
-    LEFT JOIN warehouse_names wh
-      ON u.account_id = wh.account_id
-      AND u.workspace_id = wh.workspace_id
-      AND u.usage_metadata.warehouse_id = wh.warehouse_id
-)
+/**
+ * The FOCUS 1.3 SELECT projection over `usage_with_pricing`. Shared between
+ * the standalone MV DDL and the DLT pipeline SQL so changes only need to be
+ * made once.
+ */
+const FOCUS_SELECT_PROJECTION = /* sql */ `\
 SELECT
   CAST(NULL AS STRING) AS AvailabilityZone,
   CAST(COALESCE(usage_quantity * account_unit_price, 0) AS DECIMAL(30, 15)) AS BilledCost,
@@ -186,6 +109,7 @@ SELECT
   'Databricks' AS PublisherName,
   split(current_metastore(), ':')[1] AS RegionId,
   split(current_metastore(), ':')[1] AS RegionName,
+  -- ResourceId: primary resource identifier per billing_origin_product
   CASE
     WHEN u.billing_origin_product IN ('JOBS')
       THEN COALESCE(u.usage_metadata.job_id, u.billing_origin_product)
@@ -242,6 +166,7 @@ SELECT
       THEN COALESCE(u.usage_metadata.notebook_id, u.billing_origin_product)
     ELSE u.billing_origin_product
   END AS ResourceId,
+  -- ResourceName: human-friendly name for the resource
   CASE
     WHEN u.billing_origin_product IN ('JOBS')
       THEN COALESCE(u.usage_metadata.job_name, u.usage_metadata.job_id)
@@ -273,6 +198,7 @@ SELECT
       THEN u.usage_metadata.sharing_materialization_id
     ELSE u.billing_origin_product
   END AS ResourceName,
+  -- ResourceType / ServiceCategory / ServiceSubcategory
   CASE
     WHEN u.billing_origin_product = 'JOBS' THEN 'Job'
     WHEN u.billing_origin_product = 'DLT' THEN 'Spark Declarative Pipeline'
@@ -380,6 +306,96 @@ SELECT
 FROM usage_with_pricing u
 `;
 
+const FOCUS_SELECT_BODY = /* sql */ `
+WITH pipeline_names AS (
+  SELECT account_id, workspace_id, pipeline_id, name AS pipeline_name
+  FROM system.lakeflow.pipelines
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY account_id, workspace_id, pipeline_id ORDER BY create_time DESC
+  ) = 1
+),
+cluster_names AS (
+  SELECT account_id, workspace_id, cluster_id, cluster_name
+  FROM system.compute.clusters
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY account_id, workspace_id, cluster_id ORDER BY change_time DESC
+  ) = 1
+),
+warehouse_names AS (
+  SELECT account_id, workspace_id, warehouse_id, warehouse_name
+  FROM system.compute.warehouses
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY account_id, workspace_id, warehouse_id ORDER BY change_time DESC
+  ) = 1
+),
+workspace_names AS (
+  SELECT account_id, workspace_id, workspace_name
+  FROM system.access.workspaces_latest
+),
+list_prices AS (
+  SELECT COALESCE(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, *
+  FROM system.billing.list_prices
+  WHERE currency_code = 'USD'
+),
+account_prices AS (
+  SELECT COALESCE(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, *
+  FROM __ACCOUNT_PRICES__
+  WHERE currency_code = 'USD'
+),
+usage_with_pricing AS (
+  SELECT
+    u.record_id,
+    u.account_id,
+    u.workspace_id,
+    w.workspace_name,
+    u.sku_name,
+    u.cloud,
+    u.usage_start_time,
+    u.usage_end_time,
+    u.usage_date,
+    u.usage_quantity,
+    u.usage_unit,
+    u.usage_type,
+    u.custom_tags,
+    u.usage_metadata,
+    u.product_features,
+    u.billing_origin_product,
+    pip.pipeline_name,
+    cl.cluster_name,
+    wh.warehouse_name,
+    lp.currency_code,
+    lp.price_start_time,
+    CAST(lp.pricing.default AS DECIMAL(30, 15)) AS list_unit_price,
+    CAST(ap.pricing.default AS DECIMAL(30, 15)) AS account_unit_price
+  FROM system.billing.usage u
+    LEFT JOIN list_prices lp
+      ON u.sku_name = lp.sku_name
+      AND u.usage_unit = lp.usage_unit
+      AND u.account_id = lp.account_id
+      AND u.usage_end_time BETWEEN lp.price_start_time AND lp.coalesced_price_end_time
+    LEFT JOIN account_prices ap
+      ON u.sku_name = ap.sku_name
+      AND u.usage_unit = ap.usage_unit
+      AND u.account_id = ap.account_id
+      AND u.usage_end_time BETWEEN ap.price_start_time AND ap.coalesced_price_end_time
+    LEFT JOIN workspace_names w
+      ON u.account_id = w.account_id
+      AND u.workspace_id = w.workspace_id
+    LEFT JOIN pipeline_names pip
+      ON u.account_id = pip.account_id
+      AND u.workspace_id = pip.workspace_id
+      AND u.usage_metadata.dlt_pipeline_id = pip.pipeline_id
+    LEFT JOIN cluster_names cl
+      ON u.account_id = cl.account_id
+      AND u.workspace_id = cl.workspace_id
+      AND u.usage_metadata.cluster_id = cl.cluster_id
+    LEFT JOIN warehouse_names wh
+      ON u.account_id = wh.account_id
+      AND u.workspace_id = wh.workspace_id
+      AND u.usage_metadata.warehouse_id = wh.warehouse_id
+)
+${FOCUS_SELECT_PROJECTION}`;
+
 export interface FocusViewSqlOptions extends FocusViewTarget {
   /** Account-level prices table (1-3 dot-separated identifiers). Defaults to `system.billing.list_prices`. */
   accountPricesTable?: string;
@@ -391,13 +407,154 @@ function resolveAccountPrices(value: string | undefined): string {
 }
 
 /**
- * Builds the `CREATE OR REPLACE VIEW` DDL for the FOCUS 1.3 mapping.
- * Identifiers are validated and inlined directly — no parameter markers required.
+ * Builds the `CREATE OR REPLACE MATERIALIZED VIEW` DDL for the FOCUS 1.3
+ * mapping. Currently only used by tests / previews — production scheduling
+ * goes through `buildFocusPipelineSql` + Pipelines API.
  */
 export function buildFocusViewSql(opts: FocusViewSqlOptions): string {
   const accountPrices = resolveAccountPrices(opts.accountPricesTable);
   const body = FOCUS_SELECT_BODY.replaceAll('__ACCOUNT_PRICES__', accountPrices);
-  return `CREATE OR REPLACE VIEW ${focusViewFqn(opts)} AS${body}`;
+  return `CREATE OR REPLACE MATERIALIZED VIEW ${focusViewFqn(opts)} AS${body}`;
+}
+
+/* ---------------------------------------------------------------------------
+ * DLT Temporary View definitions
+ *
+ * Each CTE from `FOCUS_SELECT_BODY` is promoted to a `CREATE TEMPORARY VIEW`
+ * so that the Lakeflow Declarative Pipeline GUI renders each source as a
+ * distinct DAG node and the DLT engine can cache intermediate results.
+ * --------------------------------------------------------------------------- */
+
+const DLT_TEMP_PIPELINE_NAMES = /* sql */ `\
+CREATE TEMPORARY VIEW pipeline_names AS
+SELECT account_id, workspace_id, pipeline_id, name AS pipeline_name
+FROM system.lakeflow.pipelines
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY account_id, workspace_id, pipeline_id ORDER BY create_time DESC
+) = 1`;
+
+const DLT_TEMP_CLUSTER_NAMES = /* sql */ `\
+CREATE TEMPORARY VIEW cluster_names AS
+SELECT account_id, workspace_id, cluster_id, cluster_name
+FROM system.compute.clusters
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY account_id, workspace_id, cluster_id ORDER BY change_time DESC
+) = 1`;
+
+const DLT_TEMP_WAREHOUSE_NAMES = /* sql */ `\
+CREATE TEMPORARY VIEW warehouse_names AS
+SELECT account_id, workspace_id, warehouse_id, warehouse_name
+FROM system.compute.warehouses
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY account_id, workspace_id, warehouse_id ORDER BY change_time DESC
+) = 1`;
+
+const DLT_TEMP_WORKSPACE_NAMES = /* sql */ `\
+CREATE TEMPORARY VIEW workspace_names AS
+SELECT account_id, workspace_id, workspace_name
+FROM system.access.workspaces_latest`;
+
+const DLT_TEMP_LIST_PRICES = /* sql */ `\
+CREATE TEMPORARY VIEW list_prices AS
+SELECT COALESCE(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, *
+FROM system.billing.list_prices
+WHERE currency_code = 'USD'`;
+
+/** `__ACCOUNT_PRICES__` is replaced at build time with the resolved identifier. */
+const DLT_TEMP_ACCOUNT_PRICES = /* sql */ `\
+CREATE TEMPORARY VIEW account_prices AS
+SELECT COALESCE(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, *
+FROM __ACCOUNT_PRICES__
+WHERE currency_code = 'USD'`;
+
+const DLT_TEMP_USAGE_WITH_PRICING = /* sql */ `\
+CREATE TEMPORARY VIEW usage_with_pricing AS
+SELECT
+  u.record_id,
+  u.account_id,
+  u.workspace_id,
+  w.workspace_name,
+  u.sku_name,
+  u.cloud,
+  u.usage_start_time,
+  u.usage_end_time,
+  u.usage_date,
+  u.usage_quantity,
+  u.usage_unit,
+  u.usage_type,
+  u.custom_tags,
+  u.usage_metadata,
+  u.product_features,
+  u.billing_origin_product,
+  pip.pipeline_name,
+  cl.cluster_name,
+  wh.warehouse_name,
+  lp.currency_code,
+  lp.price_start_time,
+  CAST(lp.pricing.default AS DECIMAL(30, 15)) AS list_unit_price,
+  CAST(ap.pricing.default AS DECIMAL(30, 15)) AS account_unit_price
+FROM system.billing.usage u
+  LEFT JOIN list_prices lp
+    ON u.sku_name = lp.sku_name
+    AND u.usage_unit = lp.usage_unit
+    AND u.account_id = lp.account_id
+    AND u.usage_end_time BETWEEN lp.price_start_time AND lp.coalesced_price_end_time
+  LEFT JOIN account_prices ap
+    ON u.sku_name = ap.sku_name
+    AND u.usage_unit = ap.usage_unit
+    AND u.account_id = ap.account_id
+    AND u.usage_end_time BETWEEN ap.price_start_time AND ap.coalesced_price_end_time
+  LEFT JOIN workspace_names w
+    ON u.account_id = w.account_id
+    AND u.workspace_id = w.workspace_id
+  LEFT JOIN pipeline_names pip
+    ON u.account_id = pip.account_id
+    AND u.workspace_id = pip.workspace_id
+    AND u.usage_metadata.dlt_pipeline_id = pip.pipeline_id
+  LEFT JOIN cluster_names cl
+    ON u.account_id = cl.account_id
+    AND u.workspace_id = cl.workspace_id
+    AND u.usage_metadata.cluster_id = cl.cluster_id
+  LEFT JOIN warehouse_names wh
+    ON u.account_id = wh.account_id
+    AND u.workspace_id = wh.workspace_id
+    AND u.usage_metadata.warehouse_id = wh.warehouse_id`;
+
+/**
+ * Builds a Lakeflow Declarative Pipeline SQL file for the FOCUS view.
+ *
+ * The output contains multiple statements separated by semicolons:
+ *   7 × `CREATE TEMPORARY VIEW` (one per JOIN source)
+ *   1 × `CREATE OR REFRESH MATERIALIZED VIEW` (final FOCUS output)
+ *
+ * Each temporary view appears as its own node in the pipeline DAG, making the
+ * data flow visible in the Databricks UI and allowing the DLT engine to cache
+ * intermediate results.
+ *
+ * The pipeline owns the catalog/schema (via Pipeline.catalog + Pipeline.schema),
+ * so only the unqualified table name is used in the final MV declaration.
+ */
+export function buildFocusPipelineSql(opts: {
+  table: string;
+  accountPricesTable?: string;
+}): string {
+  if (!IDENT_RE.test(opts.table)) {
+    throw new Error(`Invalid table identifier "${opts.table}"`);
+  }
+  const accountPrices = resolveAccountPrices(opts.accountPricesTable);
+
+  const statements = [
+    DLT_TEMP_PIPELINE_NAMES,
+    DLT_TEMP_CLUSTER_NAMES,
+    DLT_TEMP_WAREHOUSE_NAMES,
+    DLT_TEMP_WORKSPACE_NAMES,
+    DLT_TEMP_LIST_PRICES,
+    DLT_TEMP_ACCOUNT_PRICES.replaceAll('__ACCOUNT_PRICES__', accountPrices),
+    DLT_TEMP_USAGE_WITH_PRICING,
+    `CREATE OR REFRESH MATERIALIZED VIEW \`${opts.table}\` AS\n${FOCUS_SELECT_PROJECTION}`,
+  ];
+
+  return statements.join(';\n\n') + ';\n';
 }
 
 /** `CREATE SCHEMA IF NOT EXISTS \`catalog\`.\`schema\`` — prerequisite for the view. */

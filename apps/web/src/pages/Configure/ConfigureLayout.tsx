@@ -4,7 +4,6 @@ import { useI18n } from '../../i18n';
 
 const TABS = [
   { to: '/configure/data-sources', labelKey: 'nav.dataSources' },
-  { to: '/configure/detection-rules', labelKey: 'nav.detectionRules' },
   { to: '/configure/transformations', labelKey: 'nav.transformations' },
   { to: '/configure/admin', labelKey: 'nav.admin' },
 ];

@@ -5,7 +5,6 @@ export const en = {
     overview: 'Overview',
     configure: 'Configure',
     dataSources: 'Data sources',
-    detectionRules: 'Detection rules',
     transformations: 'Transformations',
     admin: 'Admin',
     costExplorer: 'Cost Explorer',
@@ -95,7 +94,6 @@ export const en = {
   settings: {
     title: 'Settings',
     subtitle: 'Application configuration',
-    body: 'Application-wide settings are stored as key/value pairs in the app_settings table.',
     mainCatalogHeading: 'Main catalog',
     mainCatalogDesc:
       'Unity Catalog name to query by default (e.g. main, prod_finops). Saved to app_settings.',
@@ -105,53 +103,70 @@ export const en = {
   },
   configure: {
     title: 'Configure',
-    detectionRules: {
-      title: 'Detection rules',
-      desc: 'Define anomaly and budget breach rules. e.g. flag spend > 2σ vs 7d trailing average.',
-    },
     transformations: {
       title: 'Transformations',
       desc: 'Author the medallion pipeline that normalizes raw cost feeds (CUR, Cost Mgmt) into the gold cost facts table.',
-    },
-    admin: {
-      title: 'Admin',
-      desc: 'App service principal, OBO scopes, and operator-only settings.',
     },
     stubBanner: 'Coming soon. Track progress in the LakeCost roadmap.',
   },
   dataSources: {
     currentTitle: 'Current data sources',
-    viewGold: '⧉ View Gold tables',
     filterPlaceholder: 'Filter sources…',
     addTitle: 'Add data source',
     tileNoHistory: 'no history yet',
+    empty: 'No data sources yet — add one from the catalog below.',
+    delete: 'Delete data source',
+    confirmDelete: 'Delete "{name}"? Its scheduled refresh job will also be removed.',
     badges: {
       enabled: 'Enabled',
       disabled: 'Disabled',
+      added: 'Added',
+      setupRequired: 'Setup required',
       healthy: 'Healthy',
       unknown: 'Unknown',
       error: 'Error',
-      notVerified: 'Not verified',
+      notVerified: 'Not scheduled',
+      scheduled: 'Scheduled',
+      add: 'Add',
       comingSoon: 'Coming soon',
     },
     drawer: {
       notImplemented:
-        "This data source is not yet implemented. We're tracking it on the LakeCost roadmap.",
+        "This provider is not yet implemented. We're tracking it on the LakeCost roadmap.",
     },
     systemTables: {
+      title: 'FOCUS materialized view',
       step1: 'Step 1 — System tables enabled',
       verifySchemas: 'Verify system schemas',
       step2: 'Step 2 — App service principal grants',
       verifySelect: 'Verify SELECT permission',
       step3: 'Step 3 — FOCUS view',
       focusViewDesc:
-        'Materialize a FOCUS 1.3 mapping of system.billing.* into your catalog. The view path is <catalog>.<tier>.<table>.',
+        'Creates Spark Declarative Pipelines that build a materialized view mapping `system.billing.*` to the FOCUS format.',
       catalog: 'Catalog (from Admin)',
+      schema: 'Schema',
       tier: 'Tier (schema)',
       tableName: 'Table name',
       accountPrices: 'Account prices table',
+      cron: 'Cron schedule (Quartz)',
+      timezone: 'Timezone',
       focusViewTarget: 'View target',
       createView: 'Create FOCUS view',
+      setupAndSchedule: 'Create job',
+      updateSchedule: 'Update job',
+      runJob: 'Run job',
+      runOk: 'Run #{runId} started for job #{jobId}.',
+      jobScheduled: 'Scheduled job: #{id}',
+      jobLink: 'Job #{id}',
+      pipelineLink: 'Pipeline #{id}',
+      resourcesTitle: 'Databricks resources',
+      jobResource: 'Job',
+      pipelineResource: 'Pipeline',
+      tableResource: 'Table',
+      setupOk:
+        'Job #{jobId} scheduled. The next run will create or refresh {fqn} on the SQL warehouse.',
+      updateOk:
+        'Job #{jobId} updated. The next run will create or refresh {fqn} on the SQL warehouse.',
       saveTarget: 'Save target',
       catalogMissing: 'Set the main catalog in Configure → Admin first.',
     },
@@ -178,8 +193,8 @@ export const en = {
     },
     catalog: {
       'databricks-system-tables': {
-        description: 'DBU consumption from system.billing.usage and system.billing.list_prices',
-        subtitle: 'by Databricks',
+        description: 'Databricks usage and list prices normalized to FOCUS 1.3',
+        subtitle: '',
       },
       'aws-cur': {
         description: 'EC2 / EBS / S3 spend ingested via CUR 2.0 to S3',
@@ -191,7 +206,7 @@ export const en = {
       },
       'tagging-policy': {
         description: 'Cost-attribution tags enforced via compute & budget policies',
-        subtitle: 'by Databricks',
+        subtitle: '',
       },
       'gcp-cloud-billing': {
         description: 'Google Cloud billing export to BigQuery, federated into the warehouse',

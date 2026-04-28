@@ -7,7 +7,6 @@ export const ja: Dictionary = {
     overview: '概要',
     configure: '構成',
     dataSources: 'データソース',
-    detectionRules: '検知ルール',
     transformations: '変換パイプライン',
     admin: '管理',
     costExplorer: 'コストエクスプローラー',
@@ -99,7 +98,6 @@ export const ja: Dictionary = {
   settings: {
     title: '設定',
     subtitle: 'アプリケーション設定',
-    body: 'アプリ全体の設定は app_settings テーブルに Key / Value 形式で保存されます。',
     mainCatalogHeading: 'メインカタログ',
     mainCatalogDesc:
       '既定で参照する Unity Catalog のカタログ名 (例: main, prod_finops)。app_settings に保存されます。',
@@ -109,53 +107,70 @@ export const ja: Dictionary = {
   },
   configure: {
     title: '構成',
-    detectionRules: {
-      title: '検知ルール',
-      desc: '異常検知や予算超過のルールを定義します。例: 直近7日平均に対して 2σ を超える支出を検知。',
-    },
     transformations: {
       title: '変換パイプライン',
       desc: 'CUR や Cost Management などの生データを Gold コストファクトテーブルへ正規化するメダリオンパイプラインを作成します。',
-    },
-    admin: {
-      title: '管理',
-      desc: 'アプリのサービスプリンシパル、OBO スコープ、運用者向け設定。',
     },
     stubBanner: '近日公開予定です。LakeCost のロードマップで進捗を追跡しています。',
   },
   dataSources: {
     currentTitle: '現在のデータソース',
-    viewGold: '⧉ Gold テーブルを表示',
     filterPlaceholder: 'データソースを絞り込み…',
     addTitle: 'データソースを追加',
     tileNoHistory: '履歴はまだありません',
+    empty: 'データソースがまだ登録されていません。下のカタログから追加してください。',
+    delete: 'データソースを削除',
+    confirmDelete: '「{name}」を削除しますか？スケジュール済みのリフレッシュジョブも削除されます。',
     badges: {
       enabled: '有効',
       disabled: '無効',
+      added: '追加済み',
+      setupRequired: '設定が必要',
       healthy: '正常',
       unknown: '不明',
       error: 'エラー',
-      notVerified: '未検証',
+      notVerified: '未スケジュール',
+      scheduled: 'スケジュール済',
+      add: '追加',
       comingSoon: '近日公開',
     },
     drawer: {
       notImplemented:
-        'このデータソースはまだ実装されていません。LakeCost のロードマップで進捗を追跡しています。',
+        'このプロバイダーはまだ実装されていません。LakeCost のロードマップで進捗を追跡しています。',
     },
     systemTables: {
+      title: 'FOCUS マテリアライズドビュー',
       step1: 'ステップ 1 — システムテーブルの有効化',
       verifySchemas: 'システムスキーマを検証',
       step2: 'ステップ 2 — アプリのサービスプリンシパル権限',
       verifySelect: 'SELECT 権限を検証',
       step3: 'ステップ 3 — FOCUS ビュー',
       focusViewDesc:
-        'system.billing.* を FOCUS 1.3 仕様でマッピングしたビューを作成します。配置先は <catalog>.<tier>.<table> です。',
+        '`system.billing.*` を FOCUS 形式にマッピングしたマテリアライズドビューを作成する Spark Declarative Pipelines を作成します。',
       catalog: 'カタログ（管理画面で設定）',
+      schema: 'スキーマ',
       tier: 'ティア（スキーマ）',
       tableName: 'テーブル名',
       accountPrices: 'アカウント別料金テーブル',
+      cron: 'Cron スケジュール (Quartz)',
+      timezone: 'タイムゾーン',
       focusViewTarget: 'ビューの配置先',
       createView: 'FOCUS ビューを作成',
+      setupAndSchedule: 'ジョブを作成',
+      updateSchedule: 'ジョブを更新',
+      runJob: 'ジョブを実行',
+      runOk: 'Job #{jobId} の Run #{runId} を開始しました。',
+      jobScheduled: 'スケジュール済ジョブ: #{id}',
+      jobLink: 'Job #{id}',
+      pipelineLink: 'Pipeline #{id}',
+      resourcesTitle: 'Databricks リソース',
+      jobResource: 'Job',
+      pipelineResource: 'Pipeline',
+      tableResource: 'Table',
+      setupOk:
+        'ジョブ #{jobId} をスケジュールしました。次回実行時に SQL ウェアハウスで {fqn} が作成・更新されます。',
+      updateOk:
+        'ジョブ #{jobId} の設定を更新しました。次回実行時に SQL ウェアハウスで {fqn} が作成・更新されます。',
       saveTarget: '設定を保存',
       catalogMissing: '先に「構成 → 管理」でメインカタログを設定してください。',
     },
@@ -182,8 +197,8 @@ export const ja: Dictionary = {
     },
     catalog: {
       'databricks-system-tables': {
-        description: 'system.billing.usage および system.billing.list_prices からの DBU 消費量',
-        subtitle: 'Databricks 提供',
+        description: 'Databricks の利用量とリスト価格を FOCUS 1.3 形式に正規化',
+        subtitle: '',
       },
       'aws-cur': {
         description: 'CUR 2.0 経由で S3 から取り込む EC2 / EBS / S3 の支出',
@@ -195,7 +210,7 @@ export const ja: Dictionary = {
       },
       'tagging-policy': {
         description: 'コンピュート / 予算ポリシーで強制するコスト按分用タグ',
-        subtitle: 'Databricks 提供',
+        subtitle: '',
       },
       'gcp-cloud-billing': {
         description: 'Google Cloud の BigQuery 課金エクスポートをウェアハウスへ連携',

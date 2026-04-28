@@ -36,7 +36,7 @@ export async function buildApp({ env, db }: AppDeps): Promise<express.Express> {
   app.use('/api/setup', setupRouter(db, env));
   app.use('/api/settings', settingsRouter(db));
   app.use('/api/me', meRouter(env));
-  app.use('/api/data-sources', dataSourcesRouter(db));
+  app.use('/api/data-sources', dataSourcesRouter(db, env));
 
   if (env.NODE_ENV === 'production') {
     const distDir = resolveWebDistDir(env);

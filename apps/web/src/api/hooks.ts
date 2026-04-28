@@ -3,6 +3,10 @@ import type {
   Budget,
   CreateBudgetInput,
   DataSource,
+  DataSourceCreateBody,
+  DataSourceRunResult,
+  DataSourceSetupBody,
+  DataSourceSetupResult,
   DataSourceUpdateBody,
   SetupCheckResult,
   SetupStateResponse,
@@ -134,9 +138,24 @@ export function useDataSources() {
 export function useDataSource(id: string | undefined) {
   return useQuery({
     queryKey: ['dataSources', id],
-    enabled: Boolean(id),
+    enabled: typeof id === 'string',
     queryFn: () => apiFetch<DataSource>(`/api/data-sources/${encodeURIComponent(id!)}`),
     staleTime: 60 * 1000,
+  });
+}
+
+export function useCreateDataSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DataSourceCreateBody) =>
+      apiFetch<DataSource>('/api/data-sources', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(['dataSources', data.id], data);
+      qc.invalidateQueries({ queryKey: ['dataSources'] });
+    },
   });
 }
 
@@ -152,6 +171,43 @@ export function useUpdateDataSource() {
       qc.setQueryData(['dataSources', data.id], data);
       qc.invalidateQueries({ queryKey: ['dataSources'] });
     },
+  });
+}
+
+export function useDeleteDataSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/data-sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: ['dataSources', id] });
+      qc.invalidateQueries({ queryKey: ['dataSources'] });
+    },
+  });
+}
+
+export function useSetupDataSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: DataSourceSetupBody }) =>
+      apiFetch<DataSourceSetupResult>(`/api/data-sources/${encodeURIComponent(id)}/setup`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['dataSources', data.dataSourceId] });
+      qc.invalidateQueries({ queryKey: ['dataSources'] });
+    },
+  });
+}
+
+export function useRunDataSourceJob() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<DataSourceRunResult>(`/api/data-sources/${encodeURIComponent(id)}/run`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
   });
 }
 

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, unique } from 'drizzle-orm/sqlite-core';
 
 export const budgets = sqliteTable('budgets', {
   id: text('id').primaryKey(),
@@ -55,17 +55,26 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: text('updated_at').notNull(),
 });
 
-export const dataSources = sqliteTable('data_sources', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  description: text('description'),
-  provider: text('provider').notNull(),
-  tier: text('tier').notNull(),
-  tableName: text('table_name').notNull(),
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  configJson: text('config_json').notNull().default('{}'),
-  updatedAt: text('updated_at').notNull(),
-});
+export const dataSources = sqliteTable(
+  'data_sources',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    providerName: text('provider_name').notNull(),
+    billingAccountId: text('billing_account_id'),
+    tableName: text('table_name').notNull(),
+    jobId: integer('job_id'),
+    pipelineId: text('pipeline_id'),
+    focusVersion: text('focus_version'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    configJson: text('config_json').notNull().default('{}'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    uniqProvider: unique().on(table.providerName, table.billingAccountId),
+  }),
+);
 
 export const setupState = sqliteTable('setup_state', {
   workspaceId: text('workspace_id').primaryKey(),

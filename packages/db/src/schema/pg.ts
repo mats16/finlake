@@ -2,10 +2,12 @@ import {
   pgTable,
   text,
   integer,
+  bigint,
   doublePrecision,
   boolean,
   jsonb,
   timestamp,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 export const budgets = pgTable('budgets', {
@@ -63,17 +65,26 @@ export const appSettings = pgTable('app_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const dataSources = pgTable('data_sources', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  description: text('description'),
-  provider: text('provider').notNull(),
-  tier: text('tier').notNull(),
-  tableName: text('table_name').notNull(),
-  enabled: boolean('enabled').notNull().default(true),
-  config: jsonb('config').notNull().default({}),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const dataSources = pgTable(
+  'data_sources',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    providerName: text('provider_name').notNull(),
+    billingAccountId: text('billing_account_id'),
+    tableName: text('table_name').notNull(),
+    jobId: bigint('job_id', { mode: 'number' }),
+    pipelineId: text('pipeline_id'),
+    focusVersion: text('focus_version'),
+    enabled: boolean('enabled').notNull().default(true),
+    config: jsonb('config').notNull().default({}),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    uniqProvider: unique().on(table.providerName, table.billingAccountId),
+  }),
+);
 
 export const setupState = pgTable('setup_state', {
   workspaceId: text('workspace_id').primaryKey(),

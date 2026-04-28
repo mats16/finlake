@@ -21,15 +21,6 @@ export function App() {
           <Route index element={<Navigate to="data-sources" replace />} />
           <Route path="data-sources" element={<DataSources />} />
           <Route
-            path="detection-rules"
-            element={
-              <Stub
-                titleKey="configure.detectionRules.title"
-                descKey="configure.detectionRules.desc"
-              />
-            }
-          />
-          <Route
             path="transformations"
             element={
               <Stub

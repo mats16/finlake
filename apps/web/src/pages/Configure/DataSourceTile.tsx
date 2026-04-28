@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Badge, Card, CardContent } from '@databricks/appkit-ui/react';
-import type { DataSourceDefinition } from './dataSourceCatalog';
+import type { DataSourceTemplate } from './dataSourceCatalog';
 import { VendorLogo } from './VendorLogo';
 import { Sparkline } from './Sparkline';
 import { useI18n } from '../../i18n';
@@ -17,7 +17,12 @@ export interface TileBadge {
 }
 
 interface Props {
-  source: DataSourceDefinition;
+  /** Static template metadata (brand color, vendor abbr, default name). */
+  source: DataSourceTemplate;
+  /** Override the rendered name (for DB rows the user has renamed). */
+  displayName?: string;
+  /** Override the rendered description. */
+  displayDescription?: string;
   badges?: TileBadge[];
   metric?: TileMetric;
   onClick?: () => void;
@@ -43,6 +48,8 @@ const BADGE_CLASSES: Record<TileBadge['variant'], string> = {
 
 export function DataSourceTile({
   source,
+  displayName,
+  displayDescription,
   badges = [],
   metric,
   onClick,
@@ -50,8 +57,10 @@ export function DataSourceTile({
   muted,
 }: Props) {
   const { t } = useI18n();
-  const description = t(`dataSources.catalog.${source.id}.description`);
-  const subtitle = t(`dataSources.catalog.${source.id}.subtitle`);
+  const description =
+    displayDescription ?? t(`dataSources.catalog.${source.templateId}.description`);
+  const subtitle = t(`dataSources.catalog.${source.templateId}.subtitle`);
+  const name = displayName ?? source.name;
   const interactive = Boolean(onClick);
 
   return (
@@ -78,9 +87,9 @@ export function DataSourceTile({
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h4 className="m-0 text-base font-semibold">{source.name}</h4>
+          <h4 className="m-0 text-base font-semibold">{name}</h4>
           <p className="text-muted-foreground mt-1 text-xs">{description}</p>
-          <p className="text-muted-foreground mt-0.5 text-[11px]">{subtitle}</p>
+          {subtitle ? <p className="text-muted-foreground mt-0.5 text-[11px]">{subtitle}</p> : null}
         </div>
         <div className="flex flex-col items-end gap-1">
           {badges.map((b) => (
