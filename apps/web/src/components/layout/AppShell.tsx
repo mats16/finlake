@@ -53,7 +53,6 @@ const CONFIGURE: NavGroup = {
   matchPrefix: '/configure',
   items: [
     { to: '/configure/data-sources', labelKey: 'nav.dataSources' },
-    { to: '/configure/detection-rules', labelKey: 'nav.detectionRules' },
     { to: '/configure/transformations', labelKey: 'nav.transformations' },
     { to: '/configure/admin', labelKey: 'nav.admin' },
   ],

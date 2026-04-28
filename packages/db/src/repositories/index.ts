@@ -54,18 +54,33 @@ export interface DataSourceValue {
   id: string;
   name: string;
   description: string | null;
-  provider: string;
-  tier: string;
+  providerName: string;
+  billingAccountId: string | null;
   tableName: string;
+  jobId: number | null;
+  pipelineId: string | null;
+  focusVersion: string | null;
   enabled: boolean;
   config: Record<string, unknown>;
   updatedAt: string;
 }
 
+export type DataSourceCreateInput = Omit<
+  DataSourceValue,
+  'updatedAt' | 'jobId' | 'pipelineId' | 'focusVersion'
+> & {
+  jobId?: number | null;
+  pipelineId?: string | null;
+  focusVersion?: string | null;
+};
+
+export type DataSourceUpdatePatch = Partial<Omit<DataSourceValue, 'id' | 'updatedAt'>>;
+
 export interface DataSourcesRepo {
   list(): Promise<DataSourceValue[]>;
   get(id: string): Promise<DataSourceValue | null>;
-  upsert(value: DataSourceValue): Promise<DataSourceValue>;
+  create(input: DataSourceCreateInput): Promise<DataSourceValue>;
+  update(id: string, patch: DataSourceUpdatePatch): Promise<DataSourceValue>;
   delete(id: string): Promise<void>;
 }
 

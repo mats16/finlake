@@ -1,15 +1,4 @@
 import type { Env, SetupCheckResult, SetupStepId } from '@lakecost/shared';
-import {
-  ACCOUNT_PRICES_DEFAULT,
-  CATALOG_SETTING_KEY,
-  DATABRICKS_BILLING_SOURCE_ID,
-  FOCUS_VIEW_SCHEMA_DEFAULT,
-  FOCUS_VIEW_TABLE_DEFAULT,
-  buildEnsureSchemaSql,
-  buildFocusViewSql,
-  focusViewFqn,
-  validateAccountPricesTable,
-} from '@lakecost/shared';
 import type { DatabaseClient } from '@lakecost/db';
 import { buildUserExecutor } from './statementExecution.js';
 import { z } from 'zod';
@@ -18,7 +7,7 @@ export async function runSetupCheck(
   step: SetupStepId,
   env: Env,
   input: Record<string, unknown>,
-  db: DatabaseClient,
+  _db: DatabaseClient,
   userToken?: string,
 ): Promise<SetupCheckResult> {
   const checkedAt = new Date().toISOString();
@@ -28,8 +17,6 @@ export async function runSetupCheck(
       return await checkSystemTables(env, checkedAt, userToken);
     case 'permissions':
       return await checkPermissions(env, checkedAt, userToken);
-    case 'focusView':
-      return await checkFocusView(env, db, input, checkedAt, userToken);
     case 'awsCur':
       return checkAwsCur(input, checkedAt);
     case 'azureExport':
@@ -152,116 +139,6 @@ databricks permissions set sql/warehouses ${warehouseId} \\
         cli: warehouseGrantCli,
         terraform: warehouseTerraform,
       },
-      checkedAt,
-    };
-  }
-}
-
-async function checkFocusView(
-  env: Env,
-  db: DatabaseClient,
-  input: Record<string, unknown>,
-  checkedAt: string,
-  userToken?: string,
-): Promise<SetupCheckResult> {
-  const [catalogSetting, source] = await Promise.all([
-    db.repos.appSettings.get(CATALOG_SETTING_KEY),
-    db.repos.dataSources.get(DATABRICKS_BILLING_SOURCE_ID),
-  ]);
-  const pick = (key: string, fallback: string): string => {
-    const v = input[key];
-    return typeof v === 'string' && v.trim().length > 0 ? v.trim() : fallback;
-  };
-  const catalog = pick('catalog', (catalogSetting?.value ?? '').trim());
-  const tier = pick('tier', source?.tier ?? FOCUS_VIEW_SCHEMA_DEFAULT);
-  const tableName = pick('tableName', source?.tableName ?? FOCUS_VIEW_TABLE_DEFAULT);
-  const accountPricesTable = pick(
-    'accountPricesTable',
-    (source?.config.accountPricesTable as string | undefined) ?? ACCOUNT_PRICES_DEFAULT,
-  );
-
-  if (!catalog) {
-    return {
-      step: 'focusView',
-      status: 'warning',
-      message:
-        'Main catalog is not configured. Set it in Configure → Admin (catalog_name in app_settings) before creating the FOCUS view.',
-      checkedAt,
-    };
-  }
-
-  let viewSql: string;
-  let ensureSchemaSql: string;
-  let fqn: string;
-  let validatedAccountPrices: string;
-  try {
-    validatedAccountPrices = validateAccountPricesTable(accountPricesTable);
-    ensureSchemaSql = buildEnsureSchemaSql({ catalog, schema: tier });
-    viewSql = buildFocusViewSql({
-      catalog,
-      schema: tier,
-      table: tableName,
-      accountPricesTable: validatedAccountPrices,
-    });
-    fqn = focusViewFqn({ catalog, schema: tier, table: tableName });
-  } catch (err) {
-    return {
-      step: 'focusView',
-      status: 'error',
-      message: `Invalid view target: ${(err as Error).message}`,
-      details: { catalog, tier, tableName, accountPricesTable },
-      checkedAt,
-    };
-  }
-
-  const combinedRemediationSql = `${ensureSchemaSql};\n\n${viewSql};`;
-
-  const executor = buildUserExecutor(env, userToken);
-  if (!executor) {
-    return {
-      step: 'focusView',
-      status: 'unknown',
-      message: notConfiguredMessage(userToken),
-      details: { fqn, accountPricesTable: validatedAccountPrices },
-      remediation: { sql: combinedRemediationSql },
-      checkedAt,
-    };
-  }
-
-  try {
-    await executor.run(ensureSchemaSql, [], z.object({}).passthrough());
-    await executor.run(viewSql, [], z.object({}).passthrough());
-    await db.repos.dataSources.upsert({
-      id: DATABRICKS_BILLING_SOURCE_ID,
-      name: source?.name ?? 'Databricks System Tables',
-      description:
-        source?.description ??
-        'FOCUS 1.3 view materialized over system.billing.* and supporting system tables',
-      provider: source?.provider ?? 'Databricks',
-      tier,
-      tableName,
-      enabled: source?.enabled ?? true,
-      config: {
-        ...(source?.config ?? {}),
-        accountPricesTable: validatedAccountPrices,
-      },
-      updatedAt: checkedAt,
-    });
-    return {
-      step: 'focusView',
-      status: 'ok',
-      message: `Created or replaced FOCUS view ${fqn}`,
-      details: { fqn, accountPricesTable: validatedAccountPrices },
-      remediation: { sql: combinedRemediationSql },
-      checkedAt,
-    };
-  } catch (err) {
-    return {
-      step: 'focusView',
-      status: 'error',
-      message: `Failed to create FOCUS view ${fqn}: ${(err as Error).message}`,
-      details: { fqn, accountPricesTable: validatedAccountPrices },
-      remediation: { sql: combinedRemediationSql },
       checkedAt,
     };
   }

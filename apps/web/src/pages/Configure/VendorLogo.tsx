@@ -1,6 +1,7 @@
-import type { DataSourceDefinition } from './dataSourceCatalog';
+import type { DataSourceTemplate, DataSourceVendor } from './dataSourceCatalog';
+import databricksSymbolUrl from '../../assets/databricks-symbol-color.png';
 
-const ABBR: Record<DataSourceDefinition['vendor'], string> = {
+const ABBR: Record<DataSourceVendor, string> = {
   Databricks: 'DBR',
   AWS: 'AWS',
   Azure: 'AZ',
@@ -9,7 +10,20 @@ const ABBR: Record<DataSourceDefinition['vendor'], string> = {
   Custom: 'src',
 };
 
-export function VendorLogo({ source, size = 56 }: { source: DataSourceDefinition; size?: number }) {
+export function VendorLogo({ source, size = 56 }: { source: DataSourceTemplate; size?: number }) {
+  if (source.vendor === 'Databricks') {
+    return (
+      <img
+        src={databricksSymbolUrl}
+        width={size}
+        height={size}
+        className="object-contain"
+        alt=""
+        aria-hidden
+      />
+    );
+  }
+
   return (
     <div
       className="vendor-logo"

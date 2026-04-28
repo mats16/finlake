@@ -11,6 +11,8 @@ import type {
   BudgetsRepo,
   CachedAggregationValue,
   CachedAggregationsRepo,
+  DataSourceCreateInput,
+  DataSourceUpdatePatch,
   DataSourceValue,
   DataSourcesRepo,
   Repositories,
@@ -22,27 +24,8 @@ import type {
 import { ensureParentDir } from './paths.js';
 import { logger } from './logger.js';
 import type { Budget, CreateBudgetInput, SetupCheckResult } from '@lakecost/shared';
-import {
-  ACCOUNT_PRICES_DEFAULT,
-  DATABRICKS_BILLING_SOURCE_ID,
-  FOCUS_VIEW_SCHEMA_DEFAULT,
-  FOCUS_VIEW_TABLE_DEFAULT,
-} from '@lakecost/shared';
 
 type Db = BetterSQLite3Database<typeof s>;
-
-const DEFAULT_DATA_SOURCES: ReadonlyArray<Omit<DataSourceValue, 'updatedAt'>> = [
-  {
-    id: DATABRICKS_BILLING_SOURCE_ID,
-    name: 'Databricks System Tables',
-    description: 'FOCUS 1.3 view materialized over system.billing.* and supporting system tables',
-    provider: 'Databricks',
-    tier: FOCUS_VIEW_SCHEMA_DEFAULT,
-    tableName: FOCUS_VIEW_TABLE_DEFAULT,
-    enabled: true,
-    config: { accountPricesTable: ACCOUNT_PRICES_DEFAULT },
-  },
-];
 
 export class SqliteClient implements DatabaseClient {
   readonly backend = 'sqlite' as const;
@@ -128,12 +111,16 @@ export class SqliteClient implements DatabaseClient {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
-        provider TEXT NOT NULL,
-        tier TEXT NOT NULL,
+        provider_name TEXT NOT NULL,
+        billing_account_id TEXT,
         table_name TEXT NOT NULL,
+        job_id INTEGER,
+        pipeline_id TEXT,
+        focus_version TEXT,
         enabled INTEGER NOT NULL DEFAULT 1,
         config_json TEXT NOT NULL DEFAULT '{}',
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider_name, billing_account_id)
       );
       CREATE TABLE IF NOT EXISTS setup_state (
         workspace_id TEXT PRIMARY KEY,
@@ -145,30 +132,7 @@ export class SqliteClient implements DatabaseClient {
         details_json TEXT NOT NULL DEFAULT '{}'
       );
     `);
-    this.seedDataSources();
     logger.debug('SQLite schema bootstrap complete');
-  }
-
-  private seedDataSources(): void {
-    const stmt = this.raw.prepare(
-      `INSERT OR IGNORE INTO data_sources (
-        id, name, description, provider, tier, table_name, enabled, config_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const now = new Date().toISOString();
-    for (const row of DEFAULT_DATA_SOURCES) {
-      stmt.run(
-        row.id,
-        row.name,
-        row.description,
-        row.provider,
-        row.tier,
-        row.tableName,
-        row.enabled ? 1 : 0,
-        JSON.stringify(row.config),
-        now,
-      );
-    }
   }
 
   async healthCheck(): Promise<{ ok: true; backend: 'sqlite' }> {
@@ -422,35 +386,52 @@ class SqliteDataSourcesRepo implements DataSourcesRepo {
     return row ? toDataSource(row) : null;
   }
 
-  async upsert(value: DataSourceValue): Promise<DataSourceValue> {
-    const row = {
-      id: value.id,
-      name: value.name,
-      description: value.description,
-      provider: value.provider,
-      tier: value.tier,
-      tableName: value.tableName,
-      enabled: value.enabled,
-      configJson: JSON.stringify(value.config),
-      updatedAt: value.updatedAt,
-    };
-    await this.db
+  async create(input: DataSourceCreateInput): Promise<DataSourceValue> {
+    const inserted = await this.db
       .insert(s.dataSources)
-      .values(row)
-      .onConflictDoUpdate({
-        target: s.dataSources.id,
-        set: {
-          name: row.name,
-          description: row.description,
-          provider: row.provider,
-          tier: row.tier,
-          tableName: row.tableName,
-          enabled: row.enabled,
-          configJson: row.configJson,
-          updatedAt: row.updatedAt,
-        },
-      });
-    return value;
+      .values({
+        id: input.id,
+        name: input.name,
+        description: input.description ?? null,
+        providerName: input.providerName,
+        billingAccountId: input.billingAccountId ?? null,
+        tableName: input.tableName,
+        jobId: input.jobId ?? null,
+        pipelineId: input.pipelineId ?? null,
+        focusVersion: input.focusVersion ?? null,
+        enabled: input.enabled,
+        configJson: JSON.stringify(input.config ?? {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .returning();
+    const row = inserted[0];
+    if (!row) throw new Error('Failed to insert data source');
+    return toDataSource(row);
+  }
+
+  async update(id: string, patch: DataSourceUpdatePatch): Promise<DataSourceValue> {
+    const set: Partial<typeof s.dataSources.$inferInsert> = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (patch.name !== undefined) set.name = patch.name;
+    if (patch.description !== undefined) set.description = patch.description;
+    if (patch.providerName !== undefined) set.providerName = patch.providerName;
+    if (patch.billingAccountId !== undefined) set.billingAccountId = patch.billingAccountId;
+    if (patch.tableName !== undefined) set.tableName = patch.tableName;
+    if (patch.jobId !== undefined) set.jobId = patch.jobId;
+    if (patch.pipelineId !== undefined) set.pipelineId = patch.pipelineId;
+    if (patch.focusVersion !== undefined) set.focusVersion = patch.focusVersion;
+    if (patch.enabled !== undefined) set.enabled = patch.enabled;
+    if (patch.config !== undefined) set.configJson = JSON.stringify(patch.config);
+
+    const updated = await this.db
+      .update(s.dataSources)
+      .set(set)
+      .where(eq(s.dataSources.id, id))
+      .returning();
+    const row = updated[0];
+    if (!row) throw new Error(`Data source ${id} not found`);
+    return toDataSource(row);
   }
 
   async delete(id: string): Promise<void> {
@@ -463,9 +444,12 @@ function toDataSource(row: typeof s.dataSources.$inferSelect): DataSourceValue {
     id: row.id,
     name: row.name,
     description: row.description,
-    provider: row.provider,
-    tier: row.tier,
+    providerName: row.providerName,
+    billingAccountId: row.billingAccountId,
     tableName: row.tableName,
+    jobId: row.jobId,
+    pipelineId: row.pipelineId,
+    focusVersion: row.focusVersion,
     enabled: row.enabled,
     config: JSON.parse(row.configJson) as Record<string, unknown>,
     updatedAt: row.updatedAt,

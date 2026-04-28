@@ -10,278 +10,356 @@ import {
   Input,
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
   Spinner,
 } from '@databricks/appkit-ui/react';
-import { Info } from 'lucide-react';
+import { ExternalLink, Info } from 'lucide-react';
 import {
   useAppSettings,
   useDataSource,
-  useRunSetupCheck,
-  useUpdateDataSource,
+  useDeleteDataSource,
+  useMe,
+  useRunDataSourceJob,
+  useSetupDataSource,
 } from '../../api/hooks';
-import { StepResult } from '../SetupWizard/StepResult';
-import type { DataSourceDefinition } from './dataSourceCatalog';
 import {
   ACCOUNT_PRICES_DEFAULT,
   CATALOG_SETTING_KEY,
-  DATABRICKS_BILLING_SOURCE_ID,
+  FOCUS_REFRESH_CRON_DEFAULT,
+  FOCUS_REFRESH_TIMEZONE_DEFAULT,
   FOCUS_VIEW_SCHEMA_DEFAULT,
-  FOCUS_VIEW_TABLE_DEFAULT,
-  type SetupCheckResult,
-  type SetupStepId,
+  type DataSource,
+  type DataSourceSetupResult,
 } from '@lakecost/shared';
 import { useI18n } from '../../i18n';
+import { displayNameForRow, findTemplateForRow } from './dataSourceCatalog';
+import { tableLeafName, unquotedFqn } from '@lakecost/shared';
 
 interface Props {
-  source: DataSourceDefinition | null;
+  dataSourceId: string | null;
   onClose: () => void;
 }
 
-export function DataSourceDrawer({ source, onClose }: Props) {
+function catalogTableUrl(workspaceUrl: string, fqn: string): string {
+  return `${workspaceUrl}/explore/data/${fqn.split('.').map(encodeURIComponent).join('/')}`;
+}
+
+export function DataSourceDrawer({ dataSourceId, onClose }: Props) {
   const { t } = useI18n();
-  if (!source) return null;
-  const description = t(`dataSources.catalog.${source.id}.description`);
+  const ds = useDataSource(dataSourceId ?? undefined);
+  const isOpen = dataSourceId !== null;
+  const row = ds.data;
 
   return (
-    <Sheet open onOpenChange={(open) => (open ? null : onClose())}>
-      <SheetContent side="right" className="w-full max-w-(--container-md) sm:max-w-xl">
+    <Sheet open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
+      <SheetContent
+        side="right"
+        className="w-full max-w-(--container-md) sm:max-w-xl"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <SheetHeader>
-          <SheetTitle>{source.name}</SheetTitle>
-          <SheetDescription>{description}</SheetDescription>
+          <SheetTitle>
+            {row
+              ? findTemplateForRow(row)
+                ? displayNameForRow(row, findTemplateForRow(row)!)
+                : row.name
+              : t('common.loading')}
+          </SheetTitle>
         </SheetHeader>
         <div className="flex flex-col gap-4 overflow-auto px-4 pb-6">
-          {source.available ? (
-            <Configurator source={source} />
-          ) : (
-            <Alert>
-              <Info />
-              <AlertDescription>{t('dataSources.drawer.notImplemented')}</AlertDescription>
-            </Alert>
-          )}
+          {row?.providerName === 'Databricks' ? (
+            <p className="text-muted-foreground text-sm">
+              {t('dataSources.systemTables.focusViewDesc')}
+            </p>
+          ) : null}
+          {row ? <Configurator row={row} onClose={onClose} /> : null}
         </div>
       </SheetContent>
     </Sheet>
   );
 }
 
-function Configurator({ source }: { source: DataSourceDefinition }) {
+function Configurator({ row, onClose }: { row: DataSource; onClose: () => void }) {
   const { t } = useI18n();
-  const [results, setResults] = useState<Partial<Record<SetupStepId, SetupCheckResult>>>({});
-  const [bucket, setBucket] = useState('');
-  const [storageAccount, setStorageAccount] = useState('');
-  const check = useRunSetupCheck();
+  const deleteDs = useDeleteDataSource();
 
-  const run = async (step: SetupStepId, body?: Record<string, unknown>) => {
-    const result = await check.mutateAsync({ step, body });
-    setResults((prev) => ({ ...prev, [step]: result }));
+  const onDelete = async () => {
+    if (!window.confirm(t('dataSources.confirmDelete', { name: row.name }))) return;
+    await deleteDs.mutateAsync(row.id);
+    onClose();
   };
 
   return (
     <>
-      {source.id === 'databricks-system-tables' ? (
-        <>
-          <Section title={t('dataSources.systemTables.step1')}>
-            <Button type="button" disabled={check.isPending} onClick={() => run('systemTables')}>
-              {check.isPending ? <Spinner /> : null}
-              {t('dataSources.systemTables.verifySchemas')}
-            </Button>
-            <StepResult result={results.systemTables ?? null} />
-          </Section>
-          <Section title={t('dataSources.systemTables.step2')}>
-            <Button type="button" disabled={check.isPending} onClick={() => run('permissions')}>
-              {check.isPending ? <Spinner /> : null}
-              {t('dataSources.systemTables.verifySelect')}
-            </Button>
-            <StepResult result={results.permissions ?? null} />
-          </Section>
-          <FocusViewSection
-            results={results}
-            onResult={(r) => setResults((prev) => ({ ...prev, focusView: r }))}
-          />
-        </>
-      ) : null}
+      {row.providerName === 'Databricks' ? (
+        <FocusViewSection row={row} />
+      ) : (
+        <Alert>
+          <Info />
+          <AlertDescription>{t('dataSources.drawer.notImplemented')}</AlertDescription>
+        </Alert>
+      )}
 
-      {source.id === 'aws-cur' ? (
-        <Section title={t('dataSources.awsCur.title')}>
-          <div className="mb-2 flex items-center gap-2">
-            <Input
-              placeholder={t('dataSources.awsCur.placeholder')}
-              value={bucket}
-              onChange={(e) => setBucket(e.target.value)}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              disabled={check.isPending}
-              onClick={() => run('awsCur', { bucket: bucket || undefined })}
-            >
-              {check.isPending ? <Spinner /> : null}
-              {t('dataSources.awsCur.verify')}
-            </Button>
-          </div>
-          <StepResult result={results.awsCur ?? null} />
-        </Section>
-      ) : null}
-
-      {source.id === 'azure-cost-management' ? (
-        <Section title={t('dataSources.azure.title')}>
-          <div className="mb-2 flex items-center gap-2">
-            <Input
-              placeholder={t('dataSources.azure.placeholder')}
-              value={storageAccount}
-              onChange={(e) => setStorageAccount(e.target.value)}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              disabled={check.isPending}
-              onClick={() => run('azureExport', { storageAccount: storageAccount || undefined })}
-            >
-              {check.isPending ? <Spinner /> : null}
-              {t('dataSources.azure.verify')}
-            </Button>
-          </div>
-          <StepResult result={results.azureExport ?? null} />
-        </Section>
-      ) : null}
-
-      {source.id === 'tagging-policy' ? (
-        <Section title={t('dataSources.tagging.title')}>
-          <Button type="button" disabled={check.isPending} onClick={() => run('tagging')}>
-            {check.isPending ? <Spinner /> : null}
-            {t('dataSources.tagging.verify')}
-          </Button>
-          <StepResult result={results.tagging ?? null} />
-        </Section>
-      ) : null}
+      <div className="flex justify-end pt-2">
+        <Button
+          type="button"
+          variant="destructive"
+          disabled={deleteDs.isPending}
+          onClick={onDelete}
+        >
+          {deleteDs.isPending ? <Spinner /> : null}
+          {t('dataSources.delete')}
+        </Button>
+      </div>
     </>
   );
 }
 
-interface FocusViewSectionProps {
-  results: Partial<Record<SetupStepId, SetupCheckResult>>;
-  onResult: (result: SetupCheckResult) => void;
-}
-
-function FocusViewSection({ results, onResult }: FocusViewSectionProps) {
+function FocusViewSection({ row }: { row: DataSource }) {
   const { t } = useI18n();
+  const me = useMe();
   const settings = useAppSettings();
-  const ds = useDataSource(DATABRICKS_BILLING_SOURCE_ID);
-  const updateDs = useUpdateDataSource();
-  const check = useRunSetupCheck();
+  const setupDs = useSetupDataSource();
+  const runJob = useRunDataSourceJob();
 
   const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
-  const remoteTier = ds.data?.tier ?? FOCUS_VIEW_SCHEMA_DEFAULT;
-  const remoteTable = ds.data?.tableName ?? FOCUS_VIEW_TABLE_DEFAULT;
   const remoteAccountPrices =
-    (ds.data?.config.accountPricesTable as string | undefined) ?? ACCOUNT_PRICES_DEFAULT;
+    (row.config.accountPricesTable as string | undefined) ?? ACCOUNT_PRICES_DEFAULT;
+  const remoteCron =
+    (row.config.cronExpression as string | undefined) ?? FOCUS_REFRESH_CRON_DEFAULT;
+  const remoteTz = (row.config.timezoneId as string | undefined) ?? FOCUS_REFRESH_TIMEZONE_DEFAULT;
 
-  const [tier, setTier] = useState(remoteTier);
-  const [tableName, setTableName] = useState(remoteTable);
+  const [tableName, setTableName] = useState(tableLeafName(row.tableName));
   const [accountPrices, setAccountPrices] = useState(remoteAccountPrices);
+  const [cron, setCron] = useState(remoteCron);
+  const [timezone, setTimezone] = useState(remoteTz);
+  const [result, setResult] = useState<DataSourceSetupResult | null>(null);
+  const jobId = result?.jobId ?? row.jobId;
+  const pipelineId = result?.pipelineId ?? row.pipelineId;
+  const workspaceUrl = me.data?.workspaceUrl ?? null;
+  const hasExistingSchedule = row.jobId !== null || result?.jobId != null;
 
-  useEffect(() => setTier(remoteTier), [remoteTier]);
-  useEffect(() => setTableName(remoteTable), [remoteTable]);
+  useEffect(() => setTableName(tableLeafName(row.tableName)), [row.tableName]);
   useEffect(() => setAccountPrices(remoteAccountPrices), [remoteAccountPrices]);
+  useEffect(() => setCron(remoteCron), [remoteCron]);
+  useEffect(() => setTimezone(remoteTz), [remoteTz]);
 
-  const fqn = remoteCatalog ? `${remoteCatalog}.${tier}.${tableName}` : `${tier}.${tableName}`;
-  const dirty =
-    tier !== remoteTier || tableName !== remoteTable || accountPrices !== remoteAccountPrices;
-  const busy = check.isPending || updateDs.isPending;
+  const fqn = remoteCatalog
+    ? unquotedFqn(remoteCatalog, FOCUS_VIEW_SCHEMA_DEFAULT, tableName)
+    : `${FOCUS_VIEW_SCHEMA_DEFAULT}.${tableName}`;
 
-  const onSave = async () => {
-    if (!dirty) return;
-    await updateDs.mutateAsync({
-      id: DATABRICKS_BILLING_SOURCE_ID,
+  const onSetup = async () => {
+    const r = await setupDs.mutateAsync({
+      id: row.id,
       body: {
-        tier,
         tableName,
-        config: { ...(ds.data?.config ?? {}), accountPricesTable: accountPrices },
+        accountPricesTable: accountPrices,
+        cronExpression: cron,
+        timezoneId: timezone,
       },
     });
+    setResult(r);
   };
 
-  const onCreateView = async () => {
-    if (dirty) await onSave();
-    const result = await check.mutateAsync({
-      step: 'focusView',
-      body: { catalog: remoteCatalog, tier, tableName, accountPricesTable: accountPrices },
-    });
-    onResult(result);
+  const onRunJob = async () => {
+    await runJob.mutateAsync(row.id);
   };
 
-  return (
-    <Section title={t('dataSources.systemTables.step3')}>
-      <p className="text-muted-foreground mb-3 text-xs">
-        {t('dataSources.systemTables.focusViewDesc')}
-      </p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <label className="grid gap-1 text-xs">
-          <span className="text-muted-foreground">{t('dataSources.systemTables.catalog')}</span>
-          <Input value={remoteCatalog} disabled placeholder="main" />
-        </label>
-        <label className="grid gap-1 text-xs">
-          <span className="text-muted-foreground">{t('dataSources.systemTables.tier')}</span>
-          <Input
-            value={tier}
-            onChange={(e) => setTier(e.target.value)}
-            placeholder={FOCUS_VIEW_SCHEMA_DEFAULT}
-          />
-        </label>
-        <label className="grid gap-1 text-xs sm:col-span-2">
-          <span className="text-muted-foreground">{t('dataSources.systemTables.tableName')}</span>
-          <Input
-            value={tableName}
-            onChange={(e) => setTableName(e.target.value)}
-            placeholder={FOCUS_VIEW_TABLE_DEFAULT}
-          />
-        </label>
-        <label className="grid gap-1 text-xs sm:col-span-2">
-          <span className="text-muted-foreground">
-            {t('dataSources.systemTables.accountPrices')}
-          </span>
-          <Input
-            value={accountPrices}
-            onChange={(e) => setAccountPrices(e.target.value)}
-            placeholder={ACCOUNT_PRICES_DEFAULT}
-          />
-        </label>
-      </div>
-      <p className="text-muted-foreground mt-2 text-xs">
-        {t('dataSources.systemTables.focusViewTarget')}: <code>{fqn}</code>
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button type="button" disabled={busy} onClick={onCreateView}>
-          {busy ? <Spinner /> : null}
-          {t('dataSources.systemTables.createView')}
-        </Button>
-        {dirty ? (
-          <Button type="button" variant="outline" disabled={busy} onClick={onSave}>
-            {t('dataSources.systemTables.saveTarget')}
-          </Button>
-        ) : null}
-      </div>
-      {!remoteCatalog ? (
-        <Alert className="mt-3">
-          <Info />
-          <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
-        </Alert>
-      ) : null}
-      <StepResult result={results.focusView ?? null} />
-    </Section>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">{title}</CardTitle>
+        <CardTitle className="text-sm">{t('dataSources.systemTables.title')}</CardTitle>
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <label className="grid gap-1 text-xs">
+            <span className="text-muted-foreground">{t('dataSources.systemTables.catalog')}</span>
+            <Input value={remoteCatalog} disabled placeholder="main" />
+          </label>
+          <label className="grid gap-1 text-xs">
+            <span className="text-muted-foreground">{t('dataSources.systemTables.schema')}</span>
+            <Input value={FOCUS_VIEW_SCHEMA_DEFAULT} disabled />
+          </label>
+          <label className="grid gap-1 text-xs sm:col-span-2">
+            <span className="text-muted-foreground">{t('dataSources.systemTables.tableName')}</span>
+            <Input value={tableName} onChange={(e) => setTableName(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs sm:col-span-2">
+            <span className="text-muted-foreground">
+              {t('dataSources.systemTables.accountPrices')}
+            </span>
+            <Input
+              value={accountPrices}
+              onChange={(e) => setAccountPrices(e.target.value)}
+              placeholder={ACCOUNT_PRICES_DEFAULT}
+            />
+          </label>
+          <label className="grid gap-1 text-xs">
+            <span className="text-muted-foreground">{t('dataSources.systemTables.cron')}</span>
+            <Input
+              value={cron}
+              onChange={(e) => setCron(e.target.value)}
+              placeholder={FOCUS_REFRESH_CRON_DEFAULT}
+            />
+          </label>
+          <label className="grid gap-1 text-xs">
+            <span className="text-muted-foreground">{t('dataSources.systemTables.timezone')}</span>
+            <Input
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              placeholder={FOCUS_REFRESH_TIMEZONE_DEFAULT}
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            disabled={setupDs.isPending || !remoteCatalog}
+            onClick={onSetup}
+            className="bg-(--success) text-(--background) hover:bg-(--success)/90"
+          >
+            {setupDs.isPending ? <Spinner /> : null}
+            {t(
+              hasExistingSchedule
+                ? 'dataSources.systemTables.updateSchedule'
+                : 'dataSources.systemTables.setupAndSchedule',
+            )}
+          </Button>
+          {jobId !== null ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={runJob.isPending}
+              onClick={onRunJob}
+            >
+              {runJob.isPending ? <Spinner /> : null}
+              {t('dataSources.systemTables.runJob')}
+            </Button>
+          ) : null}
+        </div>
+        <DatabricksResourceLinks
+          workspaceUrl={workspaceUrl}
+          jobId={jobId}
+          pipelineId={pipelineId}
+          tableFqn={jobId !== null && remoteCatalog ? fqn : null}
+        />
+        {!remoteCatalog ? (
+          <Alert className="mt-3">
+            <Info />
+            <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
+          </Alert>
+        ) : null}
+        {result ? (
+          <Alert className="mt-3">
+            <Info />
+            <AlertDescription>
+              {t(
+                hasExistingSchedule
+                  ? 'dataSources.systemTables.updateOk'
+                  : 'dataSources.systemTables.setupOk',
+                {
+                  fqn: result.fqn,
+                  jobId: String(result.jobId),
+                },
+              )}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {runJob.data ? (
+          <Alert className="mt-3">
+            <Info />
+            <AlertDescription>
+              {t('dataSources.systemTables.runOk', {
+                jobId: String(runJob.data.jobId),
+                runId: String(runJob.data.runId),
+              })}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {setupDs.error ? (
+          <Alert className="mt-3" variant="destructive">
+            <Info />
+            <AlertDescription>{(setupDs.error as Error).message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {runJob.error ? (
+          <Alert className="mt-3" variant="destructive">
+            <Info />
+            <AlertDescription>{(runJob.error as Error).message}</AlertDescription>
+          </Alert>
+        ) : null}
+      </CardContent>
     </Card>
+  );
+}
+
+function DatabricksResourceLinks({
+  workspaceUrl,
+  jobId,
+  pipelineId,
+  tableFqn,
+}: {
+  workspaceUrl: string | null;
+  jobId: number | null;
+  pipelineId: string | null;
+  tableFqn: string | null;
+}) {
+  const { t } = useI18n();
+  if (jobId === null && !pipelineId && !tableFqn) return null;
+
+  return (
+    <div className="border-border bg-background/35 mt-4 rounded-md border p-3">
+      <div className="text-muted-foreground mb-2 text-xs font-medium">
+        {t('dataSources.systemTables.resourcesTitle')}
+      </div>
+      <div className="grid grid-cols-1 gap-2">
+        {jobId !== null ? (
+          <ResourceLink
+            label={t('dataSources.systemTables.jobResource')}
+            id={String(jobId)}
+            href={workspaceUrl ? `${workspaceUrl}/jobs/${jobId}` : null}
+          />
+        ) : null}
+        {pipelineId ? (
+          <ResourceLink
+            label={t('dataSources.systemTables.pipelineResource')}
+            id={pipelineId}
+            href={workspaceUrl ? `${workspaceUrl}/pipelines/${pipelineId}` : null}
+          />
+        ) : null}
+        {tableFqn ? (
+          <ResourceLink
+            label={t('dataSources.systemTables.tableResource')}
+            id={tableFqn}
+            href={workspaceUrl ? catalogTableUrl(workspaceUrl, tableFqn) : null}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ResourceLink({ href, label, id }: { href: string | null; label: string; id: string }) {
+  const content = (
+    <>
+      <span className="text-muted-foreground shrink-0 text-xs font-medium">{label}</span>
+      <span className="text-foreground min-w-0 break-all font-mono text-xs" title={id}>
+        {id}
+      </span>
+      {href ? <ExternalLink className="text-primary size-3.5 shrink-0" /> : null}
+    </>
+  );
+
+  const className =
+    'border-border bg-card/70 hover:border-primary focus-visible:border-primary flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-left transition-colors';
+
+  if (!href) {
+    return <div className={className}>{content}</div>;
+  }
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener" className={className}>
+      {content}
+    </a>
   );
 }
