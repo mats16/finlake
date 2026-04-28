@@ -68,9 +68,10 @@ export function settingsRouter(db: DatabaseClient, env: Env): Router {
       const settings: Record<string, string> = {};
       for (const row of rows) settings[row.key] = row.value;
 
-      const catalogChanged =
-        newCatalog !== undefined && newCatalog.length > 0 && newCatalog !== previousCatalog;
-      if (!catalogChanged) {
+      const hasCatalog = newCatalog !== undefined && newCatalog.length > 0;
+      const shouldProvision = hasCatalog && parsed.data.provision !== undefined;
+      const catalogChanged = hasCatalog && newCatalog !== previousCatalog;
+      if (!catalogChanged && !shouldProvision) {
         res.json({ settings });
         return;
       }

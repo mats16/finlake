@@ -147,7 +147,6 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         env,
         db,
         req.user?.accessToken,
-        req.user?.email,
         idParse.data,
         parsed.data,
       );

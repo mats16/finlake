@@ -7,7 +7,7 @@ export interface PipelineScheduleParams {
   jobName: string;
   /** DLT SQL body — must use `CREATE OR REFRESH` syntax (no catalog/schema). */
   pipelineSql: string;
-  /** Absolute workspace path (e.g. `/Workspace/Users/foo/.lakecost/refresh-1.sql`). */
+  /** Absolute workspace path (e.g. `/Workspace/Shared/lakecost/data_sources/databricks/focus-pipeline.sql`). */
   workspacePath: string;
   /** Unity Catalog target catalog. */
   catalog: string;
@@ -76,8 +76,15 @@ async function upsertPipeline(
   };
 
   if (existingPipelineId) {
-    await wc.pipelines.update({ pipeline_id: existingPipelineId, ...settings });
-    return existingPipelineId;
+    try {
+      await wc.pipelines.update({ pipeline_id: existingPipelineId, ...settings });
+      return existingPipelineId;
+    } catch (err) {
+      if (!isManagePermissionDenied(err)) throw err;
+      // The saved pipeline may be owned by a different principal. Create a
+      // replacement owned by the current OBO user.
+      wc.pipelines.delete({ pipeline_id: existingPipelineId }).catch(() => {});
+    }
   }
   const created = await wc.pipelines.create({ ...settings, allow_duplicate_names: true });
   if (!created.pipeline_id) {
@@ -117,13 +124,20 @@ export async function upsertPipelineSchedule(
   };
 
   if (existing.jobId !== null) {
-    await wc.jobs.reset({ job_id: existing.jobId, new_settings: jobSettings });
-    return {
-      jobId: existing.jobId,
-      pipelineId,
-      workspacePath: params.workspacePath,
-      createdJob: false,
-    };
+    try {
+      await wc.jobs.reset({ job_id: existing.jobId, new_settings: jobSettings });
+      return {
+        jobId: existing.jobId,
+        pipelineId,
+        workspacePath: params.workspacePath,
+        createdJob: false,
+      };
+    } catch (err) {
+      if (!isManagePermissionDenied(err)) throw err;
+      // The saved job may be owned by a different principal. Create a new
+      // user-owned job and persist its id in the data source row.
+      wc.jobs.delete({ job_id: existing.jobId }).catch(() => {});
+    }
   }
   const created = await wc.jobs.create(jobSettings);
   if (typeof created.job_id !== 'number') {
@@ -135,6 +149,11 @@ export async function upsertPipelineSchedule(
     workspacePath: params.workspacePath,
     createdJob: true,
   };
+}
+
+function isManagePermissionDenied(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /PERMISSION_DENIED/i.test(message) && /Manage permissions/i.test(message);
 }
 
 /**

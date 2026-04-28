@@ -54,9 +54,8 @@ function readFocusConfig(config: Record<string, unknown>): FocusConfig {
   };
 }
 
-function workspacePathFor(userEmail: string, dataSourceId: string): string {
-  // Files live under the calling user's home so OBO writes are always allowed.
-  return `/Workspace/Users/${userEmail}/.lakecost/focus-pipeline-${dataSourceId}.sql`;
+function workspacePathFor(appName: string, dataSourceId: string): string {
+  return `/Workspace/Shared/${appName}/data_sources/${dataSourceId}/focus-pipeline.sql`;
 }
 
 /**
@@ -103,7 +102,6 @@ export async function setupFocusDataSource(
   env: Env,
   db: DatabaseClient,
   userToken: string | undefined,
-  userEmail: string | undefined,
   dataSourceId: string,
   body: DataSourceSetupBody,
 ): Promise<DataSourceSetupResult> {
@@ -113,16 +111,12 @@ export async function setupFocusDataSource(
       401,
     );
   }
-  if (!userEmail) {
-    throw new DataSourceSetupError(
-      'Missing user email from OBO headers — needed to host the pipeline SQL file under /Workspace/Users/<email>.',
-      401,
-    );
-  }
   if (!env.DATABRICKS_HOST) {
     throw new DataSourceSetupError('DATABRICKS_HOST must be configured.', 400);
   }
-
+  if (!env.DATABRICKS_APP_NAME) {
+    throw new DataSourceSetupError('DATABRICKS_APP_NAME must be configured.', 400);
+  }
   const [source, catalogSetting] = await Promise.all([
     db.repos.dataSources.get(dataSourceId),
     db.repos.appSettings.get(CATALOG_SETTING_KEY),
@@ -160,7 +154,7 @@ export async function setupFocusDataSource(
   let pipelineSql: string;
   let fqn: string;
   try {
-    pipelineSql = buildFocusPipelineSql({ table: tableName, accountPricesTable });
+    pipelineSql = buildFocusPipelineSql({ catalog, table: tableName, accountPricesTable });
     fqn = focusViewFqn(target);
   } catch (err) {
     throw new DataSourceSetupError(`Invalid view target: ${(err as Error).message}`, 400);
@@ -169,7 +163,7 @@ export async function setupFocusDataSource(
   const wc = buildUserWorkspaceClient(env, userToken);
   if (!wc) throw new DataSourceSetupError('Failed to build Databricks workspace client', 500);
 
-  const workspacePath = existing.workspacePath ?? workspacePathFor(userEmail, dataSourceId);
+  const workspacePath = workspacePathFor(env.DATABRICKS_APP_NAME, dataSourceId);
 
   const labelBase = resourceLabelBase(source);
   const scheduleParams: PipelineScheduleParams = {

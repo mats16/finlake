@@ -10,17 +10,29 @@ import {
   CardHeader,
   CardTitle,
   Field,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Spinner,
 } from '@databricks/appkit-ui/react';
 import { CheckCircle2, AlertCircle, Info } from 'lucide-react';
-import { CATALOG_SETTING_KEY, MEDALLION_SCHEMAS, type ProvisionResult } from '@lakecost/shared';
+import {
+  CATALOG_SETTING_KEY,
+  IDENT_RE,
+  MEDALLION_SCHEMAS,
+  schemaGrantPrivileges,
+  type ProvisionResult,
+} from '@lakecost/shared';
 import { useI18n } from '../../i18n';
 import { useAppSettings, useCatalogs, useUpdateAppSettings } from '../../api/hooks';
-import { CatalogCombobox, type CatalogSelection } from '../../components/CatalogCombobox';
+import { CatalogCombobox } from '../../components/CatalogCombobox';
 
+type CatalogMode = 'existing' | 'create';
 type Severity = 'success' | 'warning' | 'error';
 
 const SEVERITY_VARIANT: Record<Severity, 'default' | 'destructive'> = {
@@ -42,9 +54,7 @@ const SEVERITY_TITLE_KEY: Record<Severity, string> = {
 };
 
 function messageOf(err: unknown): string | null {
-  return err && typeof err === 'object'
-    ? ((err as { message?: string }).message ?? null)
-    : null;
+  return err && typeof err === 'object' ? ((err as { message?: string }).message ?? null) : null;
 }
 
 export function Admin() {
@@ -54,31 +64,46 @@ export function Admin() {
   const updateSettings = useUpdateAppSettings();
 
   const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
-  const [selection, setSelection] = useState<CatalogSelection>({
-    name: remoteCatalog,
-    create: false,
-  });
+  const [mode, setMode] = useState<CatalogMode>('create');
+  const [selectedCatalog, setSelectedCatalog] = useState(remoteCatalog);
+  const [newCatalogName, setNewCatalogName] = useState('');
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   useEffect(() => {
-    setSelection({ name: remoteCatalog, create: false });
+    setSelectedCatalog(remoteCatalog);
+    if (remoteCatalog) setMode('existing');
   }, [remoteCatalog]);
+
+  const hasConfiguredCatalog = remoteCatalog.length > 0;
+  const catalogName = hasConfiguredCatalog
+    ? remoteCatalog
+    : mode === 'existing'
+      ? selectedCatalog.trim()
+      : newCatalogName.trim();
+  const isCreate = !hasConfiguredCatalog && mode === 'create';
+  const dirty = !hasConfiguredCatalog && catalogName !== remoteCatalog;
+  const validName =
+    catalogName.length > 0 &&
+    (hasConfiguredCatalog || mode === 'existing' || IDENT_RE.test(catalogName));
+  const saving = updateSettings.isPending;
+  const submitDisabled = hasConfiguredCatalog
+    ? saving || !validName
+    : !dirty || saving || !validName;
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const name = selection.name.trim();
-    if (!name) return;
+    if (!validName) return;
     updateSettings.mutate(
       {
-        settings: { [CATALOG_SETTING_KEY]: name },
-        provision: { createIfMissing: selection.create },
+        settings: { [CATALOG_SETTING_KEY]: catalogName },
+        provision: { createIfMissing: isCreate },
       },
-      { onSuccess: () => setSavedAt(Date.now()) },
+      {
+        onSuccess: () => setSavedAt(Date.now()),
+      },
     );
   };
 
-  const dirty = selection.name.trim() !== remoteCatalog;
-  const saving = updateSettings.isPending;
   const errorMessage = messageOf(updateSettings.error);
   const catalogsError = messageOf(catalogs.error);
 
@@ -97,23 +122,50 @@ export function Admin() {
         </CardHeader>
         <CardContent>
           <FieldGroup>
+            {!hasConfiguredCatalog ? (
+              <Field>
+                <FieldLabel>{t('settings.catalogTypeLabel')}</FieldLabel>
+                <Select value={mode} onValueChange={(v: string) => setMode(v as CatalogMode)}>
+                  <SelectTrigger className="max-w-md">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="create">{t('settings.catalogModeCreate')}</SelectItem>
+                    <SelectItem value="existing">{t('settings.catalogModeExisting')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : null}
+
             <Field>
-              <FieldLabel htmlFor="catalog-name">{t('settings.mainCatalogHeading')}</FieldLabel>
-              <CatalogCombobox
-                value={selection.name}
-                onChange={setSelection}
-                options={catalogs.data?.catalogs ?? []}
-                loading={catalogs.isLoading}
-                disabled={settings.isLoading || saving}
-                placeholder={t('settings.catalogSelectPlaceholder')}
-                searchPlaceholder={t('settings.catalogSearchPlaceholder')}
-                emptyText={t('settings.catalogEmpty')}
-                createLabel={(name) => t('settings.catalogCreateOption', { name })}
-              />
-              <FieldDescription>{t('settings.mainCatalogDesc')}</FieldDescription>
+              <FieldLabel>{t('settings.catalogNameLabel')}</FieldLabel>
+              {hasConfiguredCatalog ? (
+                <Input className="max-w-md" value={remoteCatalog} disabled readOnly />
+              ) : mode === 'existing' ? (
+                <CatalogCombobox
+                  value={selectedCatalog}
+                  onChange={(sel) => setSelectedCatalog(sel.name)}
+                  options={catalogs.data?.catalogs ?? []}
+                  loading={catalogs.isLoading}
+                  disabled={settings.isLoading || saving}
+                  placeholder={t('settings.catalogSelectPlaceholder')}
+                  searchPlaceholder={t('settings.catalogSearchPlaceholder')}
+                  emptyText={t('settings.catalogEmpty')}
+                  allowCreate={false}
+                />
+              ) : (
+                <Input
+                  id="new-catalog-name"
+                  className="max-w-md"
+                  value={newCatalogName}
+                  onChange={(e) => setNewCatalogName(e.target.value)}
+                  placeholder={t('settings.catalogCreatePlaceholder')}
+                  disabled={settings.isLoading || saving}
+                />
+              )}
             </Field>
 
-            {catalogsError ? (
+            {!hasConfiguredCatalog && catalogsError ? (
               <Alert variant="destructive">
                 <AlertCircle />
                 <AlertTitle>{t('settings.catalogLoadFailed')}</AlertTitle>
@@ -122,12 +174,18 @@ export function Admin() {
             ) : null}
 
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={!dirty || saving || !selection.name.trim()}>
+              <Button
+                type="submit"
+                disabled={submitDisabled}
+                className="bg-(--success) text-(--background) hover:bg-(--success)/90 disabled:bg-muted disabled:text-muted-foreground"
+              >
                 {saving ? (
                   <>
                     <Spinner /> {t('common.saving')}
                   </>
-                ) : selection.create ? (
+                ) : hasConfiguredCatalog ? (
+                  t('settings.fixPermission')
+                ) : isCreate ? (
                   t('settings.saveAndCreate')
                 ) : (
                   t('settings.save')
@@ -236,7 +294,7 @@ function renderRemediationSql(catalog: string, sp: string): string {
   const lines: string[] = [];
   lines.push(`GRANT USE CATALOG ON CATALOG \`${catalog}\` TO \`${sp}\`;`);
   for (const s of MEDALLION_SCHEMAS) {
-    lines.push(`GRANT USE SCHEMA, SELECT ON SCHEMA \`${catalog}\`.\`${s}\` TO \`${sp}\`;`);
+    lines.push(`GRANT ${schemaGrantPrivileges(s)} ON SCHEMA \`${catalog}\`.\`${s}\` TO \`${sp}\`;`);
   }
   return lines.join('\n');
 }

@@ -3,7 +3,8 @@
  * Source: https://github.com/databricks-solutions/cloud-infra-costs/blob/main/aws/focus/focus_query.sql
  *
  * The FOCUS table is exposed as a Unity Catalog Materialized View at
- * `<catalog>.silver.<table>` (the schema is fixed at `silver`). A periodic
+ * `<catalog>.silver.<table>` (the schema is fixed at `silver`). The same
+ * pipeline also publishes curated rollups under `<catalog>.gold`. A periodic
  * refresh job is created via the Jobs API and stamped onto the data source
  * row's `job_id` column. Identifier parts and the `accountPricesTable` (1- to
  * 3-part identifier) are validated and inlined directly into the SQL — no
@@ -12,6 +13,9 @@
 
 export const FOCUS_VIEW_SCHEMA_DEFAULT = 'silver';
 export const FOCUS_VIEW_TABLE_DEFAULT = 'databricks_billing';
+export const DATABRICKS_BILLING_GOLD_SCHEMA = 'gold';
+export const DATABRICKS_BILLING_DAILY_TABLE = 'databricks_billing_daily';
+export const DATABRICKS_BILLING_MONTHLY_TABLE = 'databricks_billing_monthly';
 export const ACCOUNT_PRICES_DEFAULT = 'system.billing.list_prices';
 
 /**
@@ -22,6 +26,13 @@ export const ACCOUNT_PRICES_DEFAULT = 'system.billing.list_prices';
  */
 export const MEDALLION_SCHEMAS = ['bronze', 'silver', 'gold'] as const;
 export type MedallionSchema = (typeof MEDALLION_SCHEMAS)[number];
+
+/** SQL privilege list needed by the App SP for each medallion schema. */
+export function schemaGrantPrivileges(schema: MedallionSchema): string {
+  return schema === 'silver' || schema === 'gold'
+    ? 'USE SCHEMA, SELECT, CREATE TABLE'
+    : 'USE SCHEMA, SELECT';
+}
 
 export interface FocusViewTarget {
   catalog: string;
@@ -537,22 +548,31 @@ FROM system.billing.usage u
  * The output contains multiple statements separated by semicolons:
  *   7 × `CREATE TEMPORARY VIEW` (one per JOIN source)
  *   1 × `CREATE OR REFRESH MATERIALIZED VIEW` (final FOCUS output)
+ *   2 × `CREATE OR REFRESH MATERIALIZED VIEW` (gold daily/monthly rollups)
  *
  * Each temporary view appears as its own node in the pipeline DAG, making the
  * data flow visible in the Databricks UI and allowing the DLT engine to cache
  * intermediate results.
  *
  * The pipeline owns the catalog/schema (via Pipeline.catalog + Pipeline.schema),
- * so only the unqualified table name is used in the final MV declaration.
+ * so only the unqualified table name is used in the silver MV declaration.
+ * Gold rollups are explicitly qualified to publish into `<catalog>.gold`.
  */
 export function buildFocusPipelineSql(opts: {
+  catalog: string;
   table: string;
   accountPricesTable?: string;
 }): string {
+  if (!IDENT_RE.test(opts.catalog)) {
+    throw new Error(`Invalid catalog identifier "${opts.catalog}"`);
+  }
   if (!IDENT_RE.test(opts.table)) {
     throw new Error(`Invalid table identifier "${opts.table}"`);
   }
   const accountPrices = resolveAccountPrices(opts.accountPricesTable);
+  const focusTable = quoteIdent(opts.table);
+  const dailyTable = `${quoteIdent(opts.catalog)}.${quoteIdent(DATABRICKS_BILLING_GOLD_SCHEMA)}.${quoteIdent(DATABRICKS_BILLING_DAILY_TABLE)}`;
+  const monthlyTable = `${quoteIdent(opts.catalog)}.${quoteIdent(DATABRICKS_BILLING_GOLD_SCHEMA)}.${quoteIdent(DATABRICKS_BILLING_MONTHLY_TABLE)}`;
 
   const statements = [
     DLT_TEMP_PIPELINE_NAMES,
@@ -562,10 +582,91 @@ export function buildFocusPipelineSql(opts: {
     DLT_TEMP_LIST_PRICES,
     DLT_TEMP_ACCOUNT_PRICES.replaceAll('__ACCOUNT_PRICES__', accountPrices),
     DLT_TEMP_USAGE_WITH_PRICING,
-    `CREATE OR REFRESH MATERIALIZED VIEW \`${opts.table}\` AS\n${FOCUS_SELECT_PROJECTION}`,
+    `CREATE OR REFRESH MATERIALIZED VIEW ${focusTable} AS\n${FOCUS_SELECT_PROJECTION}`,
+    buildBillingRollupSql({
+      table: dailyTable,
+      source: focusTable,
+      grain: 'daily',
+      dateExpression: 'CAST(ChargePeriodEnd AS DATE)',
+    }),
+    buildBillingRollupSql({
+      table: monthlyTable,
+      source: focusTable,
+      grain: 'monthly',
+      dateExpression: "CAST(DATE_TRUNC('MONTH', CAST(ChargePeriodEnd AS DATE)) AS DATE)",
+    }),
   ];
 
   return statements.join(';\n\n') + ';\n';
+}
+
+function buildBillingRollupSql({
+  table,
+  source,
+  grain,
+  dateExpression,
+}: {
+  table: string;
+  source: string;
+  grain: 'daily' | 'monthly';
+  dateExpression: string;
+}): string {
+  return /* sql */ `\
+CREATE OR REFRESH MATERIALIZED VIEW ${table}
+COMMENT 'Databricks FOCUS ${grain} billing rollup managed by LakeCost'
+AS
+SELECT
+  ${dateExpression} AS ChargeDate,
+  BillingAccountId AS billing_account_id,
+  BillingAccountName AS billing_account_name,
+  BillingCurrency AS billing_currency,
+  SubAccountId AS workspace_id,
+  SubAccountName AS workspace_name,
+  SubAccountType AS workspace_type,
+  ProviderName AS provider_name,
+  PublisherName AS publisher_name,
+  ServiceProviderName AS service_provider_name,
+  ServiceCategory AS service_category,
+  ServiceSubcategory AS service_subcategory,
+  ServiceName AS service_name,
+  ResourceId AS resource_id,
+  ResourceName AS resource_name,
+  ResourceType AS resource_type,
+  SkuId AS sku_id,
+  SkuMeter AS sku_meter,
+  ChargeDescription AS charge_description,
+  PricingUnit AS pricing_unit,
+  ConsumedUnit AS consumed_unit,
+  CAST(SUM(COALESCE(ConsumedQuantity, 0)) AS DECIMAL(30, 15)) AS consumed_quantity,
+  CAST(SUM(COALESCE(ListCost, 0)) AS DECIMAL(30, 15)) AS list_cost,
+  CAST(SUM(COALESCE(BilledCost, 0)) AS DECIMAL(30, 15)) AS billed_cost,
+  CAST(SUM(COALESCE(ContractedCost, 0)) AS DECIMAL(30, 15)) AS contracted_cost,
+  CAST(SUM(COALESCE(EffectiveCost, 0)) AS DECIMAL(30, 15)) AS effective_cost,
+  MIN(ChargePeriodStart) AS charge_period_start,
+  MAX(ChargePeriodEnd) AS charge_period_end
+FROM ${source}
+GROUP BY
+  ${dateExpression},
+  BillingAccountId,
+  BillingAccountName,
+  BillingCurrency,
+  SubAccountId,
+  SubAccountName,
+  SubAccountType,
+  ProviderName,
+  PublisherName,
+  ServiceProviderName,
+  ServiceCategory,
+  ServiceSubcategory,
+  ServiceName,
+  ResourceId,
+  ResourceName,
+  ResourceType,
+  SkuId,
+  SkuMeter,
+  ChargeDescription,
+  PricingUnit,
+  ConsumedUnit`;
 }
 
 /** `CREATE SCHEMA IF NOT EXISTS \`catalog\`.\`schema\`` — prerequisite for the view. */

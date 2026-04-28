@@ -28,6 +28,8 @@ export interface CatalogComboboxProps {
   searchPlaceholder?: string;
   emptyText?: string;
   createLabel?: (name: string) => string;
+  /** When false the "Create …" option is hidden. Defaults to true. */
+  allowCreate?: boolean;
 }
 
 export function CatalogCombobox({
@@ -40,13 +42,14 @@ export function CatalogCombobox({
   searchPlaceholder = 'Search catalogs…',
   emptyText = 'No catalogs found.',
   createLabel = (name) => `Create "${name}"`,
+  allowCreate = true,
 }: CatalogComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
   const trimmed = query.trim();
   const exactMatch = options.some((o) => o.name === trimmed);
-  const showCreate = trimmed.length > 0 && !exactMatch && IDENT_RE.test(trimmed);
+  const showCreate = allowCreate && trimmed.length > 0 && !exactMatch && IDENT_RE.test(trimmed);
 
   const handleSelect = (name: string, create: boolean) => {
     onChange({ name, create });
@@ -80,11 +83,7 @@ export function CatalogCombobox({
       </PopoverTrigger>
       <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
         <Command shouldFilter={true}>
-          <CommandInput
-            value={query}
-            onValueChange={setQuery}
-            placeholder={searchPlaceholder}
-          />
+          <CommandInput value={query} onValueChange={setQuery} placeholder={searchPlaceholder} />
           <CommandList>
             <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
@@ -95,10 +94,7 @@ export function CatalogCombobox({
                   onSelect={() => handleSelect(opt.name, false)}
                 >
                   <Check
-                    className={cn(
-                      'mr-2 size-4',
-                      value === opt.name ? 'opacity-100' : 'opacity-0',
-                    )}
+                    className={cn('mr-2 size-4', value === opt.name ? 'opacity-100' : 'opacity-0')}
                   />
                   <span className="truncate">{opt.name}</span>
                   {opt.catalogType ? (

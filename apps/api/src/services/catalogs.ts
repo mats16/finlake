@@ -1,6 +1,7 @@
 import {
   MEDALLION_SCHEMAS,
   quoteIdent,
+  schemaGrantPrivileges,
   type CatalogSummary,
   type Env,
   type ProvisionResult,
@@ -83,6 +84,10 @@ function isPermissionDenied(err: unknown): boolean {
   return /PERMISSION_DENIED|not authorized/i.test(message);
 }
 
+function quotePrincipal(name: string): string {
+  return `\`${name.replace(/`/g, '``')}\``;
+}
+
 interface ProvisionOptions {
   createIfMissing?: boolean;
 }
@@ -90,8 +95,8 @@ interface ProvisionOptions {
 /**
  * Provisions the medallion layout (`bronze` / `silver` / `gold`) under
  * `catalog`, optionally creating the catalog itself, and grants the App
- * Service Principal the minimum read access (USE CATALOG / USE SCHEMA /
- * SELECT) it needs to read aggregates from the materialized view.
+ * Service Principal the access it needs to run the FOCUS pipeline:
+ * USE/SELECT on medallion schemas and CREATE TABLE on silver/gold outputs.
  *
  * All DDL/GRANT statements are run **as the calling user** (OBO) so the SP
  * does not need any prior privileges. Schema creates and GRANTs are
@@ -157,12 +162,12 @@ export async function provisionCatalog(
     gold: 'skipped:sp_id_not_configured',
   };
   if (sp.length > 0) {
-    const spIdent = quoteIdent(sp);
+    const spIdent = quotePrincipal(sp);
     const grantStmts: Array<{ key: keyof ProvisionResult['grants']; sql: string }> = [
       { key: 'catalog', sql: `GRANT USE CATALOG ON CATALOG ${catalogIdent} TO ${spIdent}` },
       ...schemaIdents.map(({ name, ident }) => ({
         key: name,
-        sql: `GRANT USE SCHEMA, SELECT ON SCHEMA ${catalogIdent}.${ident} TO ${spIdent}`,
+        sql: `GRANT ${schemaGrantPrivileges(name)} ON SCHEMA ${catalogIdent}.${ident} TO ${spIdent}`,
       })),
     ];
     const results = await Promise.all(grantStmts.map((g) => grant(executor, g.sql, warnings)));
@@ -170,9 +175,7 @@ export async function provisionCatalog(
       grants[g.key] = results[i] as ProvisionResult['grants'][keyof ProvisionResult['grants']];
     });
   } else {
-    warnings.push(
-      'DATABRICKS_CLIENT_ID is not set — App Service Principal grants were skipped.',
-    );
+    warnings.push('DATABRICKS_CLIENT_ID is not set — App Service Principal grants were skipped.');
   }
 
   return {
@@ -187,8 +190,9 @@ export async function provisionCatalog(
 
 async function catalogExists(executor: StatementExecutor, catalog: string): Promise<boolean> {
   try {
+    const escaped = catalog.replace(/'/g, "''").replace(/[%_]/g, '\\$&');
     const rows = await executor.run(
-      `SHOW CATALOGS LIKE '${catalog.replace(/'/g, "''")}'`,
+      `SHOW CATALOGS LIKE '${escaped}' ESCAPE '\\\\'`,
       [],
       z.object({ catalog: z.string().optional() }),
     );
