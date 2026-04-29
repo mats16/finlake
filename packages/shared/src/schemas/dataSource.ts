@@ -149,6 +149,43 @@ export const DataSourceSetupResultSchema = z.object({
 });
 export type DataSourceSetupResult = z.infer<typeof DataSourceSetupResultSchema>;
 
+export const DataSourcePermissionStepSchema = z.object({
+  label: z.string(),
+  status: z.enum(['ok', 'warning', 'error']),
+  message: z.string(),
+});
+export type DataSourcePermissionStep = z.infer<typeof DataSourcePermissionStepSchema>;
+
+export const DataSourceSystemTableGrantsBodySchema = z.object({
+  accountPricesTable: z.string().min(1).max(256).optional(),
+});
+export type DataSourceSystemTableGrantsBody = z.infer<typeof DataSourceSystemTableGrantsBodySchema>;
+
+export const DataSourceSystemTableGrantsResultSchema = z.object({
+  dataSourceId: z.number().int().positive(),
+  servicePrincipalId: z.string().min(1).nullable(),
+  tables: z.array(z.string()),
+  steps: z.array(DataSourcePermissionStepSchema),
+  remediationSql: z.string().nullable(),
+  warnings: z.array(z.string()),
+});
+export type DataSourceSystemTableGrantsResult = z.infer<
+  typeof DataSourceSystemTableGrantsResultSchema
+>;
+
+export const DataSourcePreflightBodySchema = DataSourceSetupBodySchema;
+export type DataSourcePreflightBody = z.infer<typeof DataSourcePreflightBodySchema>;
+
+export const DataSourcePreflightResultSchema = z.object({
+  dataSourceId: z.number().int().positive(),
+  servicePrincipalId: z.string().min(1).nullable(),
+  ok: z.boolean(),
+  steps: z.array(DataSourcePermissionStepSchema),
+  remediationSql: z.string().nullable(),
+  warnings: z.array(z.string()),
+});
+export type DataSourcePreflightResult = z.infer<typeof DataSourcePreflightResultSchema>;
+
 export const DataSourceRunResultSchema = z.object({
   dataSourceId: z.number().int().positive(),
   jobId: z.number().int().positive(),

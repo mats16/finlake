@@ -228,13 +228,10 @@ export function useSetupDataSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: DataSourceSetupBody }) =>
-      apiFetch<DataSourceSetupResult>(
-        dsConfigPath(id, '/setup'),
-        {
-          method: 'POST',
-          body: JSON.stringify(body),
-        },
-      ),
+      apiFetch<DataSourceSetupResult>(dsConfigPath(id, '/setup'), {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['dataSources', data.dataSourceId] });
       qc.invalidateQueries({ queryKey: ['dataSources'] });
@@ -245,13 +242,10 @@ export function useSetupDataSource() {
 export function useRunDataSourceJob() {
   return useMutation({
     mutationFn: (id: number) =>
-      apiFetch<DataSourceRunResult>(
-        dsConfigPath(id, '/run'),
-        {
-          method: 'POST',
-          body: JSON.stringify({}),
-        },
-      ),
+      apiFetch<DataSourceRunResult>(dsConfigPath(id, '/run'), {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
   });
 }
 

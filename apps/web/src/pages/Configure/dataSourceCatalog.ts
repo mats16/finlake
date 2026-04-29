@@ -7,9 +7,7 @@ import {
 
 export { DATA_SOURCE_TEMPLATES, type DataSourceTemplate };
 
-export type TemplateLogo =
-  | { kind: 'databricks' }
-  | { kind: 'abbr'; label: string };
+export type TemplateLogo = { kind: 'databricks' } | { kind: 'abbr'; label: string };
 
 export interface DataSourceTemplateMatchRule {
   providerName: string;

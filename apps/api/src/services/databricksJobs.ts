@@ -19,6 +19,8 @@ export interface PipelineScheduleParams {
   cronExpression: string;
   /** Java timezone id, e.g. `UTC`. */
   timezoneId: string;
+  /** Optional application ID for service-principal-owned pipeline runs. */
+  servicePrincipalId?: string;
 }
 
 export interface UpsertPipelineScheduleResult {
@@ -36,7 +38,7 @@ async function ensureWorkspaceDir(wc: WorkspaceClient, dir: string): Promise<voi
   }
 }
 
-async function uploadPipelineFile(
+export async function uploadPipelineFile(
   wc: WorkspaceClient,
   path: string,
   content: string,
@@ -75,6 +77,9 @@ async function upsertPipeline(
     channel: 'CURRENT',
     libraries: [{ file: { path: params.workspacePath } }],
     ...(params.configuration ? { configuration: params.configuration } : {}),
+    ...(params.servicePrincipalId
+      ? { run_as: { service_principal_name: params.servicePrincipalId } }
+      : {}),
     tags: { managed_by: 'lakecost' },
   };
 
@@ -94,6 +99,28 @@ async function upsertPipeline(
     throw new Error('Databricks Pipelines API returned no pipeline_id');
   }
   return created.pipeline_id;
+}
+
+export async function dryRunPipelineCreate(
+  wc: WorkspaceClient,
+  params: PipelineScheduleParams,
+): Promise<void> {
+  await wc.pipelines.create({
+    name: params.pipelineName,
+    catalog: params.catalog,
+    schema: params.schema,
+    serverless: true,
+    development: false,
+    continuous: false,
+    channel: 'CURRENT',
+    libraries: [{ file: { path: params.workspacePath } }],
+    ...(params.configuration ? { configuration: params.configuration } : {}),
+    ...(params.servicePrincipalId
+      ? { run_as: { service_principal_name: params.servicePrincipalId } }
+      : {}),
+    tags: { managed_by: 'lakecost' },
+    dry_run: true,
+  });
 }
 
 /**

@@ -160,6 +160,24 @@ export function buildUserExecutor(
   return new StatementExecutor({ workspaceClient: wc, warehouseId: env.SQL_WAREHOUSE_ID });
 }
 
+export function buildAppWorkspaceClient(env: Env): WorkspaceClient | undefined {
+  if (!env.DATABRICKS_HOST || !env.DATABRICKS_CLIENT_ID || !env.DATABRICKS_CLIENT_SECRET) {
+    return undefined;
+  }
+  return new SdkWorkspaceClient({
+    host: env.DATABRICKS_HOST,
+    clientId: env.DATABRICKS_CLIENT_ID,
+    clientSecret: env.DATABRICKS_CLIENT_SECRET,
+  });
+}
+
+export function buildAppExecutor(env: Env): StatementExecutor | undefined {
+  if (!env.SQL_WAREHOUSE_ID) return undefined;
+  const wc = buildAppWorkspaceClient(env);
+  if (!wc) return undefined;
+  return new StatementExecutor({ workspaceClient: wc, warehouseId: env.SQL_WAREHOUSE_ID });
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -16,7 +16,7 @@ const AppSettingKeySchema = z
   .string()
   .min(1)
   .max(128)
-  .regex(/^[A-Za-z0-9_.\-]+$/, 'invalid key');
+  .regex(/^[A-Za-z0-9_.-]+$/, 'invalid key');
 
 const AppSettingValueSchema = z.string().max(4096);
 

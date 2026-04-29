@@ -37,6 +37,10 @@ export interface FocusViewTarget {
   table: string;
 }
 
+export type FocusSourceTableRef = FocusViewTarget & {
+  fqn: string;
+};
+
 /** Single source of truth for unquoted SQL identifiers used across the app. */
 export const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const QUALIFIED_RE = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,2}$/;
@@ -73,6 +77,22 @@ export function validateAccountPricesTable(value: string): string {
     );
   }
   return value;
+}
+
+function sourceTableRef(value: string): FocusSourceTableRef {
+  const parts = value.split('.');
+  const [catalog, schema, table] =
+    parts.length === 1
+      ? ['system', 'billing', parts[0]!]
+      : parts.length === 2
+        ? ['system', parts[0]!, parts[1]!]
+        : [parts[0]!, parts[1]!, parts[2]!];
+  return { catalog, schema, table, fqn: `${catalog}.${schema}.${table}` };
+}
+
+export function focusSourceTables(accountPricesTable: string): FocusSourceTableRef[] {
+  validateAccountPricesTable(accountPricesTable);
+  return [sourceTableRef('system.billing.usage'), sourceTableRef(accountPricesTable)];
 }
 
 function quoteQualified(value: string): string {

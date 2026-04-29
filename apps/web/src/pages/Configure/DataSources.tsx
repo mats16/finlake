@@ -109,7 +109,10 @@ export function DataSources() {
       templateId: tpl.id,
       name: tpl.name,
       providerName: input.providerName,
-      tableName: initialTableName(input, settings.data?.settings[CATALOG_SETTING_KEY]?.trim() ?? ''),
+      tableName: initialTableName(
+        input,
+        settings.data?.settings[CATALOG_SETTING_KEY]?.trim() ?? '',
+      ),
       description: tpl.description,
       enabled: false,
     });
@@ -170,8 +173,8 @@ export function DataSources() {
                 existing
                   ? badgesFor(existing)
                   : !canCreate
-                  ? [{ label: t('dataSources.badges.comingSoon'), variant: 'unknown' }]
-                  : []
+                    ? [{ label: t('dataSources.badges.comingSoon'), variant: 'unknown' }]
+                    : []
               }
               onClick={canCreate ? () => onAddTemplate(tpl) : undefined}
               muted={!canCreate}

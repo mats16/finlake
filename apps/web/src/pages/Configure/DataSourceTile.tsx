@@ -110,9 +110,7 @@ export function DataSourceTile({
           {subtitle ? <p className="text-muted-foreground mt-0.5 text-[11px]">{subtitle}</p> : null}
         </div>
         {headerBadges.length > 0 ? (
-          <div className="flex flex-col items-end gap-1">
-            {renderBadges(headerBadges)}
-          </div>
+          <div className="flex flex-col items-end gap-1">{renderBadges(headerBadges)}</div>
         ) : null}
       </div>
 
