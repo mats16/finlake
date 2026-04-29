@@ -25,6 +25,7 @@ function loadDotenvFiles(): void {
   dotenvLoaded = true;
   const root = findRepoRoot(process.cwd());
   if (!root) return;
+  const hadToken = 'DATABRICKS_TOKEN' in process.env;
   // Higher precedence first wins (process.loadEnvFile does not overwrite existing keys
   // that are already set in process.env, so list .env.local before .env).
   for (const name of ['.env.local', '.env']) {
@@ -36,6 +37,12 @@ function loadDotenvFiles(): void {
         // ignore parse errors and fall back to whatever is already in process.env
       }
     }
+  }
+  if (!hadToken) {
+    // Local frontend-only token used by the Vite proxy to forge OBO headers.
+    // Keeping it in the API process confuses Databricks SDK clients that should
+    // authenticate with the app service principal.
+    delete process.env.DATABRICKS_TOKEN;
   }
 }
 

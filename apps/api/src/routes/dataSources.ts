@@ -2,30 +2,33 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { DatabaseClient } from '@lakecost/db';
 import {
-  DATABRICKS_FOCUS_VERSION,
+  DATA_SOURCE_TEMPLATES,
   DataSourceCreateBodySchema,
   DataSourceSetupBodySchema,
   DataSourceUpdateBodySchema,
-  buildDataSourceId,
   type Env,
 } from '@lakecost/shared';
 import {
   runDataSourceJob,
   setupFocusDataSource,
   teardownFocusDataSource,
-  DataSourceSetupError,
 } from '../services/dataSourceSetup.js';
+import { DataSourceSetupError } from '../services/dataSourceErrors.js';
 
 const IdSchema = z
   .string()
-  .min(1)
-  .max(128)
-  .regex(/^[A-Za-z0-9_.\-]+$/, 'invalid id');
+  .regex(/^\d+$/, 'invalid id')
+  .transform(Number)
+  .refine((id) => Number.isSafeInteger(id) && id > 0, 'invalid id');
 
 export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
   const router = Router();
 
-  router.get('/', async (_req, res, next) => {
+  router.get('/templates', (_req, res) => {
+    res.json({ items: DATA_SOURCE_TEMPLATES });
+  });
+
+  router.get('/configurations', async (_req, res, next) => {
     try {
       const items = await db.repos.dataSources.list();
       res.json({ items });
@@ -34,22 +37,26 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.post('/', async (req, res, next) => {
+  router.post('/configurations', async (req, res, next) => {
     try {
       const parsed = DataSourceCreateBodySchema.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: { message: 'Invalid input', issues: parsed.error.issues } });
         return;
       }
-      const id = buildDataSourceId(parsed.data.providerName, parsed.data.billingAccountId);
+      const template = DATA_SOURCE_TEMPLATES.find((tpl) => tpl.id === parsed.data.templateId);
+      if (!template || !template.available) {
+        res.status(400).json({ error: { message: 'Invalid templateId' } });
+        return;
+      }
       const created = await db.repos.dataSources.create({
-        id,
+        templateId: parsed.data.templateId,
         name: parsed.data.name,
         description: parsed.data.description ?? null,
         providerName: parsed.data.providerName,
         billingAccountId: parsed.data.billingAccountId ?? null,
         tableName: parsed.data.tableName,
-        focusVersion: parsed.data.providerName === 'Databricks' ? DATABRICKS_FOCUS_VERSION : null,
+        focusVersion: template.focus_version,
         enabled: parsed.data.enabled ?? false,
         config: parsed.data.config ?? {},
       });
@@ -59,7 +66,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.get('/:id', async (req, res, next) => {
+  router.get('/configurations/:id', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -77,7 +84,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.put('/:id', async (req, res, next) => {
+  router.patch('/configurations/:id', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -101,7 +108,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.delete('/:id', async (req, res, next) => {
+  router.delete('/configurations/:id', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -131,7 +138,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.post('/:id/setup', async (req, res, next) => {
+  router.post('/configurations/:id/setup', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -147,21 +154,20 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         env,
         db,
         req.user?.accessToken,
-        req.user?.email,
         idParse.data,
         parsed.data,
       );
       res.json(result);
     } catch (err) {
       if (err instanceof DataSourceSetupError) {
-        res.status(err.status).json({ error: { message: err.message } });
+        res.status(err.statusCode).json({ error: { message: err.message } });
         return;
       }
       next(err);
     }
   });
 
-  router.post('/:id/run', async (req, res, next) => {
+  router.post('/configurations/:id/run', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -172,7 +178,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       res.json(result);
     } catch (err) {
       if (err instanceof DataSourceSetupError) {
-        res.status(err.status).json({ error: { message: err.message } });
+        res.status(err.statusCode).json({ error: { message: err.message } });
         return;
       }
       next(err);

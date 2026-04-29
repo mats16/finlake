@@ -6,7 +6,6 @@ import {
   FOCUS_REFRESH_CRON_DEFAULT,
   FOCUS_REFRESH_TIMEZONE_DEFAULT,
   FOCUS_VIEW_SCHEMA_DEFAULT,
-  buildFocusPipelineSql,
   focusViewFqn,
   tableLeafName,
   unquotedFqn,
@@ -15,22 +14,18 @@ import {
   type DataSourceSetupResult,
   type Env,
 } from '@lakecost/shared';
-import { buildUserWorkspaceClient } from './statementExecution.js';
+import { z } from 'zod';
+import { buildUserExecutor, buildUserWorkspaceClient } from './statementExecution.js';
 import {
   deletePipelineSchedule,
   upsertPipelineSchedule,
   type PipelineScheduleParams,
 } from './databricksJobs.js';
-
-export class DataSourceSetupError extends Error {
-  override readonly name = 'DataSourceSetupError';
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
+import { DataSourceSetupError } from './dataSourceErrors.js';
+import {
+  buildFocusPipelineConfiguration,
+  buildFocusPipelineSql,
+} from './databricksFocusTransformPipelineSql.js';
 
 interface FocusConfig {
   accountPricesTable: string;
@@ -40,7 +35,7 @@ interface FocusConfig {
   workspacePath: string | null;
 }
 
-function readFocusConfig(config: Record<string, unknown>): FocusConfig {
+export function readFocusConfig(config: Record<string, unknown>): FocusConfig {
   const get = (k: string): string | null => {
     const v = config[k];
     return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
@@ -54,9 +49,8 @@ function readFocusConfig(config: Record<string, unknown>): FocusConfig {
   };
 }
 
-function workspacePathFor(userEmail: string, dataSourceId: string): string {
-  // Files live under the calling user's home so OBO writes are always allowed.
-  return `/Workspace/Users/${userEmail}/.lakecost/focus-pipeline-${dataSourceId}.sql`;
+export function workspacePathFor(appName: string, dataSourceId: number): string {
+  return `/Workspace/Shared/${appName}/data_sources/${dataSourceId}/databricksFocusTransformPipeline.sql`;
 }
 
 /**
@@ -65,7 +59,7 @@ function workspacePathFor(userEmail: string, dataSourceId: string): string {
  * the name is always unique even before the per-provider config is filled in.
  */
 function resourceSlug(source: {
-  id: string;
+  id: number;
   providerName: string;
   config: Record<string, unknown>;
 }): string {
@@ -77,16 +71,16 @@ function resourceSlug(source: {
     case 'Databricks':
       return 'focus';
     case 'AWS':
-      return fromConfig('awsAccountId') ?? source.id;
+      return fromConfig('awsAccountId') ?? String(source.id);
     case 'Azure':
-      return fromConfig('subscriptionId') ?? source.id;
+      return fromConfig('subscriptionId') ?? String(source.id);
     default:
-      return source.id;
+      return String(source.id);
   }
 }
 
-function resourceLabelBase(source: {
-  id: string;
+export function resourceLabelBase(source: {
+  id: number;
   providerName: string;
   config: Record<string, unknown>;
 }): string {
@@ -103,8 +97,7 @@ export async function setupFocusDataSource(
   env: Env,
   db: DatabaseClient,
   userToken: string | undefined,
-  userEmail: string | undefined,
-  dataSourceId: string,
+  dataSourceId: number,
   body: DataSourceSetupBody,
 ): Promise<DataSourceSetupResult> {
   if (!userToken) {
@@ -113,16 +106,12 @@ export async function setupFocusDataSource(
       401,
     );
   }
-  if (!userEmail) {
-    throw new DataSourceSetupError(
-      'Missing user email from OBO headers — needed to host the pipeline SQL file under /Workspace/Users/<email>.',
-      401,
-    );
-  }
   if (!env.DATABRICKS_HOST) {
     throw new DataSourceSetupError('DATABRICKS_HOST must be configured.', 400);
   }
-
+  if (!env.DATABRICKS_APP_NAME) {
+    throw new DataSourceSetupError('DATABRICKS_APP_NAME must be configured.', 400);
+  }
   const [source, catalogSetting] = await Promise.all([
     db.repos.dataSources.get(dataSourceId),
     db.repos.appSettings.get(CATALOG_SETTING_KEY),
@@ -160,7 +149,7 @@ export async function setupFocusDataSource(
   let pipelineSql: string;
   let fqn: string;
   try {
-    pipelineSql = buildFocusPipelineSql({ table: tableName, accountPricesTable });
+    pipelineSql = buildFocusPipelineSql({ catalog, table: tableName, accountPricesTable });
     fqn = focusViewFqn(target);
   } catch (err) {
     throw new DataSourceSetupError(`Invalid view target: ${(err as Error).message}`, 400);
@@ -169,7 +158,7 @@ export async function setupFocusDataSource(
   const wc = buildUserWorkspaceClient(env, userToken);
   if (!wc) throw new DataSourceSetupError('Failed to build Databricks workspace client', 500);
 
-  const workspacePath = existing.workspacePath ?? workspacePathFor(userEmail, dataSourceId);
+  const workspacePath = workspacePathFor(env.DATABRICKS_APP_NAME, dataSourceId);
 
   const labelBase = resourceLabelBase(source);
   const scheduleParams: PipelineScheduleParams = {
@@ -179,9 +168,12 @@ export async function setupFocusDataSource(
     workspacePath,
     catalog,
     schema: FOCUS_VIEW_SCHEMA_DEFAULT,
+    configuration: buildFocusPipelineConfiguration(tableName, accountPricesTable),
     cronExpression,
     timezoneId,
   };
+
+  await assertCanReadUsageTable(env, userToken);
 
   let result;
   try {
@@ -220,6 +212,42 @@ export async function setupFocusDataSource(
     timezoneId,
     createdView: false,
   };
+}
+
+async function assertCanReadUsageTable(env: Env, userToken: string): Promise<void> {
+  if (!env.SQL_WAREHOUSE_ID) {
+    throw new DataSourceSetupError(
+      [
+        'SQL_WAREHOUSE_ID must be configured to verify system.billing.usage access',
+        'before creating the FOCUS pipeline/job.',
+      ].join(' '),
+      400,
+    );
+  }
+  const executor = buildUserExecutor(env, userToken);
+  if (!executor) {
+    throw new DataSourceSetupError(
+      'Failed to build Databricks SQL executor for system.billing.usage access check.',
+      500,
+    );
+  }
+  try {
+    await executor.run(
+      'SELECT 1 AS ok FROM system.billing.usage LIMIT 1',
+      [],
+      z.object({ ok: z.number() }),
+    );
+  } catch (err) {
+    throw new DataSourceSetupError(
+      [
+        'Cannot read system.billing.usage with the current user.',
+        'Grant USE CATALOG on system, USE SCHEMA on system.billing, and SELECT on',
+        'system.billing.usage before creating the FOCUS pipeline/job.',
+        (err as Error).message,
+      ].join(' '),
+      400,
+    );
+  }
 }
 
 /**
@@ -267,8 +295,8 @@ export async function runDataSourceJob(
   env: Env,
   db: DatabaseClient,
   userToken: string | undefined,
-  dataSourceId: string,
-): Promise<{ dataSourceId: string; jobId: number; runId: number }> {
+  dataSourceId: number,
+): Promise<{ dataSourceId: number; jobId: number; runId: number }> {
   if (!userToken) {
     throw new DataSourceSetupError(
       'Missing OBO access token. Run behind Databricks Apps or `databricks apps run-local`.',

@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { DatabaseClient } from '@lakecost/db';
+import { CATALOG_SETTING_KEY, type Env } from '@lakecost/shared';
+import { CatalogServiceError, provisionCatalog } from '../services/catalogs.js';
+import { logger } from '../config/logger.js';
 
 const PrefsBodySchema = z.object({
   currency: z.string().min(3).max(8).optional(),
@@ -13,22 +16,27 @@ const AppSettingKeySchema = z
   .string()
   .min(1)
   .max(128)
-  .regex(/^[A-Za-z0-9_.\-]+$/, 'invalid key');
+  .regex(/^[A-Za-z0-9_.-]+$/, 'invalid key');
 
 const AppSettingValueSchema = z.string().max(4096);
 
 const AppSettingsBulkBodySchema = z.object({
   settings: z.record(AppSettingKeySchema, AppSettingValueSchema),
+  provision: z
+    .object({
+      createIfMissing: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const AppSettingSingleBodySchema = z.object({
   value: AppSettingValueSchema,
 });
 
-export function settingsRouter(db: DatabaseClient): Router {
+export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
   const router = Router();
 
-  router.get('/app', async (_req, res, next) => {
+  router.get('/', async (_req, res, next) => {
     try {
       const rows = await db.repos.appSettings.list();
       const settings: Record<string, string> = {};
@@ -39,26 +47,60 @@ export function settingsRouter(db: DatabaseClient): Router {
     }
   });
 
-  router.put('/app', async (req, res, next) => {
+  router.put('/', async (req, res, next) => {
     try {
       const parsed = AppSettingsBulkBodySchema.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: { message: 'Invalid input', issues: parsed.error.issues } });
         return;
       }
+
+      const newCatalog = parsed.data.settings[CATALOG_SETTING_KEY]?.trim();
+      const previousCatalog =
+        newCatalog !== undefined
+          ? ((await db.repos.appSettings.get(CATALOG_SETTING_KEY))?.value?.trim() ?? '')
+          : '';
+
+      // Persist settings before provisioning. If provisionCatalog fails below,
+      // the catalog name stays saved so the user can retry via "Fix permission"
+      // without re-entering it. This is intentional — no rollback on failure.
       for (const [key, value] of Object.entries(parsed.data.settings)) {
         await db.repos.appSettings.upsert(key, value);
       }
       const rows = await db.repos.appSettings.list();
       const settings: Record<string, string> = {};
       for (const row of rows) settings[row.key] = row.value;
-      res.json({ settings });
+
+      const hasCatalog = newCatalog !== undefined && newCatalog.length > 0;
+      const shouldProvision = hasCatalog && parsed.data.provision !== undefined;
+      const catalogChanged = hasCatalog && newCatalog !== previousCatalog;
+      if (!catalogChanged && !shouldProvision) {
+        res.json({ settings });
+        return;
+      }
+
+      try {
+        const provision = await provisionCatalog(env, req.user?.accessToken, newCatalog, {
+          createIfMissing: parsed.data.provision?.createIfMissing,
+        });
+        res.json({ settings, provision });
+      } catch (err) {
+        if (err instanceof CatalogServiceError) {
+          logger.warn(
+            { err, catalog: newCatalog, status: err.statusCode },
+            'provisionCatalog precondition failed; settings persisted without provisioning',
+          );
+          res.status(err.statusCode).json({ error: { message: err.message }, settings });
+          return;
+        }
+        throw err;
+      }
     } catch (err) {
       next(err);
     }
   });
 
-  router.get('/app/:key', async (req, res, next) => {
+  router.get('/:key', async (req, res, next) => {
     try {
       const keyParse = AppSettingKeySchema.safeParse(req.params.key);
       if (!keyParse.success) {
@@ -76,7 +118,7 @@ export function settingsRouter(db: DatabaseClient): Router {
     }
   });
 
-  router.put('/app/:key', async (req, res, next) => {
+  router.put('/:key', async (req, res, next) => {
     try {
       const keyParse = AppSettingKeySchema.safeParse(req.params.key);
       if (!keyParse.success) {
@@ -95,7 +137,7 @@ export function settingsRouter(db: DatabaseClient): Router {
     }
   });
 
-  router.delete('/app/:key', async (req, res, next) => {
+  router.delete('/:key', async (req, res, next) => {
     try {
       const keyParse = AppSettingKeySchema.safeParse(req.params.key);
       if (!keyParse.success) {
@@ -108,6 +150,12 @@ export function settingsRouter(db: DatabaseClient): Router {
       next(err);
     }
   });
+
+  return router;
+}
+
+export function settingsRouter(db: DatabaseClient): Router {
+  const router = Router();
 
   router.get('/me', async (req, res, next) => {
     try {

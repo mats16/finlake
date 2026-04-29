@@ -1,57 +1,66 @@
 import { useMemo, useState } from 'react';
 import { CATALOG_SETTING_KEY, FOCUS_VIEW_SCHEMA_DEFAULT, type DataSource } from '@lakecost/shared';
 import { Input, Separator } from '@databricks/appkit-ui/react';
-import { useAppSettings, useCreateDataSource, useDataSources } from '../../api/hooks';
+import {
+  useAppSettings,
+  useCreateDataSource,
+  useDataSources,
+  useDataSourceTemplates,
+} from '../../api/hooks';
 import { DataSourceTile, type TileBadge } from './DataSourceTile';
 import { DataSourceDrawer } from './DataSourceDrawer';
 import {
   DATA_SOURCE_TEMPLATES,
+  canCreateTemplate,
   displayDescriptionForRow,
   displayNameForRow,
   findTemplateForRow,
+  getTemplateInputConfig,
+  getTemplateRegistryEntry,
+  type DataSourceTemplateInputConfig,
   type DataSourceTemplate,
 } from './dataSourceCatalog';
-import { tableLeafName } from '@lakecost/shared';
 import { useI18n } from '../../i18n';
 
 const FALLBACK_TEMPLATE: DataSourceTemplate = {
-  templateId: 'custom-source',
-  providerName: 'Custom',
-  vendor: 'Custom',
+  id: 'custom',
   name: 'Custom data source',
   description: '',
   subtitle: '',
-  defaultTableName: 'custom_source',
-  setupSteps: [],
+  focus_version: null,
   available: true,
-  brandColor: '#475467',
+  appearance: {
+    brandColor: '#475467',
+  },
 };
 
 function templateForRow(row: DataSource): DataSourceTemplate {
   return findTemplateForRow(row) ?? FALLBACK_TEMPLATE;
 }
 
-function initialTableName(template: DataSourceTemplate, catalog: string): string {
-  if (template.providerName !== 'Databricks' || !catalog) return template.defaultTableName;
-  return `${catalog}.${FOCUS_VIEW_SCHEMA_DEFAULT}.${template.defaultTableName}`;
+function initialTableName(input: DataSourceTemplateInputConfig, catalog: string): string {
+  if (input.providerName !== 'Databricks' || !catalog) return input.defaultTableName;
+  return `${catalog}.${FOCUS_VIEW_SCHEMA_DEFAULT}.${input.defaultTableName}`;
 }
 
 function rowMatchesTemplate(row: DataSource, template: DataSourceTemplate): boolean {
-  return (
-    row.providerName === template.providerName &&
-    (row.name === template.name || tableLeafName(row.tableName) === template.defaultTableName)
-  );
+  return findTemplateForRow(row)?.id === template.id;
 }
 
 export function DataSources() {
   const { t } = useI18n();
   const [filter, setFilter] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
   const dataSources = useDataSources();
+  const templates = useDataSourceTemplates();
   const settings = useAppSettings();
   const createDs = useCreateDataSource();
 
   const rows = dataSources.data?.items ?? [];
+  const availableTemplates = useMemo(
+    () => templates.data?.items ?? DATA_SOURCE_TEMPLATES,
+    [templates.data?.items],
+  );
 
   const filteredRows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -61,16 +70,16 @@ export function DataSources() {
 
   const candidates = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return DATA_SOURCE_TEMPLATES.filter((tpl) => {
+    return availableTemplates.filter((tpl) => {
       if (
-        tpl.providerName === 'Databricks' &&
+        tpl.id === 'databricks_focus13' &&
         rows.some((row) => row.providerName === 'Databricks')
       ) {
         return false;
       }
       return q ? tpl.name.toLowerCase().includes(q) : true;
     });
-  }, [filter, rows]);
+  }, [availableTemplates, filter, rows]);
 
   const badgesFor = (row: DataSource): TileBadge[] => {
     if (row.jobId !== null) {
@@ -87,7 +96,8 @@ export function DataSources() {
   };
 
   const onAddTemplate = async (tpl: DataSourceTemplate) => {
-    if (!tpl.available) {
+    const input = getTemplateInputConfig(tpl);
+    if (!tpl.available || !input) {
       return;
     }
     const existing = rows.find((row) => rowMatchesTemplate(row, tpl));
@@ -96,9 +106,13 @@ export function DataSources() {
       return;
     }
     const created = await createDs.mutateAsync({
+      templateId: tpl.id,
       name: tpl.name,
-      providerName: tpl.providerName,
-      tableName: initialTableName(tpl, settings.data?.settings[CATALOG_SETTING_KEY]?.trim() ?? ''),
+      providerName: input.providerName,
+      tableName: initialTableName(
+        input,
+        settings.data?.settings[CATALOG_SETTING_KEY]?.trim() ?? '',
+      ),
       description: tpl.description,
       enabled: false,
     });
@@ -125,10 +139,12 @@ export function DataSources() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {filteredRows.map((row) => {
             const tpl = templateForRow(row);
+            const registryEntry = getTemplateRegistryEntry(tpl);
             return (
               <DataSourceTile
                 key={row.id}
                 source={tpl}
+                logo={registryEntry?.logo}
                 displayName={displayNameForRow(row, tpl)}
                 displayDescription={displayDescriptionForRow(row, tpl)}
                 badges={badgesFor(row)}
@@ -146,19 +162,22 @@ export function DataSources() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {candidates.map((tpl) => {
           const existing = rows.find((row) => rowMatchesTemplate(row, tpl));
+          const registryEntry = getTemplateRegistryEntry(tpl);
+          const canCreate = canCreateTemplate(tpl);
           return (
             <DataSourceTile
-              key={tpl.templateId}
+              key={tpl.id}
               source={tpl}
+              logo={registryEntry?.logo}
               badges={
                 existing
                   ? badgesFor(existing)
-                  : tpl.available
-                    ? [{ label: t('dataSources.badges.add'), variant: 'unknown' }]
-                    : [{ label: t('dataSources.badges.comingSoon'), variant: 'unknown' }]
+                  : !canCreate
+                    ? [{ label: t('dataSources.badges.comingSoon'), variant: 'unknown' }]
+                    : []
               }
-              onClick={tpl.available ? () => onAddTemplate(tpl) : undefined}
-              muted={!tpl.available}
+              onClick={canCreate ? () => onAddTemplate(tpl) : undefined}
+              muted={!canCreate}
             />
           );
         })}

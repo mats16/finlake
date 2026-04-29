@@ -7,16 +7,20 @@ export interface PipelineScheduleParams {
   jobName: string;
   /** DLT SQL body — must use `CREATE OR REFRESH` syntax (no catalog/schema). */
   pipelineSql: string;
-  /** Absolute workspace path (e.g. `/Workspace/Users/foo/.lakecost/refresh-1.sql`). */
+  /** Absolute workspace path for the uploaded pipeline SQL source. */
   workspacePath: string;
   /** Unity Catalog target catalog. */
   catalog: string;
   /** Unity Catalog target schema (e.g. `silver`). */
   schema: string;
+  /** Lakeflow pipeline parameters exposed to SQL as `${key}` references. */
+  configuration?: Record<string, string>;
   /** Quartz cron expression: `seconds minutes hours day-of-month month day-of-week`. */
   cronExpression: string;
   /** Java timezone id, e.g. `UTC`. */
   timezoneId: string;
+  /** Optional application ID for service-principal-owned pipeline runs. */
+  servicePrincipalId?: string;
 }
 
 export interface UpsertPipelineScheduleResult {
@@ -34,7 +38,7 @@ async function ensureWorkspaceDir(wc: WorkspaceClient, dir: string): Promise<voi
   }
 }
 
-async function uploadPipelineFile(
+export async function uploadPipelineFile(
   wc: WorkspaceClient,
   path: string,
   content: string,
@@ -72,18 +76,51 @@ async function upsertPipeline(
     continuous: false,
     channel: 'CURRENT',
     libraries: [{ file: { path: params.workspacePath } }],
+    ...(params.configuration ? { configuration: params.configuration } : {}),
+    ...(params.servicePrincipalId
+      ? { run_as: { service_principal_name: params.servicePrincipalId } }
+      : {}),
     tags: { managed_by: 'lakecost' },
   };
 
   if (existingPipelineId) {
-    await wc.pipelines.update({ pipeline_id: existingPipelineId, ...settings });
-    return existingPipelineId;
+    try {
+      await wc.pipelines.update({ pipeline_id: existingPipelineId, ...settings });
+      return existingPipelineId;
+    } catch (err) {
+      if (!isManagePermissionDenied(err)) throw err;
+      // The saved pipeline may be owned by a different principal. Create a
+      // replacement owned by the current OBO user.
+      await wc.pipelines.delete({ pipeline_id: existingPipelineId }).catch(() => {});
+    }
   }
   const created = await wc.pipelines.create({ ...settings, allow_duplicate_names: true });
   if (!created.pipeline_id) {
     throw new Error('Databricks Pipelines API returned no pipeline_id');
   }
   return created.pipeline_id;
+}
+
+export async function dryRunPipelineCreate(
+  wc: WorkspaceClient,
+  params: PipelineScheduleParams,
+): Promise<void> {
+  await wc.pipelines.create({
+    name: params.pipelineName,
+    catalog: params.catalog,
+    schema: params.schema,
+    serverless: true,
+    development: false,
+    continuous: false,
+    channel: 'CURRENT',
+    libraries: [{ file: { path: params.workspacePath } }],
+    ...(params.configuration ? { configuration: params.configuration } : {}),
+    ...(params.servicePrincipalId
+      ? { run_as: { service_principal_name: params.servicePrincipalId } }
+      : {}),
+    tags: { managed_by: 'lakecost' },
+    dry_run: true,
+  });
 }
 
 /**
@@ -117,13 +154,20 @@ export async function upsertPipelineSchedule(
   };
 
   if (existing.jobId !== null) {
-    await wc.jobs.reset({ job_id: existing.jobId, new_settings: jobSettings });
-    return {
-      jobId: existing.jobId,
-      pipelineId,
-      workspacePath: params.workspacePath,
-      createdJob: false,
-    };
+    try {
+      await wc.jobs.reset({ job_id: existing.jobId, new_settings: jobSettings });
+      return {
+        jobId: existing.jobId,
+        pipelineId,
+        workspacePath: params.workspacePath,
+        createdJob: false,
+      };
+    } catch (err) {
+      if (!isManagePermissionDenied(err)) throw err;
+      // The saved job may be owned by a different principal. Create a new
+      // user-owned job and persist its id in the data source row.
+      await wc.jobs.delete({ job_id: existing.jobId }).catch(() => {});
+    }
   }
   const created = await wc.jobs.create(jobSettings);
   if (typeof created.job_id !== 'number') {
@@ -135,6 +179,22 @@ export async function upsertPipelineSchedule(
     workspacePath: params.workspacePath,
     createdJob: true,
   };
+}
+
+function isManagePermissionDenied(err: unknown): boolean {
+  const code = hasErrorCode(err) ? err.errorCode : '';
+  const message = err instanceof Error ? err.message : String(err);
+  const isPermDenied = code === 'PERMISSION_DENIED' || /PERMISSION_DENIED/i.test(message);
+  return isPermDenied && /Manage permissions/i.test(message);
+}
+
+function hasErrorCode(err: unknown): err is { errorCode: string } {
+  return (
+    err != null &&
+    typeof err === 'object' &&
+    'errorCode' in err &&
+    typeof (err as { errorCode: unknown }).errorCode === 'string'
+  );
 }
 
 /**

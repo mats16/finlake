@@ -95,11 +95,30 @@ export const en = {
     title: 'Settings',
     subtitle: 'Application configuration',
     mainCatalogHeading: 'Main catalog',
-    mainCatalogDesc:
-      'Unity Catalog name to query by default (e.g. main, prod_finops). Saved to app_settings.',
+    mainCatalogDesc: 'The Unity Catalog catalog name used as the main catalog.',
     mainCatalogPlaceholder: 'main',
+    catalogTypeLabel: 'Catalog type',
+    catalogNameLabel: 'Catalog name',
+    catalogModeExisting: 'Use an existing catalog',
+    catalogModeCreate: 'Create a new catalog',
+    catalogSelectPlaceholder: 'Select a catalog…',
+    catalogSearchPlaceholder: 'Search catalogs…',
+    catalogEmpty: 'No catalogs found.',
+    catalogCreatePlaceholder: 'finops',
+    catalogLoadFailed: 'Could not load catalogs',
     save: 'Save',
+    saveAndCreate: 'Create & save',
+    fixPermission: 'Fix permission',
     saved: 'Saved',
+    provisionSuccess: 'Catalog ready',
+    provisionWarning: 'Saved with warnings',
+    provisionFailed: 'Provisioning had errors',
+    provisionAllOk:
+      'Catalog "{name}" already had bronze/silver/gold and the service principal grants in place.',
+    provisionCatalogCreated: 'Created catalog "{name}".',
+    provisionSchemaFailed: 'Could not create schema "{schema}" — see warnings below.',
+    provisionGrantFailed: 'GRANT for {scope} failed: {message}',
+    provisionScopeCatalog: 'catalog',
   },
   configure: {
     title: 'Configure',
@@ -113,7 +132,6 @@ export const en = {
     currentTitle: 'Current data sources',
     filterPlaceholder: 'Filter sources…',
     addTitle: 'Add data source',
-    tileNoHistory: 'no history yet',
     empty: 'No data sources yet — add one from the catalog below.',
     delete: 'Delete data source',
     confirmDelete: 'Delete "{name}"? Its scheduled refresh job will also be removed.',
@@ -192,31 +210,23 @@ export const en = {
       last30d: 'Last 30d',
     },
     catalog: {
-      'databricks-system-tables': {
+      databricks_focus13: {
         description: 'Databricks usage and list prices normalized to FOCUS 1.3',
         subtitle: '',
       },
-      'aws-cur': {
-        description: 'EC2 / EBS / S3 spend ingested via CUR 2.0 to S3',
+      aws: {
+        description: 'AWS Cost & Usage Report support is coming soon.',
         subtitle: 'by Amazon Web Services',
       },
-      'azure-cost-management': {
-        description: 'Daily export of Azure Cost Management data to ADLS Gen2',
-        subtitle: 'by Microsoft Azure',
-      },
-      'tagging-policy': {
-        description: 'Cost-attribution tags enforced via compute & budget policies',
-        subtitle: '',
-      },
-      'gcp-cloud-billing': {
-        description: 'Google Cloud billing export to BigQuery, federated into the warehouse',
+      gcp: {
+        description: 'Google Cloud billing export support is coming soon.',
         subtitle: 'by Google Cloud',
       },
-      'snowflake-credits': {
-        description: 'Compare warehouse credit consumption against Databricks DBUs',
+      snowflake: {
+        description: 'Snowflake credits support is coming soon.',
         subtitle: 'by Snowflake',
       },
-      'custom-source': {
+      custom: {
         description: 'Bring your own cost feed via Auto Loader or Lakeflow Connect',
         subtitle: 'by your team',
       },

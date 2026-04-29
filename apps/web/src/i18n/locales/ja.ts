@@ -99,11 +99,31 @@ export const ja: Dictionary = {
     title: '設定',
     subtitle: 'アプリケーション設定',
     mainCatalogHeading: 'メインカタログ',
-    mainCatalogDesc:
-      '既定で参照する Unity Catalog のカタログ名 (例: main, prod_finops)。app_settings に保存されます。',
+    mainCatalogDesc: 'メインで利用する Unity Catalog のカタログ名です。',
     mainCatalogPlaceholder: 'main',
+    catalogTypeLabel: 'カタログのタイプ',
+    catalogNameLabel: 'カタログの名前',
+    catalogModeExisting: '既存のカタログを利用する',
+    catalogModeCreate: '新規にカタログを作成する',
+    catalogSelectPlaceholder: 'カタログを選択…',
+    catalogSearchPlaceholder: 'カタログを検索…',
+    catalogEmpty: 'カタログが見つかりません。',
+    catalogCreatePlaceholder: 'finops',
+    catalogLoadFailed: 'カタログ一覧を取得できませんでした',
     save: '保存',
+    saveAndCreate: '作成して保存',
+    fixPermission: '権限を修復',
     saved: '保存しました',
+    provisionSuccess: 'カタログを準備しました',
+    provisionWarning: '一部の処理がスキップされました',
+    provisionFailed: 'プロビジョニングでエラーが発生しました',
+    provisionAllOk:
+      'カタログ「{name}」には bronze/silver/gold スキーマとサービスプリンシパル権限が既に揃っています。',
+    provisionCatalogCreated: 'カタログ「{name}」を作成しました。',
+    provisionSchemaFailed:
+      'スキーマ「{schema}」を作成できませんでした。下の警告を確認してください。',
+    provisionGrantFailed: '{scope} への GRANT に失敗しました: {message}',
+    provisionScopeCatalog: 'catalog',
   },
   configure: {
     title: '構成',
@@ -117,7 +137,6 @@ export const ja: Dictionary = {
     currentTitle: '現在のデータソース',
     filterPlaceholder: 'データソースを絞り込み…',
     addTitle: 'データソースを追加',
-    tileNoHistory: '履歴はまだありません',
     empty: 'データソースがまだ登録されていません。下のカタログから追加してください。',
     delete: 'データソースを削除',
     confirmDelete: '「{name}」を削除しますか？スケジュール済みのリフレッシュジョブも削除されます。',
@@ -196,31 +215,23 @@ export const ja: Dictionary = {
       last30d: '直近30日',
     },
     catalog: {
-      'databricks-system-tables': {
+      databricks_focus13: {
         description: 'Databricks の利用量とリスト価格を FOCUS 1.3 形式に正規化',
         subtitle: '',
       },
-      'aws-cur': {
-        description: 'CUR 2.0 経由で S3 から取り込む EC2 / EBS / S3 の支出',
+      aws: {
+        description: 'AWS Cost & Usage Report は近日公開予定です。',
         subtitle: 'Amazon Web Services 提供',
       },
-      'azure-cost-management': {
-        description: 'Azure Cost Management データを ADLS Gen2 へ日次エクスポート',
-        subtitle: 'Microsoft Azure 提供',
-      },
-      'tagging-policy': {
-        description: 'コンピュート / 予算ポリシーで強制するコスト按分用タグ',
-        subtitle: '',
-      },
-      'gcp-cloud-billing': {
-        description: 'Google Cloud の BigQuery 課金エクスポートをウェアハウスへ連携',
+      gcp: {
+        description: 'Google Cloud 課金エクスポートは近日公開予定です。',
         subtitle: 'Google Cloud 提供',
       },
-      'snowflake-credits': {
-        description: 'ウェアハウスのクレジット消費量を Databricks DBU と比較',
+      snowflake: {
+        description: 'Snowflake credits は近日公開予定です。',
         subtitle: 'Snowflake 提供',
       },
-      'custom-source': {
+      custom: {
         description: 'Auto Loader や Lakeflow Connect を介して独自のコストデータを取り込み',
         subtitle: 'お客様提供',
       },

@@ -4,3 +4,4 @@ export * from './budget.js';
 export * from './setup.js';
 export * from './health.js';
 export * from './dataSource.js';
+export * from './catalog.js';
