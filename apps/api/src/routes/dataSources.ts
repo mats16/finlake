@@ -13,8 +13,8 @@ import {
   runDataSourceJob,
   setupFocusDataSource,
   teardownFocusDataSource,
-  DataSourceSetupError,
 } from '../services/dataSourceSetup.js';
+import { DataSourceSetupError } from '../services/dataSourceErrors.js';
 
 const IdSchema = z
   .string()
@@ -153,7 +153,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       res.json(result);
     } catch (err) {
       if (err instanceof DataSourceSetupError) {
-        res.status(err.status).json({ error: { message: err.message } });
+        res.status(err.statusCode).json({ error: { message: err.message } });
         return;
       }
       next(err);
@@ -171,7 +171,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       res.json(result);
     } catch (err) {
       if (err instanceof DataSourceSetupError) {
-        res.status(err.status).json({ error: { message: err.message } });
+        res.status(err.statusCode).json({ error: { message: err.message } });
         return;
       }
       next(err);

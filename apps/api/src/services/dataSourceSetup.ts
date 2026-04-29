@@ -15,22 +15,14 @@ import {
   type DataSourceSetupResult,
   type Env,
 } from '@lakecost/shared';
-import { buildUserWorkspaceClient } from './statementExecution.js';
+import { z } from 'zod';
+import { buildUserExecutor, buildUserWorkspaceClient } from './statementExecution.js';
 import {
   deletePipelineSchedule,
   upsertPipelineSchedule,
   type PipelineScheduleParams,
 } from './databricksJobs.js';
-
-export class DataSourceSetupError extends Error {
-  override readonly name = 'DataSourceSetupError';
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
+import { DataSourceSetupError } from './dataSourceErrors.js';
 
 interface FocusConfig {
   accountPricesTable: string;
@@ -40,7 +32,7 @@ interface FocusConfig {
   workspacePath: string | null;
 }
 
-function readFocusConfig(config: Record<string, unknown>): FocusConfig {
+export function readFocusConfig(config: Record<string, unknown>): FocusConfig {
   const get = (k: string): string | null => {
     const v = config[k];
     return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
@@ -54,7 +46,7 @@ function readFocusConfig(config: Record<string, unknown>): FocusConfig {
   };
 }
 
-function workspacePathFor(appName: string, dataSourceId: string): string {
+export function workspacePathFor(appName: string, dataSourceId: string): string {
   return `/Workspace/Shared/${appName}/data_sources/${dataSourceId}/focus-pipeline.sql`;
 }
 
@@ -84,7 +76,7 @@ function resourceSlug(source: {
   }
 }
 
-function resourceLabelBase(source: {
+export function resourceLabelBase(source: {
   id: string;
   providerName: string;
   config: Record<string, unknown>;
@@ -177,6 +169,8 @@ export async function setupFocusDataSource(
     timezoneId,
   };
 
+  await assertCanReadUsageTable(env, userToken);
+
   let result;
   try {
     result = await upsertPipelineSchedule(wc, scheduleParams, {
@@ -214,6 +208,42 @@ export async function setupFocusDataSource(
     timezoneId,
     createdView: false,
   };
+}
+
+async function assertCanReadUsageTable(env: Env, userToken: string): Promise<void> {
+  if (!env.SQL_WAREHOUSE_ID) {
+    throw new DataSourceSetupError(
+      [
+        'SQL_WAREHOUSE_ID must be configured to verify system.billing.usage access',
+        'before creating the FOCUS pipeline/job.',
+      ].join(' '),
+      400,
+    );
+  }
+  const executor = buildUserExecutor(env, userToken);
+  if (!executor) {
+    throw new DataSourceSetupError(
+      'Failed to build Databricks SQL executor for system.billing.usage access check.',
+      500,
+    );
+  }
+  try {
+    await executor.run(
+      'SELECT 1 AS ok FROM system.billing.usage LIMIT 1',
+      [],
+      z.object({ ok: z.number() }),
+    );
+  } catch (err) {
+    throw new DataSourceSetupError(
+      [
+        'Cannot read system.billing.usage with the current user.',
+        'Grant USE CATALOG on system, USE SCHEMA on system.billing, and SELECT on',
+        'system.billing.usage before creating the FOCUS pipeline/job.',
+        (err as Error).message,
+      ].join(' '),
+      400,
+    );
+  }
 }
 
 /**
