@@ -216,31 +216,23 @@ export const ja: Dictionary = {
       last30d: '直近30日',
     },
     catalog: {
-      'databricks-system-tables': {
+      databricks_focus13: {
         description: 'Databricks の利用量とリスト価格を FOCUS 1.3 形式に正規化',
         subtitle: '',
       },
-      'aws-cur': {
-        description: 'CUR 2.0 経由で S3 から取り込む EC2 / EBS / S3 の支出',
+      aws: {
+        description: 'AWS Cost & Usage Report は近日公開予定です。',
         subtitle: 'Amazon Web Services 提供',
       },
-      'azure-cost-management': {
-        description: 'Azure Cost Management データを ADLS Gen2 へ日次エクスポート',
-        subtitle: 'Microsoft Azure 提供',
-      },
-      'tagging-policy': {
-        description: 'コンピュート / 予算ポリシーで強制するコスト按分用タグ',
-        subtitle: '',
-      },
-      'gcp-cloud-billing': {
-        description: 'Google Cloud の BigQuery 課金エクスポートをウェアハウスへ連携',
+      gcp: {
+        description: 'Google Cloud 課金エクスポートは近日公開予定です。',
         subtitle: 'Google Cloud 提供',
       },
-      'snowflake-credits': {
-        description: 'ウェアハウスのクレジット消費量を Databricks DBU と比較',
+      snowflake: {
+        description: 'Snowflake credits は近日公開予定です。',
         subtitle: 'Snowflake 提供',
       },
-      'custom-source': {
+      custom: {
         description: 'Auto Loader や Lakeflow Connect を介して独自のコストデータを取り込み',
         subtitle: 'お客様提供',
       },

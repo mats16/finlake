@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { DatabaseClient } from '@lakecost/db';
 import {
+  DATA_SOURCE_TEMPLATES,
   DATABRICKS_FOCUS_VERSION,
   DataSourceCreateBodySchema,
   DataSourceSetupBodySchema,
@@ -25,7 +26,11 @@ const IdSchema = z
 export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
   const router = Router();
 
-  router.get('/', async (_req, res, next) => {
+  router.get('/templates', (_req, res) => {
+    res.json({ items: DATA_SOURCE_TEMPLATES });
+  });
+
+  router.get('/configurations', async (_req, res, next) => {
     try {
       const items = await db.repos.dataSources.list();
       res.json({ items });
@@ -34,7 +39,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.post('/', async (req, res, next) => {
+  router.post('/configurations', async (req, res, next) => {
     try {
       const parsed = DataSourceCreateBodySchema.safeParse(req.body);
       if (!parsed.success) {
@@ -59,7 +64,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.get('/:id', async (req, res, next) => {
+  router.get('/configurations/:id', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -77,7 +82,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.put('/:id', async (req, res, next) => {
+  router.patch('/configurations/:id', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -101,7 +106,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.delete('/:id', async (req, res, next) => {
+  router.delete('/configurations/:id', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -131,7 +136,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.post('/:id/setup', async (req, res, next) => {
+  router.post('/configurations/:id/setup', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {
@@ -160,7 +165,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
     }
   });
 
-  router.post('/:id/run', async (req, res, next) => {
+  router.post('/configurations/:id/run', async (req, res, next) => {
     try {
       const idParse = IdSchema.safeParse(req.params.id);
       if (!idParse.success) {

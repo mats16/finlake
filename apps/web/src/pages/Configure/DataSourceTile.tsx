@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Badge, Card, CardContent } from '@databricks/appkit-ui/react';
-import type { DataSourceTemplate } from './dataSourceCatalog';
+import type { DataSourceTemplate, TemplateLogo } from './dataSourceCatalog';
 import { VendorLogo } from './VendorLogo';
 import { Sparkline } from './Sparkline';
 import { useI18n } from '../../i18n';
@@ -17,8 +17,9 @@ export interface TileBadge {
 }
 
 interface Props {
-  /** Static template metadata (brand color, vendor abbr, default name). */
+  /** Static template metadata from the API. */
   source: DataSourceTemplate;
+  logo?: TemplateLogo;
   /** Override the rendered name (for DB rows the user has renamed). */
   displayName?: string;
   /** Override the rendered description. */
@@ -48,6 +49,7 @@ const BADGE_CLASSES: Record<TileBadge['variant'], string> = {
 
 export function DataSourceTile({
   source,
+  logo,
   displayName,
   displayDescription,
   badges = [],
@@ -57,9 +59,8 @@ export function DataSourceTile({
   muted,
 }: Props) {
   const { t } = useI18n();
-  const description =
-    displayDescription ?? t(`dataSources.catalog.${source.templateId}.description`);
-  const subtitle = t(`dataSources.catalog.${source.templateId}.subtitle`);
+  const description = displayDescription ?? t(`dataSources.catalog.${source.id}.description`);
+  const subtitle = t(`dataSources.catalog.${source.id}.subtitle`);
   const name = displayName ?? source.name;
   const interactive = Boolean(onClick);
 
@@ -105,7 +106,7 @@ export function DataSourceTile({
       </div>
 
       <CardContent className="flex min-h-14 items-center justify-center px-0">
-        <VendorLogo source={source} />
+        <VendorLogo source={source} logo={logo} />
         {rightAccessory ? <div className="ml-auto">{rightAccessory}</div> : null}
       </CardContent>
 

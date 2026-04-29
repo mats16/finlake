@@ -8,6 +8,7 @@ import type {
   DataSourceRunResult,
   DataSourceSetupBody,
   DataSourceSetupResult,
+  DataSourceTemplate,
   DataSourceUpdateBody,
   ProvisionResult,
   SetupCheckResult,
@@ -153,8 +154,16 @@ export function useCatalogs() {
 export function useDataSources() {
   return useQuery({
     queryKey: ['dataSources'],
-    queryFn: () => apiFetch<{ items: DataSource[] }>('/api/data-sources'),
+    queryFn: () => apiFetch<{ items: DataSource[] }>('/api/data-sources/configurations'),
     staleTime: 60 * 1000,
+  });
+}
+
+export function useDataSourceTemplates() {
+  return useQuery({
+    queryKey: ['dataSourceTemplates'],
+    queryFn: () => apiFetch<{ items: DataSourceTemplate[] }>('/api/data-sources/templates'),
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -162,7 +171,8 @@ export function useDataSource(id: string | undefined) {
   return useQuery({
     queryKey: ['dataSources', id],
     enabled: typeof id === 'string',
-    queryFn: () => apiFetch<DataSource>(`/api/data-sources/${encodeURIComponent(id!)}`),
+    queryFn: () =>
+      apiFetch<DataSource>(`/api/data-sources/configurations/${encodeURIComponent(id!)}`),
     staleTime: 60 * 1000,
   });
 }
@@ -171,7 +181,7 @@ export function useCreateDataSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: DataSourceCreateBody) =>
-      apiFetch<DataSource>('/api/data-sources', {
+      apiFetch<DataSource>('/api/data-sources/configurations', {
         method: 'POST',
         body: JSON.stringify(body),
       }),
@@ -186,8 +196,8 @@ export function useUpdateDataSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: DataSourceUpdateBody }) =>
-      apiFetch<DataSource>(`/api/data-sources/${encodeURIComponent(id)}`, {
-        method: 'PUT',
+      apiFetch<DataSource>(`/api/data-sources/configurations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
         body: JSON.stringify(body),
       }),
     onSuccess: (data) => {
@@ -201,7 +211,9 @@ export function useDeleteDataSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/api/data-sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      apiFetch<void>(`/api/data-sources/configurations/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
     onSuccess: (_data, id) => {
       qc.removeQueries({ queryKey: ['dataSources', id] });
       qc.invalidateQueries({ queryKey: ['dataSources'] });
@@ -213,10 +225,13 @@ export function useSetupDataSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: DataSourceSetupBody }) =>
-      apiFetch<DataSourceSetupResult>(`/api/data-sources/${encodeURIComponent(id)}/setup`, {
-        method: 'POST',
-        body: JSON.stringify(body),
-      }),
+      apiFetch<DataSourceSetupResult>(
+        `/api/data-sources/configurations/${encodeURIComponent(id)}/setup`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      ),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['dataSources', data.dataSourceId] });
       qc.invalidateQueries({ queryKey: ['dataSources'] });
@@ -227,10 +242,13 @@ export function useSetupDataSource() {
 export function useRunDataSourceJob() {
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<DataSourceRunResult>(`/api/data-sources/${encodeURIComponent(id)}/run`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      }),
+      apiFetch<DataSourceRunResult>(
+        `/api/data-sources/configurations/${encodeURIComponent(id)}/run`,
+        {
+          method: 'POST',
+          body: JSON.stringify({}),
+        },
+      ),
   });
 }
 

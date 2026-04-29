@@ -1,17 +1,16 @@
-import type { DataSourceTemplate, DataSourceVendor } from './dataSourceCatalog';
+import type { DataSourceTemplate, TemplateLogo } from './dataSourceCatalog';
 import databricksSymbolUrl from '../../assets/databricks-symbol-color.png';
 
-const ABBR: Record<DataSourceVendor, string> = {
-  Databricks: 'DBR',
-  AWS: 'AWS',
-  Azure: 'AZ',
-  GCP: 'GCP',
-  Snowflake: 'SF',
-  Custom: 'src',
-};
-
-export function VendorLogo({ source, size = 56 }: { source: DataSourceTemplate; size?: number }) {
-  if (source.vendor === 'Databricks') {
+export function VendorLogo({
+  source,
+  logo,
+  size = 56,
+}: {
+  source: DataSourceTemplate;
+  logo?: TemplateLogo;
+  size?: number;
+}) {
+  if (logo?.kind === 'databricks') {
     return (
       <img
         src={databricksSymbolUrl}
@@ -30,12 +29,12 @@ export function VendorLogo({ source, size = 56 }: { source: DataSourceTemplate; 
       style={{
         width: size,
         height: size,
-        background: source.brandColor,
-        color: source.brandTextColor ?? '#ffffff',
+        background: source.appearance.brandColor,
+        color: source.appearance.brandTextColor ?? '#ffffff',
       }}
       aria-hidden
     >
-      {ABBR[source.vendor]}
+      {logo?.kind === 'abbr' ? logo.label : source.id.slice(0, 3)}
     </div>
   );
 }

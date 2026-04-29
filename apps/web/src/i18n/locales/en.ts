@@ -211,31 +211,23 @@ export const en = {
       last30d: 'Last 30d',
     },
     catalog: {
-      'databricks-system-tables': {
+      databricks_focus13: {
         description: 'Databricks usage and list prices normalized to FOCUS 1.3',
         subtitle: '',
       },
-      'aws-cur': {
-        description: 'EC2 / EBS / S3 spend ingested via CUR 2.0 to S3',
+      aws: {
+        description: 'AWS Cost & Usage Report support is coming soon.',
         subtitle: 'by Amazon Web Services',
       },
-      'azure-cost-management': {
-        description: 'Daily export of Azure Cost Management data to ADLS Gen2',
-        subtitle: 'by Microsoft Azure',
-      },
-      'tagging-policy': {
-        description: 'Cost-attribution tags enforced via compute & budget policies',
-        subtitle: '',
-      },
-      'gcp-cloud-billing': {
-        description: 'Google Cloud billing export to BigQuery, federated into the warehouse',
+      gcp: {
+        description: 'Google Cloud billing export support is coming soon.',
         subtitle: 'by Google Cloud',
       },
-      'snowflake-credits': {
-        description: 'Compare warehouse credit consumption against Databricks DBUs',
+      snowflake: {
+        description: 'Snowflake credits support is coming soon.',
         subtitle: 'by Snowflake',
       },
-      'custom-source': {
+      custom: {
         description: 'Bring your own cost feed via Auto Loader or Lakeflow Connect',
         subtitle: 'by your team',
       },

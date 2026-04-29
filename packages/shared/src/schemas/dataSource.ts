@@ -57,6 +57,63 @@ export const DataSourceUpdateBodySchema = z.object({
 });
 export type DataSourceUpdateBody = z.infer<typeof DataSourceUpdateBodySchema>;
 
+export const DataSourceTemplateSchema = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(256),
+  description: z.string().max(2048),
+  subtitle: z.string().max(256),
+  available: z.boolean(),
+  appearance: z.object({
+    brandColor: z.string().min(1).max(32),
+    brandTextColor: z.string().min(1).max(32).optional(),
+  }),
+});
+export type DataSourceTemplate = z.infer<typeof DataSourceTemplateSchema>;
+
+export const DATA_SOURCE_TEMPLATES = [
+  {
+    id: 'databricks_focus13',
+    name: 'Databricks (FOCUS 1.3)',
+    description: 'Databricks usage and list prices normalized to FOCUS 1.3',
+    subtitle: '',
+    available: true,
+    appearance: {
+      brandColor: '#FF3621',
+    },
+  },
+  {
+    id: 'aws',
+    name: 'Amazon Web Services',
+    description: 'AWS Cost & Usage Report support is coming soon.',
+    subtitle: 'by Amazon Web Services',
+    available: false,
+    appearance: {
+      brandColor: '#FF9900',
+      brandTextColor: '#232F3E',
+    },
+  },
+  {
+    id: 'gcp',
+    name: 'Google Cloud',
+    description: 'Google Cloud billing export support is coming soon.',
+    subtitle: 'by Google Cloud',
+    available: false,
+    appearance: {
+      brandColor: '#4285F4',
+    },
+  },
+  {
+    id: 'snowflake',
+    name: 'Snowflake',
+    description: 'Snowflake credits support is coming soon.',
+    subtitle: 'by Snowflake',
+    available: false,
+    appearance: {
+      brandColor: '#29B5E8',
+    },
+  },
+] satisfies DataSourceTemplate[];
+
 /**
  * Default Quartz cron for Databricks system.billing usage refresh — daily at
  * 02:00 UTC, picked because system.billing.usage publishes once per day.
