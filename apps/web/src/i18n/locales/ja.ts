@@ -1,7 +1,7 @@
 import type { Dictionary } from './en';
 
 export const ja: Dictionary = {
-  appName: 'LakeCost',
+  appName: 'FinLake',
   nav: {
     finops: 'FinOps',
     overview: '概要',
@@ -29,7 +29,7 @@ export const ja: Dictionary = {
   account: {
     openMenu: 'アカウントメニューを開く',
     localUser: 'ローカルユーザー',
-    sectionApp: 'LakeCost',
+    sectionApp: 'FinLake',
     settings: '設定',
     databricksConsole: 'Databricks コンソール',
   },
@@ -131,7 +131,7 @@ export const ja: Dictionary = {
       title: '変換パイプライン',
       desc: 'CUR や Cost Management などの生データを Gold コストファクトテーブルへ正規化するメダリオンパイプラインを作成します。',
     },
-    stubBanner: '近日公開予定です。LakeCost のロードマップで進捗を追跡しています。',
+    stubBanner: '近日公開予定です。FinLake のロードマップで進捗を追跡しています。',
   },
   dataSources: {
     currentTitle: '現在のデータソース',
@@ -155,7 +155,7 @@ export const ja: Dictionary = {
     },
     drawer: {
       notImplemented:
-        'このプロバイダーはまだ実装されていません。LakeCost のロードマップで進捗を追跡しています。',
+        'このプロバイダーはまだ実装されていません。FinLake のロードマップで進捗を追跡しています。',
     },
     systemTables: {
       title: 'FOCUS マテリアライズドビュー',

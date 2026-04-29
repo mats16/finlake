@@ -1,5 +1,5 @@
 export const en = {
-  appName: 'LakeCost',
+  appName: 'FinLake',
   nav: {
     finops: 'FinOps',
     overview: 'Overview',
@@ -27,7 +27,7 @@ export const en = {
   account: {
     openMenu: 'Open account menu',
     localUser: 'Local user',
-    sectionApp: 'LakeCost',
+    sectionApp: 'FinLake',
     settings: 'Settings',
     databricksConsole: 'Databricks Console',
   },
@@ -126,7 +126,7 @@ export const en = {
       title: 'Transformations',
       desc: 'Author the medallion pipeline that normalizes raw cost feeds (CUR, Cost Mgmt) into the gold cost facts table.',
     },
-    stubBanner: 'Coming soon. Track progress in the LakeCost roadmap.',
+    stubBanner: 'Coming soon. Track progress in the FinLake roadmap.',
   },
   dataSources: {
     currentTitle: 'Current data sources',
@@ -150,7 +150,7 @@ export const en = {
     },
     drawer: {
       notImplemented:
-        "This provider is not yet implemented. We're tracking it on the LakeCost roadmap.",
+        "This provider is not yet implemented. We're tracking it on the FinLake roadmap.",
     },
     systemTables: {
       title: 'FOCUS materialized view',
