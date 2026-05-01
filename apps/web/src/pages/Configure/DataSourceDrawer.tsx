@@ -247,9 +247,7 @@ function AwsSourceForm({ form }: { form: ReturnType<typeof useAwsFocusForm> }) {
             <>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label className="grid gap-1 text-xs">
-                  <span className="text-muted-foreground">
-                    {t('dataSources.aws.s3PathPrefix')}
-                  </span>
+                  <span className="text-muted-foreground">{t('dataSources.aws.s3PathPrefix')}</span>
                   <S3PrefixInput
                     form={form}
                     disabled={form.registered || form.savePending}
@@ -257,9 +255,7 @@ function AwsSourceForm({ form }: { form: ReturnType<typeof useAwsFocusForm> }) {
                   />
                 </label>
                 <label className="grid gap-1 text-xs">
-                  <span className="text-muted-foreground">
-                    {t('dataSources.aws.exportName')}
-                  </span>
+                  <span className="text-muted-foreground">{t('dataSources.aws.exportName')}</span>
                   <Input
                     value={form.exportName}
                     onChange={(e) => form.setExportName(e.target.value)}
@@ -310,9 +306,7 @@ function AwsSourceForm({ form }: { form: ReturnType<typeof useAwsFocusForm> }) {
           form.linkedLocations.length === 0 ? (
             <Alert>
               <Info />
-              <AlertDescription>
-                {t('dataSources.aws.noLinkedExternalLocations')}
-              </AlertDescription>
+              <AlertDescription>{t('dataSources.aws.noLinkedExternalLocations')}</AlertDescription>
             </Alert>
           ) : null}
 
@@ -448,9 +442,7 @@ function AwsExportModal({ form }: { form: ReturnType<typeof useAwsFocusForm> }) 
             />
           </label>
         </div>
-        <p className="text-muted-foreground text-xs">
-          {t('dataSources.aws.credentialsNotSaved')}
-        </p>
+        <p className="text-muted-foreground text-xs">{t('dataSources.aws.credentialsNotSaved')}</p>
         <div className="flex justify-end">
           <Button
             type="button"
