@@ -34,25 +34,85 @@ function rangeQuery(range: RangeParams): string {
   return sp.toString();
 }
 
-export function useUsageDaily(range: RangeParams) {
+export function useUsageDaily(range: RangeParams, enabled = true) {
   return useQuery({
     queryKey: ['usage', 'daily', range],
     queryFn: () => apiFetch<UsageDailyResponse>(`/api/usage/daily?${rangeQuery(range)}`),
+    enabled,
   });
 }
 
-export function useUsageBySku(range: RangeParams) {
+export function useUsageBySku(range: RangeParams, enabled = true) {
   return useQuery({
     queryKey: ['usage', 'bySku', range],
     queryFn: () => apiFetch<{ rows: UsageBySkuRow[] }>(`/api/usage/by-sku?${rangeQuery(range)}`),
+    enabled,
   });
 }
 
-export function useUsageTopWorkloads(range: RangeParams) {
+export function useUsageTopWorkloads(range: RangeParams, enabled = true) {
   return useQuery({
     queryKey: ['usage', 'top', range],
     queryFn: () =>
       apiFetch<{ rows: UsageTopWorkloadRow[] }>(`/api/usage/top-workloads?${rangeQuery(range)}`),
+    enabled,
+  });
+}
+
+export interface FocusOverviewSource {
+  id: number;
+  templateId: string;
+  name: string;
+  providerName: string;
+  tableName: string;
+  focusVersion: string | null;
+  updatedAt: string;
+}
+
+export interface FocusOverviewDailyRow {
+  dataSourceId: number;
+  usageDate: string;
+  providerName: string;
+  costUsd: number;
+}
+
+export interface FocusOverviewServiceRow {
+  dataSourceId: number;
+  providerName: string;
+  serviceName: string;
+  costUsd: number;
+}
+
+export interface FocusOverviewSkuRow {
+  dataSourceId: number;
+  providerName: string;
+  skuName: string;
+  costUsd: number;
+}
+
+export interface FocusOverviewCoverageRow {
+  dataSourceId: number;
+  providerName: string;
+  rowCount: number;
+  taggedRows: number;
+  tagCoveragePct: number;
+  lastChargeAt: string | null;
+}
+
+export interface FocusOverviewResponse {
+  sources: FocusOverviewSource[];
+  daily: FocusOverviewDailyRow[];
+  services: FocusOverviewServiceRow[];
+  skus: FocusOverviewSkuRow[];
+  coverage: FocusOverviewCoverageRow[];
+  errors: Array<{ dataSourceId: number; name: string; tableName: string; message: string }>;
+  generatedAt: string;
+}
+
+export function useFocusOverview(range: RangeParams) {
+  return useQuery({
+    queryKey: ['overview', 'focus', range],
+    queryFn: () => apiFetch<FocusOverviewResponse>(`/api/overview/focus?${rangeQuery(range)}`),
   });
 }
 
