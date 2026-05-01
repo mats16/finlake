@@ -264,6 +264,17 @@ a {
   padding: 6px 10px;
 }
 
+.sidebar nav .nav-children a.active {
+  background: transparent;
+  color: var(--sidebar-foreground);
+  font-weight: 600;
+}
+
+.sidebar nav .nav-children a.active:hover {
+  background: transparent;
+  color: var(--sidebar-foreground);
+}
+
 .main {
   padding: 32px;
   overflow-y: auto;
