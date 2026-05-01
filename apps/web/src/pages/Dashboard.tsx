@@ -289,8 +289,8 @@ export function Dashboard() {
         <Alert variant="destructive" className="mb-4">
           <AlertCircle />
           <AlertDescription>
-            Failed to load FOCUS cost tables through the OBO token. Check SQL warehouse
-            configuration and SELECT permissions on each data_sources.tableName.
+            Failed to load FOCUS daily rollup tables through the OBO token. Check SQL warehouse
+            configuration and SELECT permissions on each gold *_daily table.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -494,9 +494,7 @@ export function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Top Services by Spend</CardTitle>
-            <CardDescription>
-              Aggregated from enabled FOCUS tables listed in data_sources.tableName.
-            </CardDescription>
+            <CardDescription>Aggregated from enabled FOCUS daily rollup tables.</CardDescription>
           </CardHeader>
           <CardContent>
             {current.isLoading ? (
@@ -747,9 +745,8 @@ export function Dashboard() {
             : 'none'}
         </div>
         <div>
-          Last updated: {lastUpdated}. Cost source: enabled FOCUS tables from
-          data_sources.tableName, queried with the user OBO token. TCO joins should account for
-          shared cluster mappings.
+          Last updated: {lastUpdated}. Cost source: enabled gold *_daily tables queried with the
+          user OBO token. TCO joins should account for shared cluster mappings.
         </div>
       </footer>
     </>

@@ -102,7 +102,7 @@ function focusOverviewHandler(db: DatabaseClient, env: Env): RequestHandler {
             errors.push({
               dataSourceId: source.id,
               name: source.name,
-              tableName: source.tableName,
+              tableName: focusDailyTableName(source.tableName).display,
               message: (err as Error).message,
             });
           }
@@ -140,6 +140,21 @@ function quoteTableName(value: string): string {
     .join('.');
 }
 
+function focusDailyTableName(value: string): { display: string; sql: string } {
+  const parsed = DataSourceTableNameSchema.parse(value);
+  const parts = parsed.split('.');
+  const table = parts[parts.length - 1]!;
+  const dailyTable = table.endsWith('_daily') ? table : `${table}_daily`;
+  const dailyParts =
+    parts.length === 3
+      ? [parts[0]!, 'gold', dailyTable]
+      : parts.length === 2
+        ? ['gold', dailyTable]
+        : [dailyTable];
+  const display = dailyParts.join('.');
+  return { display, sql: quoteTableName(display) };
+}
+
 function baseParams(source: DataSource, range: UsageRange): SqlParam[] {
   return [
     { name: 'data_source_id', value: source.id, type: 'INT' },
@@ -154,17 +169,17 @@ async function queryDaily(
   source: DataSource,
   range: UsageRange,
 ): Promise<FocusDailyRow[]> {
-  const table = quoteTableName(source.tableName);
+  const table = focusDailyTableName(source.tableName).sql;
   return executor.run(
     /* sql */ `
 SELECT
   :data_source_id AS data_source_id,
-  date_format(CAST(ChargePeriodStart AS DATE), 'yyyy-MM-dd') AS usage_date,
+  date_format(x_ChargeDate, 'yyyy-MM-dd') AS usage_date,
   COALESCE(ProviderName, :provider_name) AS provider_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM ${table}
-WHERE ChargePeriodStart >= :start_ts
-  AND ChargePeriodStart <  :end_ts
+WHERE CAST(x_ChargeDate AS TIMESTAMP) >= :start_ts
+  AND CAST(x_ChargeDate AS TIMESTAMP) <  :end_ts
 GROUP BY 1, 2, 3
 ORDER BY 2
 `,
@@ -178,17 +193,17 @@ async function queryServices(
   source: DataSource,
   range: UsageRange,
 ): Promise<FocusServiceRow[]> {
-  const table = quoteTableName(source.tableName);
+  const table = focusDailyTableName(source.tableName).sql;
   return executor.run(
     /* sql */ `
 SELECT
   :data_source_id AS data_source_id,
   COALESCE(ProviderName, :provider_name) AS provider_name,
-  COALESCE(ServiceName, ServiceCategory, ChargeDescription, 'Unknown') AS service_name,
+  COALESCE(ServiceName, ServiceCategory, 'Unknown') AS service_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM ${table}
-WHERE ChargePeriodStart >= :start_ts
-  AND ChargePeriodStart <  :end_ts
+WHERE CAST(x_ChargeDate AS TIMESTAMP) >= :start_ts
+  AND CAST(x_ChargeDate AS TIMESTAMP) <  :end_ts
 GROUP BY 1, 2, 3
 ORDER BY 4 DESC
 LIMIT 20
@@ -203,17 +218,17 @@ async function querySkus(
   source: DataSource,
   range: UsageRange,
 ): Promise<FocusSkuRow[]> {
-  const table = quoteTableName(source.tableName);
+  const table = focusDailyTableName(source.tableName).sql;
   return executor.run(
     /* sql */ `
 SELECT
   :data_source_id AS data_source_id,
   COALESCE(ProviderName, :provider_name) AS provider_name,
-  COALESCE(SkuId, SkuMeter, ChargeDescription, ServiceName, 'Unknown') AS sku_name,
+  COALESCE(SkuId, SkuMeter, ServiceName, 'Unknown') AS sku_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM ${table}
-WHERE ChargePeriodStart >= :start_ts
-  AND ChargePeriodStart <  :end_ts
+WHERE CAST(x_ChargeDate AS TIMESTAMP) >= :start_ts
+  AND CAST(x_ChargeDate AS TIMESTAMP) <  :end_ts
 GROUP BY 1, 2, 3
 ORDER BY 4 DESC
 LIMIT 50
@@ -228,24 +243,19 @@ async function queryCoverage(
   source: DataSource,
   range: UsageRange,
 ): Promise<FocusCoverageRow[]> {
-  const table = quoteTableName(source.tableName);
+  const table = focusDailyTableName(source.tableName).sql;
   return executor.run(
     /* sql */ `
 SELECT
   :data_source_id AS data_source_id,
   COALESCE(ProviderName, :provider_name) AS provider_name,
   CAST(COUNT(*) AS DOUBLE) AS row_count,
-  CAST(SUM(CASE WHEN Tags IS NOT NULL AND size(Tags) > 0 THEN 1 ELSE 0 END) AS DOUBLE) AS tagged_rows,
-  CAST(
-    CASE
-      WHEN COUNT(*) = 0 THEN 0
-      ELSE SUM(CASE WHEN Tags IS NOT NULL AND size(Tags) > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*)
-    END AS DOUBLE
-  ) AS tag_coverage_pct,
-  CAST(MAX(ChargePeriodEnd) AS STRING) AS last_charge_at
+  CAST(0 AS DOUBLE) AS tagged_rows,
+  CAST(0 AS DOUBLE) AS tag_coverage_pct,
+  CAST(MAX(x_ChargeDate) AS STRING) AS last_charge_at
 FROM ${table}
-WHERE ChargePeriodStart >= :start_ts
-  AND ChargePeriodStart <  :end_ts
+WHERE CAST(x_ChargeDate AS TIMESTAMP) >= :start_ts
+  AND CAST(x_ChargeDate AS TIMESTAMP) <  :end_ts
 GROUP BY 1, 2
 `,
     baseParams(source, range),
@@ -259,7 +269,7 @@ function sourceSummary(source: DataSource) {
     templateId: source.templateId,
     name: source.name,
     providerName: source.providerName,
-    tableName: source.tableName,
+    tableName: focusDailyTableName(source.tableName).display,
     focusVersion: source.focusVersion,
     updatedAt: source.updatedAt,
   };
