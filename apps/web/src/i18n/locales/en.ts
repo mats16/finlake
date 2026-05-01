@@ -159,8 +159,7 @@ export const en = {
       step2: 'Step 2 — App service principal grants',
       verifySelect: 'Verify SELECT permission',
       step3: 'Step 3 — FOCUS view',
-      focusViewDesc:
-        'Creates Spark Declarative Pipelines that build a materialized view mapping `system.billing.*` to the FOCUS format.',
+      focusViewDesc: 'Generates a FOCUS-formatted materialized view from system tables.',
       catalog: 'Catalog (from Admin)',
       schema: 'Schema',
       tier: 'Tier (schema)',
@@ -190,6 +189,7 @@ export const en = {
     },
     awsCur: {
       title: 'Data Export',
+      description: 'Ingests exported Parquet files in Delta format.',
       placeholder: 's3 url',
       verify: 'Verify CUR',
       awsAccountId: 'AWS account ID',

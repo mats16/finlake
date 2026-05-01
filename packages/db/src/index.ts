@@ -13,7 +13,7 @@ export async function createDatabaseClient(env: Env): Promise<DatabaseClient> {
     case 'sqlite': {
       const sqlitePath = resolveSqlitePath(env);
       logger.info({ sqlitePath }, 'DB_BACKEND=sqlite, using SQLite');
-      return SqliteClient.create({ sqlitePath });
+      return await SqliteClient.create({ sqlitePath });
     }
 
     case 'lakebase': {
@@ -35,7 +35,7 @@ export async function createDatabaseClient(env: Env): Promise<DatabaseClient> {
       }
       const sqlitePath = resolveSqlitePath(env);
       logger.info({ sqlitePath }, 'DB_BACKEND=auto, using SQLite fallback');
-      return SqliteClient.create({ sqlitePath });
+      return await SqliteClient.create({ sqlitePath });
     }
   }
 }

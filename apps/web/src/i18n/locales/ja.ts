@@ -164,8 +164,7 @@ export const ja: Dictionary = {
       step2: 'ステップ 2 — アプリのサービスプリンシパル権限',
       verifySelect: 'SELECT 権限を検証',
       step3: 'ステップ 3 — FOCUS ビュー',
-      focusViewDesc:
-        '`system.billing.*` を FOCUS 形式にマッピングしたマテリアライズドビューを作成する Spark Declarative Pipelines を作成します。',
+      focusViewDesc: 'システムテーブルから FOCUS 形式のマテリアライズドビューを生成します。',
       catalog: 'カタログ（管理画面で設定）',
       schema: 'スキーマ',
       tier: 'ティア（スキーマ）',
@@ -195,6 +194,7 @@ export const ja: Dictionary = {
     },
     awsCur: {
       title: 'データエクスポート',
+      description: 'エクスポートした Parquet ファイルを、Delta 形式で取り込みます。',
       placeholder: 'S3 URL',
       verify: 'CUR を検証',
       awsAccountId: 'AWS アカウント ID',

@@ -59,6 +59,13 @@ export function DataSourceDrawer({ dataSourceId, onClose }: Props) {
   const ds = useDataSource(dataSourceId ?? undefined);
   const isOpen = dataSourceId !== null;
   const row = ds.data;
+  const template = row ? findTemplateForRow(row) : undefined;
+  const descriptionKey =
+    template?.id === 'databricks_focus13'
+      ? 'dataSources.systemTables.focusViewDesc'
+      : template?.id === 'aws'
+        ? 'dataSources.awsCur.description'
+        : null;
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
@@ -69,19 +76,12 @@ export function DataSourceDrawer({ dataSourceId, onClose }: Props) {
       >
         <SheetHeader>
           <SheetTitle>
-            {row
-              ? (() => {
-                  const tpl = findTemplateForRow(row);
-                  return tpl ? displayNameForRow(row, tpl) : row.name;
-                })()
-              : t('common.loading')}
+            {row ? (template ? displayNameForRow(row, template) : row.name) : t('common.loading')}
           </SheetTitle>
         </SheetHeader>
         <div className="flex flex-col gap-4 overflow-auto px-4 pb-6">
-          {row?.providerName === 'Databricks' ? (
-            <p className="text-muted-foreground text-sm">
-              {t('dataSources.systemTables.focusViewDesc')}
-            </p>
+          {descriptionKey ? (
+            <p className="text-muted-foreground text-sm">{t(descriptionKey)}</p>
           ) : null}
           {row ? <Configurator row={row} onClose={onClose} /> : null}
         </div>
