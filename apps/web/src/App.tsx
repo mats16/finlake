@@ -14,8 +14,9 @@ export function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<Dashboard />} />
+        <Route path="/overview/budgets" element={<Budgets />} />
         <Route path="/explorer" element={<CostExplorer />} />
-        <Route path="/budgets" element={<Budgets />} />
+        <Route path="/budgets" element={<Navigate to="/overview/budgets" replace />} />
 
         <Route path="/configure" element={<ConfigureLayout />}>
           <Route index element={<Navigate to="data-sources" replace />} />

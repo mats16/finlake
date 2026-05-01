@@ -23,7 +23,6 @@ import {
   LineChart,
   Notebook,
   Shapes,
-  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { useI18n, type Locale } from '../../i18n';
@@ -47,7 +46,10 @@ const INFORM: NavGroup = {
   labelKey: 'nav.inform',
   icon: ChartLine,
   matchPrefix: '/overview',
-  items: [{ to: '/overview', labelKey: 'nav.overview' }],
+  items: [
+    { to: '/overview', labelKey: 'nav.overview', end: true },
+    { to: '/overview/budgets', labelKey: 'nav.budgets' },
+  ],
 };
 
 const CONFIGURE: NavGroup = {
@@ -61,10 +63,7 @@ const CONFIGURE: NavGroup = {
   ],
 };
 
-const SECONDARY: NavItem[] = [
-  { to: '/explorer', labelKey: 'nav.costExplorer', icon: LineChart },
-  { to: '/budgets', labelKey: 'nav.budgets', icon: Wallet },
-];
+const SECONDARY: NavItem[] = [{ to: '/explorer', labelKey: 'nav.costExplorer', icon: LineChart }];
 
 interface ExternalNavItem {
   path: string;
@@ -137,6 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <NavLink
                     key={item.to}
                     to={item.to}
+                    end={item.end}
                     className={({ isActive }) => (isActive ? 'active' : '')}
                   >
                     <span>{t(item.labelKey)}</span>
