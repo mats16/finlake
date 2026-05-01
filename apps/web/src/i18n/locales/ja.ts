@@ -211,6 +211,8 @@ export const ja: Dictionary = {
       sessionToken: 'セッショントークン',
       sessionTokenPlaceholder: '一時認証情報の場合のみ任意で入力',
       saveExternalLocation: '取り込み元を保存',
+      registeredReadOnly:
+        'この AWS データソースは登録済みです。バケット、プレフィックス、エクスポート名は変更できません。',
       exportCreateSection: 'エクスポートを作成',
       createExport: '作成',
       exportCreated: 'エクスポートを設定しました: {exportArn}',

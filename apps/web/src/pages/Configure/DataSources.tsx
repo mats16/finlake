@@ -26,6 +26,7 @@ import {
   type DataSourceTemplate,
 } from './dataSourceCatalog';
 import { useI18n } from '../../i18n';
+import type { AwsFocusDraft } from './useAwsFocusForm';
 
 const FALLBACK_TEMPLATE: DataSourceTemplate = {
   id: 'custom',
@@ -71,6 +72,7 @@ export function DataSources() {
   const { t } = useI18n();
   const [filter, setFilter] = useState('');
   const [openId, setOpenId] = useState<number | null>(null);
+  const [draftAwsSource, setDraftAwsSource] = useState<AwsFocusDraft | null>(null);
   const dataSources = useDataSources();
   const templates = useDataSourceTemplates();
   const settings = useAppSettings();
@@ -128,6 +130,17 @@ export function DataSources() {
     const tableName = canAddMultiple(tpl)
       ? nextTableName(input.defaultTableName, rows)
       : initialTableName(input, settings.data?.settings[CATALOG_SETTING_KEY]?.trim() ?? '');
+    if (tpl.id === 'aws') {
+      setOpenId(null);
+      setDraftAwsSource({
+        templateId: tpl.id,
+        name: tpl.name,
+        providerName: input.providerName,
+        tableName,
+        description: tpl.description,
+      });
+      return;
+    }
     const created = await createDs.mutateAsync({
       templateId: tpl.id,
       name: tpl.name,
@@ -136,6 +149,7 @@ export function DataSources() {
       description: tpl.description,
       enabled: false,
     });
+    setDraftAwsSource(null);
     setOpenId(created.id);
   };
 
@@ -205,7 +219,18 @@ export function DataSources() {
         })}
       </div>
 
-      <DataSourceDrawer dataSourceId={openId} onClose={() => setOpenId(null)} />
+      <DataSourceDrawer
+        dataSourceId={openId}
+        draftAwsSource={draftAwsSource}
+        onClose={() => {
+          setOpenId(null);
+          setDraftAwsSource(null);
+        }}
+        onCreated={(row) => {
+          setDraftAwsSource(null);
+          setOpenId(row.id);
+        }}
+      />
     </>
   );
 }

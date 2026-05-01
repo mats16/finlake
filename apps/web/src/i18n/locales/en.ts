@@ -206,6 +206,8 @@ export const en = {
       sessionToken: 'Session token',
       sessionTokenPlaceholder: 'Optional for temporary credentials',
       saveExternalLocation: 'Save source',
+      registeredReadOnly:
+        'This AWS data source is registered. Bucket, prefix, and export name cannot be changed.',
       exportCreateSection: 'Create export',
       createExport: 'Create',
       exportCreated: 'Export configured: {exportArn}',

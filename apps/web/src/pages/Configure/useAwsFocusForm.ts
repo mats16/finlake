@@ -3,6 +3,7 @@ import { BCMDataExportsClient, CreateExportCommand } from '@aws-sdk/client-bcm-d
 import {
   useAppSettings,
   useExternalLocations,
+  useCreateDataSource,
   useMe,
   useRunDataSourceJob,
   useSetupDataSource,
@@ -20,6 +21,7 @@ import {
   tableLeafName,
   unquotedFqn,
   type DataSource,
+  type DataSourceCreateBody,
   type DataSourceSetupResult,
   type ExternalLocationSummary,
   type StorageCredentialSummary,
@@ -30,14 +32,25 @@ const AWS_FOCUS_12_QUERY_STATEMENT =
   'SELECT AvailabilityZone, BilledCost, BillingAccountId, BillingAccountName, BillingAccountType, BillingCurrency, BillingPeriodEnd, BillingPeriodStart, CapacityReservationId, CapacityReservationStatus, ChargeCategory, ChargeClass, ChargeDescription, ChargeFrequency, ChargePeriodEnd, ChargePeriodStart, CommitmentDiscountCategory, CommitmentDiscountId, CommitmentDiscountName, CommitmentDiscountQuantity, CommitmentDiscountStatus, CommitmentDiscountType, CommitmentDiscountUnit, ConsumedQuantity, ConsumedUnit, ContractedCost, ContractedUnitPrice, EffectiveCost, InvoiceId, InvoiceIssuerName, ListCost, ListUnitPrice, PricingCategory, PricingCurrency, PricingCurrencyContractedUnitPrice, PricingCurrencyEffectiveCost, PricingCurrencyListUnitPrice, PricingQuantity, PricingUnit, ProviderName, PublisherName, RegionId, RegionName, ResourceId, ResourceName, ResourceType, ServiceCategory, ServiceName, ServiceSubcategory, SkuId, SkuMeter, SkuPriceDetails, SkuPriceId, SubAccountId, SubAccountName, SubAccountType, Tags, x_Discounts, x_Operation, x_ServiceCode FROM FOCUS_1_2_AWS';
 const AWS_BCM_REGION = 'us-east-1';
 
+export type AwsFocusDraft = Pick<
+  DataSourceCreateBody,
+  'templateId' | 'name' | 'description' | 'providerName' | 'tableName'
+>;
+
 function configString(config: Record<string, unknown>, key: string): string {
   const value = config[key];
   return typeof value === 'string' ? value : '';
 }
 
-export function useAwsFocusForm(row: DataSource) {
+interface UseAwsFocusFormOptions {
+  draft?: AwsFocusDraft;
+  onCreated?: (row: DataSource) => void;
+}
+
+export function useAwsFocusForm(row: DataSource | null, options: UseAwsFocusFormOptions = {}) {
   const storageCredentials = useStorageCredentials();
   const locations = useExternalLocations();
+  const createDs = useCreateDataSource();
   const updateDs = useUpdateDataSource();
   const me = useMe();
   const settings = useAppSettings();
@@ -45,13 +58,15 @@ export function useAwsFocusForm(row: DataSource) {
   const runJob = useRunDataSourceJob();
 
   // --- Remote (server) values ---
-  const remoteAwsAccountId = configString(row.config, 'awsAccountId');
-  const remoteExternalLocationName = configString(row.config, 'externalLocationName');
-  const remoteExportName = configString(row.config, 'exportName');
-  const remoteS3Prefix = configString(row.config, 's3Prefix');
+  const remoteConfig = row?.config ?? {};
+  const remoteAwsAccountId = configString(remoteConfig, 'awsAccountId');
+  const remoteExternalLocationName = configString(remoteConfig, 'externalLocationName');
+  const remoteExternalLocationUrl = configString(remoteConfig, 'externalLocationUrl');
+  const remoteExportName = configString(remoteConfig, 'exportName');
+  const remoteS3Prefix = configString(remoteConfig, 's3Prefix');
   const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
-  const remoteCron = configString(row.config, 'cronExpression') || FOCUS_REFRESH_CRON_DEFAULT;
-  const remoteTz = configString(row.config, 'timezoneId') || FOCUS_REFRESH_TIMEZONE_DEFAULT;
+  const remoteCron = configString(remoteConfig, 'cronExpression') || FOCUS_REFRESH_CRON_DEFAULT;
+  const remoteTz = configString(remoteConfig, 'timezoneId') || FOCUS_REFRESH_TIMEZONE_DEFAULT;
 
   // --- Local form state ---
   const [awsAccountId, setAwsAccountId] = useState(remoteAwsAccountId);
@@ -61,14 +76,16 @@ export function useAwsFocusForm(row: DataSource) {
   const [sessionToken, setSessionToken] = useState('');
   const [exportName, setExportName] = useState(remoteExportName || 'finlake-focus-1-2');
   const [s3Prefix, setS3Prefix] = useState(normalizeS3Prefix(remoteS3Prefix || 'export'));
-  const [tableName, setTableName] = useState(tableLeafName(row.tableName));
+  const [tableName, setTableName] = useState(
+    tableLeafName(row?.tableName ?? options.draft?.tableName ?? 'aws_billing'),
+  );
   const [cron, setCron] = useState(remoteCron);
   const [timezone, setTimezone] = useState(remoteTz);
   const [result, setResult] = useState<DataSourceSetupResult | null>(null);
-  const [exportArn, setExportArn] = useState(configString(row.config, 'exportArn'));
+  const [exportArn, setExportArn] = useState(configString(remoteConfig, 'exportArn'));
   const [exportError, setExportError] = useState<string | null>(null);
   const [creatingExport, setCreatingExport] = useState(false);
-  const [exportPanelOpen, setExportPanelOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   // --- Sync local state when server data changes ---
@@ -79,7 +96,10 @@ export function useAwsFocusForm(row: DataSource) {
   );
   useEffect(() => setExportName(remoteExportName || 'finlake-focus-1-2'), [remoteExportName]);
   useEffect(() => setS3Prefix(normalizeS3Prefix(remoteS3Prefix || 'export')), [remoteS3Prefix]);
-  useEffect(() => setTableName(tableLeafName(row.tableName)), [row.tableName]);
+  useEffect(
+    () => setTableName(tableLeafName(row?.tableName ?? options.draft?.tableName ?? 'aws_billing')),
+    [options.draft?.tableName, row?.tableName],
+  );
   useEffect(() => setCron(remoteCron), [remoteCron]);
   useEffect(() => setTimezone(remoteTz), [remoteTz]);
 
@@ -117,41 +137,73 @@ export function useAwsFocusForm(row: DataSource) {
   const selectedLocation: ExternalLocationSummary | null =
     allLocations.find((loc) => loc.name === externalLocationName) ??
     (externalLocationName ? ({ name: externalLocationName } as ExternalLocationSummary) : null);
-  const selectedS3Url = selectedLocation?.url ?? null;
+  const locationOptions = useMemo(() => {
+    if (!selectedLocation || linkedLocations.some((loc) => loc.name === selectedLocation.name)) {
+      return linkedLocations;
+    }
+    return [selectedLocation, ...linkedLocations];
+  }, [linkedLocations, selectedLocation]);
+  const selectedS3Url = selectedLocation?.url ?? (remoteExternalLocationUrl || null);
   const selectedS3Bucket = selectedS3Url ? s3BucketFromUrl(selectedS3Url) : null;
   const normalizedS3Prefix = normalizeS3Prefix(s3Prefix);
   const exportDestinationPreview =
     selectedS3Bucket && exportName && normalizedS3Prefix
-      ? s3ExportPath(selectedS3Bucket, normalizedS3Prefix, exportName)
+      ? `${s3ExportPath(selectedS3Bucket, normalizedS3Prefix, exportName)}/data`
       : null;
 
   // --- Flags ---
   const dirty =
+    !row ||
     awsAccountId !== remoteAwsAccountId ||
     externalLocationName !== remoteExternalLocationName ||
     exportName !== remoteExportName ||
-    s3Prefix !== remoteS3Prefix;
+    normalizedS3Prefix !== remoteS3Prefix;
   const loadingInputs = storageCredentials.isLoading || locations.isLoading;
-  const saveDisabled = updateDs.isPending || !awsAccountId || !externalLocationName || !dirty;
-  const jobId = result?.jobId ?? row.jobId;
-  const pipelineId = result?.pipelineId ?? row.pipelineId;
+  const registered =
+    Boolean(row) &&
+    Boolean(remoteAwsAccountId) &&
+    Boolean(remoteExternalLocationName) &&
+    Boolean(remoteExportName) &&
+    Boolean(remoteS3Prefix);
+  const savePending = createDs.isPending || updateDs.isPending;
+  const saveDisabled =
+    registered ||
+    savePending ||
+    !awsAccountId ||
+    !externalLocationName ||
+    !exportName ||
+    !normalizedS3Prefix ||
+    !selectedS3Bucket ||
+    !dirty;
+  const jobId = result?.jobId ?? row?.jobId ?? null;
+  const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const fqn = remoteCatalog
     ? unquotedFqn(remoteCatalog, FOCUS_VIEW_SCHEMA_DEFAULT, tableName)
     : `${FOCUS_VIEW_SCHEMA_DEFAULT}.${tableName}`;
-  const hadScheduleBeforeSetup = row.jobId !== null;
+  const hadScheduleBeforeSetup = row?.jobId !== null && row?.jobId !== undefined;
   const setupDisabled =
-    setupDs.isPending || !remoteCatalog || !selectedS3Url || !tableName || !cron || !timezone;
+    !row ||
+    setupDs.isPending ||
+    !remoteCatalog ||
+    !selectedS3Url ||
+    !tableName ||
+    !cron ||
+    !timezone;
   const createExportDisabled =
     creatingExport ||
-    updateDs.isPending ||
+    savePending ||
+    registered ||
     !selectedS3Bucket ||
     !accessKeyId ||
     !secretAccessKey ||
     !exportName ||
     !normalizedS3Prefix;
   const errorMessage =
-    messageOf(storageCredentials.error) ?? messageOf(locations.error) ?? messageOf(updateDs.error);
+    messageOf(storageCredentials.error) ??
+    messageOf(locations.error) ??
+    messageOf(createDs.error) ??
+    messageOf(updateDs.error);
 
   // --- Actions ---
   const onAccountChange = (value: string) => {
@@ -167,27 +219,50 @@ export function useAwsFocusForm(row: DataSource) {
     setExternalLocationName(value);
   };
 
-  const onSave = async () => {
+  const buildConfig = (overrides?: Record<string, unknown>) => {
     const selected = allLocations.find((loc) => loc.name === externalLocationName);
-    const storageCredentialName = selected?.credentialName ?? null;
-    const s3Bucket = selected?.url ? s3BucketFromUrl(selected.url) : null;
+    return {
+      ...remoteConfig,
+      awsAccountId,
+      externalLocationName,
+      externalLocationUrl: selected?.url ?? selectedS3Url,
+      storageCredentialName: selected?.credentialName ?? null,
+      s3Bucket: selectedS3Bucket,
+      exportName,
+      s3Prefix: normalizedS3Prefix,
+      s3Region: AWS_BCM_REGION,
+      ...overrides,
+    };
+  };
+
+  const onSave = async () => {
+    const config = buildConfig(exportArn ? { exportArn } : {});
+    if (row) {
+      await updateDs.mutateAsync({
+        id: row.id,
+        body: { config },
+      });
+    } else if (options.draft) {
+      const created = await createDs.mutateAsync({
+        ...options.draft,
+        enabled: false,
+        config,
+      });
+      options.onCreated?.(created);
+    }
+    setSavedAt(Date.now());
+  };
+
+  const saveExportArn = async (nextExportArn: string) => {
+    if (!row) return;
+    const config = buildConfig({
+      exportArn: nextExportArn,
+      exportCreatedAt: new Date().toISOString(),
+    });
     await updateDs.mutateAsync({
       id: row.id,
-      body: {
-        config: {
-          ...row.config,
-          awsAccountId,
-          externalLocationName,
-          externalLocationUrl: selected?.url ?? null,
-          storageCredentialName,
-          s3Bucket,
-          exportName,
-          s3Prefix: normalizedS3Prefix,
-          s3Region: AWS_BCM_REGION,
-        },
-      },
+      body: { config },
     });
-    setSavedAt(Date.now());
   };
 
   const onCreateExport = async () => {
@@ -238,24 +313,7 @@ export function useAwsFocusForm(row: DataSource) {
       );
       const nextExportArn = res.ExportArn ?? '';
       setExportArn(nextExportArn);
-      await updateDs.mutateAsync({
-        id: row.id,
-        body: {
-          config: {
-            ...row.config,
-            awsAccountId,
-            externalLocationName,
-            externalLocationUrl: selectedS3Url,
-            storageCredentialName: selectedLocation?.credentialName ?? null,
-            s3Bucket: selectedS3Bucket,
-            exportName,
-            s3Prefix: normalizedS3Prefix,
-            s3Region: AWS_BCM_REGION,
-            exportArn: nextExportArn,
-            exportCreatedAt: new Date().toISOString(),
-          },
-        },
-      });
+      await saveExportArn(nextExportArn);
     } catch (err) {
       setExportError(messageOf(err) ?? String(err));
     } finally {
@@ -264,6 +322,7 @@ export function useAwsFocusForm(row: DataSource) {
   };
 
   const onSetup = async () => {
+    if (!row) return;
     const r = await setupDs.mutateAsync({
       id: row.id,
       body: {
@@ -276,6 +335,7 @@ export function useAwsFocusForm(row: DataSource) {
   };
 
   const onRunJob = async () => {
+    if (!row) return;
     await runJob.mutateAsync(row.id);
   };
 
@@ -292,15 +352,18 @@ export function useAwsFocusForm(row: DataSource) {
     // Source form derived
     accountOptions,
     linkedLocations,
+    locationOptions,
     selectedS3Url,
     exportDestinationPreview,
+    registered,
+    persisted: Boolean(row),
     dirty,
     loadingInputs,
     saveDisabled,
     errorMessage,
     savedAt,
     storageCredentialsLoading: storageCredentials.isLoading,
-    updatePending: updateDs.isPending,
+    savePending,
 
     // Source form actions
     onAccountChange,
@@ -314,8 +377,8 @@ export function useAwsFocusForm(row: DataSource) {
     setSecretAccessKey,
     sessionToken,
     setSessionToken,
-    exportPanelOpen,
-    setExportPanelOpen,
+    exportModalOpen,
+    setExportModalOpen,
     exportArn,
     exportError,
     creatingExport,
