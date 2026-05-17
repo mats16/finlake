@@ -130,18 +130,13 @@ test('buildDatabricksTrendSql groups 30 day trends by day', () => {
   assert.match(sql, /ORDER BY period/);
 });
 
-test('buildDatabricksServicesSql only returns target serverless migration services', () => {
+test('buildDatabricksServicesSql returns all services and orders target services first', () => {
   const sql = buildDatabricksServicesSql('-- cte --');
 
-  assert.match(
-    sql,
-    /WHERE service_name IN \('SQL', 'ALL_PURPOSE', 'INTERACTIVE', 'DLT', 'JOBS', 'LAKEFLOW_CONNECT'\)/,
-  );
-  assert.match(
-    sql,
-    /WHEN service_name IN \('ALL_PURPOSE', 'INTERACTIVE'\) THEN 'INTERACTIVE \/ ALL_PURPOSE'/,
-  );
-  assert.match(sql, /WHEN 'INTERACTIVE \/ ALL_PURPOSE' THEN 2/);
+  assert.doesNotMatch(sql, /WHERE service_name IN/);
+  assert.match(sql, /WHEN service_name IN \('ALL_PURPOSE', 'INTERACTIVE'\) THEN 'ALL_PURPOSE'/);
+  assert.match(sql, /WHEN 'ALL_PURPOSE' THEN 2/);
+  assert.match(sql, /ELSE 99\s+END,\s+service_name/);
   assert.doesNotMatch(sql, /LIMIT 50/);
 });
 
@@ -168,7 +163,8 @@ test('buildDatabricksRecommendationsSql excludes blank resources and uses eligib
   assert.match(sql, /'_ALL_PURPOSE_SERVERLESS_COMPUTE'/);
   assert.match(sql, /'_SERVERLESS_SQL_COMPUTE'/);
   assert.match(sql, /'_JOBS_SERVERLESS_COMPUTE'/);
-  assert.match(sql, /'_DLT_SERVERLESS_COMPUTE'/);
+  assert.match(sql, /service_name IN \('JOBS', 'DLT'\)/);
+  assert.doesNotMatch(sql, /'_DLT_SERVERLESS_COMPUTE'/);
   assert.match(sql, /GROUP BY x_SkuNameBase, RegionId, PricingUnit/);
   assert.match(sql, /LEFT JOIN databricks_serverless_prices price/);
   assert.match(sql, /target\.serverless_sku_name_base = price\.serverless_sku_name_base/);
@@ -177,7 +173,7 @@ test('buildDatabricksRecommendationsSql excludes blank resources and uses eligib
   assert.doesNotMatch(sql, /price\.EffectiveDate/);
   assert.doesNotMatch(sql, /price\.x_PriceEndTime/);
   assert.match(sql, /COALESCE\(EffectiveListUnitPrice, ListUnitPrice\)/);
-  assert.match(sql, /target\.base_dbu \* 0\.5 \* price\.serverless_unit_price_usd/);
+  assert.match(sql, /target\.base_dbu \* price\.serverless_unit_price_usd/);
   assert.match(sql, /AS serverless_sku_name_base/);
   assert.match(sql, /AS serverless_unit_price_usd/);
   assert.match(sql, /AS estimated_serverless_cost_usd/);

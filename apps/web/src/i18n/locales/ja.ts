@@ -223,10 +223,26 @@ export const ja: Dictionary = {
       },
       services: {
         title: 'サービス別サーバレス比率',
+        filter: {
+          label: 'サービスフィルタ',
+          all: 'すべてのサービス',
+        },
       },
       recommendations: {
         title: '優先的に見直すリソース',
-        desc: '非サーバレス支出とサービス適性で重み付けして並べています。',
+        desc: 'JOBS、SQL、ALL_PURPOSE を切り替えて、見直し対象のコスト候補を確認します。',
+        serviceFilter: {
+          label: 'サービス',
+          all: 'すべて',
+        },
+        serverlessMode: {
+          label: 'Serverless jobs mode',
+          performance: 'Performance',
+          standard: 'Standard',
+        },
+        deltaDisplay: {
+          label: '差額表示',
+        },
       },
       legend: {
         serverless: 'サーバレス',
@@ -246,13 +262,14 @@ export const ja: Dictionary = {
         service: 'サービス',
         sku: 'SKU',
         instanceType: 'インスタンスタイプ',
-        nonServerlessSpend: '現行 DBU 費用',
-        estimatedServerlessCost: 'サーバレス移行後推定コスト',
+        nonServerlessSpend: 'DBU 費用',
+        estimatedServerlessCost: 'サーバレス費用',
+        estimatedValue: '推定値',
         serverlessDelta: '差額',
-        estimatedCurrentTotal: '現行構成の推定コスト',
-        estimatedEc2Cost: '推定 EC2 費用',
-        estimatedEc2CostParen: '(推定 EC2 費用)',
-        standardMode: 'Standard mode',
+        estimatedCurrentTotal: '総費用',
+        currentCost: '現在コスト',
+        estimatedEc2Cost: '推定 VM 費用',
+        estimatedEc2CostParen: '(VM 費用)',
         dbuQuantityEstimate: 'DBU 合計',
         ec2ReferenceInstance: 'EC2 参照インスタンス',
         serverlessRatio: 'サーバレス比率',

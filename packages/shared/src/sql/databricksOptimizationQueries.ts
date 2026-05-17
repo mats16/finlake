@@ -19,7 +19,6 @@ const DEFAULT_DATABRICKS_TABLE = 'databricks_usage';
 const KNOWN_COST_DENOMINATOR = '(serverless_cost_usd + non_serverless_cost_usd)';
 const AWS_EC2_PRICING_TABLE_SQL = '`finops`.`pricing`.`aws_ec2`';
 const EC2_REFERENCE_INSTANCE_TYPE = 'r6i.xlarge';
-const SERVERLESS_STANDARD_MODE_DBU_FACTOR = 0.5;
 const DEFAULT_DATABRICKS_LIST_PRICES_TABLE_SQL = [
   PRICING_SCHEMA_DEFAULT,
   DATABRICKS_LIST_PRICES_TABLE_DEFAULT,
@@ -283,13 +282,12 @@ ${cte}
       ELSE service_category
     END AS service_category,
     CASE
-      WHEN service_name IN ('ALL_PURPOSE', 'INTERACTIVE') THEN 'INTERACTIVE / ALL_PURPOSE'
+      WHEN service_name IN ('ALL_PURPOSE', 'INTERACTIVE') THEN 'ALL_PURPOSE'
       ELSE service_name
     END AS service_name,
     cost_usd,
     x_serverless
   FROM filtered
-  WHERE service_name IN ('SQL', 'ALL_PURPOSE', 'INTERACTIVE', 'DLT', 'JOBS', 'LAKEFLOW_CONNECT')
 ),
 metrics AS (
   SELECT
@@ -316,12 +314,12 @@ FROM metrics
 ORDER BY
   CASE service_name
     WHEN 'SQL' THEN 1
-    WHEN 'INTERACTIVE / ALL_PURPOSE' THEN 2
+    WHEN 'ALL_PURPOSE' THEN 2
     WHEN 'DLT' THEN 3
     WHEN 'JOBS' THEN 4
-    WHEN 'LAKEFLOW_CONNECT' THEN 5
     ELSE 99
-  END
+  END,
+  service_name
 `;
 }
 
@@ -380,10 +378,8 @@ filtered_with_serverless_target AS (
         THEN CONCAT(REGEXP_EXTRACT(sku_id, '^(STANDARD|PREMIUM|ENTERPRISE)_', 1), '_ALL_PURPOSE_SERVERLESS_COMPUTE')
       WHEN service_name = 'SQL'
         THEN CONCAT(REGEXP_EXTRACT(sku_id, '^(STANDARD|PREMIUM|ENTERPRISE)_', 1), '_SERVERLESS_SQL_COMPUTE')
-      WHEN service_name = 'JOBS'
+      WHEN service_name IN ('JOBS', 'DLT')
         THEN CONCAT(REGEXP_EXTRACT(sku_id, '^(STANDARD|PREMIUM|ENTERPRISE)_', 1), '_JOBS_SERVERLESS_COMPUTE')
-      WHEN service_name = 'DLT'
-        THEN CONCAT(REGEXP_EXTRACT(sku_id, '^(STANDARD|PREMIUM|ENTERPRISE)_', 1), '_DLT_SERVERLESS_COMPUTE')
       ELSE CAST(NULL AS STRING)
     END AS serverless_sku_name_base
   FROM filtered_with_dbu
@@ -395,7 +391,7 @@ filtered_with_serverless_price AS (
     CASE
       WHEN target.base_dbu IS NOT NULL
         AND price.serverless_unit_price_usd IS NOT NULL
-        THEN CAST(target.base_dbu * ${SERVERLESS_STANDARD_MODE_DBU_FACTOR} * price.serverless_unit_price_usd AS DOUBLE)
+        THEN CAST(target.base_dbu * price.serverless_unit_price_usd AS DOUBLE)
       ELSE CAST(NULL AS DOUBLE)
     END AS estimated_serverless_cost_usd
   FROM filtered_with_serverless_target target

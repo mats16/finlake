@@ -219,10 +219,26 @@ export const en = {
       },
       services: {
         title: 'Serverless ratio by service',
+        filter: {
+          label: 'Service filter',
+          all: 'All services',
+        },
       },
       recommendations: {
         title: 'Priority resources to review',
-        desc: 'Ranked by non-serverless spend with service eligibility weighting.',
+        desc: 'Switch between JOBS, SQL, and ALL_PURPOSE resources to review cost candidates.',
+        serviceFilter: {
+          label: 'Service',
+          all: 'All',
+        },
+        serverlessMode: {
+          label: 'Serverless jobs mode',
+          performance: 'Performance',
+          standard: 'Standard',
+        },
+        deltaDisplay: {
+          label: 'Delta display',
+        },
       },
       legend: {
         serverless: 'Serverless',
@@ -242,13 +258,14 @@ export const en = {
         service: 'Service',
         sku: 'SKU',
         instanceType: 'Instance type',
-        nonServerlessSpend: 'Current DBU cost',
-        estimatedServerlessCost: 'Estimated serverless cost',
+        nonServerlessSpend: 'DBU cost',
+        estimatedServerlessCost: 'Serverless cost',
+        estimatedValue: 'Estimated value',
         serverlessDelta: 'Delta',
-        estimatedCurrentTotal: 'Estimated current setup cost',
-        estimatedEc2Cost: 'Estimated EC2 cost',
-        estimatedEc2CostParen: '(estimated EC2 cost)',
-        standardMode: 'Standard mode',
+        estimatedCurrentTotal: 'Total cost',
+        currentCost: 'Current cost',
+        estimatedEc2Cost: 'Estimated VM cost',
+        estimatedEc2CostParen: '(VM cost)',
         dbuQuantityEstimate: 'Total DBUs',
         ec2ReferenceInstance: 'EC2 reference instance',
         serverlessRatio: 'Serverless ratio',

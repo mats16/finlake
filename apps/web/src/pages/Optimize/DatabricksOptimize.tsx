@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useRef, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   Bar,
   CartesianGrid,
@@ -20,6 +20,11 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -37,12 +42,18 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  cn,
 } from '@databricks/appkit-ui/react';
 import {
   AlertCircle,
+  Check,
   DollarSign,
   ExternalLink,
   Gauge,
+  Info,
   ListChecks,
   RefreshCcw,
   Server,
@@ -67,11 +78,71 @@ import { stableTomorrow } from '../../lib/dateRanges';
 
 const PERIODS = ['last30', 'last90', 'last180', 'last12m'] as const;
 type Period = (typeof PERIODS)[number];
+type DeltaDisplay = 'currency' | 'percent';
+type ServerlessMode = 'performance' | 'standard';
+type RecommendationServiceGroup = 'JOBS' | 'SQL' | 'ALL_PURPOSE';
 
 const SERVERLESS_COLOR = '#49A078';
 const NON_SERVERLESS_COLOR = '#E4572E';
 const UNKNOWN_COLOR = '#718096';
 const RATIO_COLOR = '#3B82F6';
+const DEFAULT_SERVICE_RATIO_FILTERS = ['SQL', 'ALL_PURPOSE', 'DLT', 'JOBS'];
+const RECOMMENDATION_SERVICE_GROUPS: RecommendationServiceGroup[] = ['JOBS', 'SQL', 'ALL_PURPOSE'];
+const RECOMMENDATION_GROUP_SERVICES: Record<RecommendationServiceGroup, string[]> = {
+  JOBS: ['JOBS', 'DLT', 'LAKEFLOW_CONNECT'],
+  SQL: ['SQL'],
+  ALL_PURPOSE: ['ALL_PURPOSE', 'INTERACTIVE'],
+};
+const SERVERLESS_STANDARD_COST_RATIO = 0.6;
+const RESOURCE_DEFAULT_COLUMN_WIDTH = 260;
+const COMPACT_RECOMMENDATION_COLUMN_WIDTH = 120;
+const DBU_COST_COLUMN_WIDTH = 100;
+const TOTAL_COST_COLUMN_WIDTH = 180;
+const ESTIMATED_SERVERLESS_COST_COLUMN_WIDTH = 230;
+const DELTA_COLUMN_WIDTH = 100;
+
+type RecommendationColumnKey =
+  | 'priority'
+  | 'resource'
+  | 'service'
+  | 'instanceType'
+  | 'nonServerlessSpend'
+  | 'estimatedCurrentTotal'
+  | 'estimatedServerlessCost'
+  | 'serverlessDelta';
+
+const RECOMMENDATION_COLUMN_ORDER: RecommendationColumnKey[] = [
+  'priority',
+  'resource',
+  'service',
+  'instanceType',
+  'nonServerlessSpend',
+  'estimatedCurrentTotal',
+  'estimatedServerlessCost',
+  'serverlessDelta',
+];
+
+const DEFAULT_RECOMMENDATION_COLUMN_WIDTHS: Record<RecommendationColumnKey, number> = {
+  priority: 92,
+  resource: RESOURCE_DEFAULT_COLUMN_WIDTH,
+  service: 128,
+  instanceType: COMPACT_RECOMMENDATION_COLUMN_WIDTH,
+  nonServerlessSpend: DBU_COST_COLUMN_WIDTH,
+  estimatedCurrentTotal: TOTAL_COST_COLUMN_WIDTH,
+  estimatedServerlessCost: ESTIMATED_SERVERLESS_COST_COLUMN_WIDTH,
+  serverlessDelta: DELTA_COLUMN_WIDTH,
+};
+
+const MIN_RECOMMENDATION_COLUMN_WIDTHS: Record<RecommendationColumnKey, number> = {
+  priority: 72,
+  resource: 0,
+  service: 96,
+  instanceType: COMPACT_RECOMMENDATION_COLUMN_WIDTH,
+  nonServerlessSpend: DBU_COST_COLUMN_WIDTH,
+  estimatedCurrentTotal: TOTAL_COST_COLUMN_WIDTH,
+  estimatedServerlessCost: ESTIMATED_SERVERLESS_COST_COLUMN_WIDTH,
+  serverlessDelta: DELTA_COLUMN_WIDTH,
+};
 
 interface DatabricksOptimizationTrendRow {
   period: string;
@@ -105,6 +176,15 @@ export function DatabricksOptimize() {
   const formatUsd = useCurrencyUsd();
   const [period, setPeriod] = useState<Period>('last30');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('all');
+  const [selectedServiceRatioServices, setSelectedServiceRatioServices] =
+    useState<string[]>(DEFAULT_SERVICE_RATIO_FILTERS);
+  const [recommendationServiceGroup, setRecommendationServiceGroup] =
+    useState<RecommendationServiceGroup>('JOBS');
+  const [serverlessMode, setServerlessMode] = useState<ServerlessMode>('standard');
+  const [deltaDisplay, setDeltaDisplay] = useState<DeltaDisplay>('currency');
+  const [recommendationColumnWidths, setRecommendationColumnWidths] = useState(
+    DEFAULT_RECOMMENDATION_COLUMN_WIDTHS,
+  );
   const baseRange = useMemo(() => rangeForPeriod(period), [period]);
   const trendGrain: DatabricksTrendGrain = period === 'last30' ? 'day' : 'month';
   const dataSources = useDataSources();
@@ -203,11 +283,99 @@ export function DatabricksOptimize() {
       })),
     [locale, trendGrain, trendQuery.rows],
   );
-  const serviceRows = servicesQuery.rows.map((row) => ({
-    ...row,
-    serverlessRatio: normalizeRatio(row.serverlessRatio),
-  }));
+  const serviceRows = useMemo(
+    () =>
+      servicesQuery.rows.map((row) => ({
+        ...row,
+        serverlessRatio: normalizeRatio(row.serverlessRatio),
+      })),
+    [servicesQuery.rows],
+  );
+  const serviceRatioOptions = useMemo(
+    () => serviceRows.map((row) => row.serviceName),
+    [serviceRows],
+  );
+  const selectedServiceRatioSet = useMemo(
+    () =>
+      new Set(
+        selectedServiceRatioServices.filter((serviceName) =>
+          serviceRatioOptions.includes(serviceName),
+        ),
+      ),
+    [selectedServiceRatioServices, serviceRatioOptions],
+  );
+  const filteredServiceRows = useMemo(
+    () =>
+      selectedServiceRatioSet.size === 0
+        ? serviceRows
+        : serviceRows.filter((row) => selectedServiceRatioSet.has(row.serviceName)),
+    [serviceRows, selectedServiceRatioSet],
+  );
+  const recommendationRows = recommendationsQuery.rows;
+  const recommendationGroupCounts = useMemo(() => {
+    const counts = Object.fromEntries(
+      RECOMMENDATION_SERVICE_GROUPS.map((group) => [group, 0]),
+    ) as Record<RecommendationServiceGroup, number>;
+    for (const row of recommendationRows) {
+      const group = recommendationServiceGroupFor(row.serviceName);
+      if (group) counts[group] += 1;
+    }
+    return counts;
+  }, [recommendationRows]);
+  const filteredRecommendationRows = useMemo(
+    () =>
+      recommendationRows.filter(
+        (row) => recommendationServiceGroupFor(row.serviceName) === recommendationServiceGroup,
+      ),
+    [recommendationRows, recommendationServiceGroup],
+  );
+  const showMigrationEstimateColumns = recommendationServiceGroup !== 'ALL_PURPOSE';
+  const showServerlessModeToggle = recommendationServiceGroup === 'JOBS';
+  const effectiveServerlessMode = showServerlessModeToggle ? serverlessMode : 'standard';
   const hasData = Boolean(summary && summary.totalCostUsd > 0);
+
+  const resizingColRef = useRef<{ column: RecommendationColumnKey; colEl: HTMLElement } | null>(null);
+
+  const startRecommendationColumnResize = (
+    column: RecommendationColumnKey,
+    event: ReactPointerEvent,
+  ) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = recommendationColumnWidths[column];
+    const minWidth = MIN_RECOMMENDATION_COLUMN_WIDTHS[column];
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    // Find the <col> element to update width directly during drag (avoids re-renders)
+    const table = (event.target as HTMLElement).closest('table');
+    const colEl = table?.querySelectorAll('col')[RECOMMENDATION_COLUMN_ORDER.indexOf(column)] as HTMLElement | undefined;
+    if (colEl) resizingColRef.current = { column, colEl };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.max(minWidth, startWidth + moveEvent.clientX - startX);
+      if (colEl) colEl.style.width = `${nextWidth}px`;
+    };
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      // Commit final width to React state
+      const finalWidth = colEl ? parseFloat(colEl.style.width) || startWidth : startWidth;
+      setRecommendationColumnWidths((current) => ({
+        ...current,
+        [column]: finalWidth,
+      }));
+      resizingColRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize, { once: true });
+  };
 
   const refresh = () => {
     summaryQuery.refetch();
@@ -390,7 +558,14 @@ export function DatabricksOptimize() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">{t('optimize.databricks.services.title')}</CardTitle>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle className="text-sm">{t('optimize.databricks.services.title')}</CardTitle>
+              <ServiceRatioFilterMenu
+                options={serviceRatioOptions}
+                selected={selectedServiceRatioServices}
+                onChange={setSelectedServiceRatioServices}
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -406,7 +581,7 @@ export function DatabricksOptimize() {
               />
             ) : (
               <div className="grid gap-4">
-                {serviceRows.map((row) => (
+                {filteredServiceRows.map((row) => (
                   <ServiceRatioRow key={`${row.serviceCategory}-${row.serviceName}`} row={row} />
                 ))}
               </div>
@@ -425,61 +600,362 @@ export function DatabricksOptimize() {
         <CardContent>
           {loading ? (
             <Skeleton className="h-72 w-full" />
-          ) : recommendationsQuery.rows.length === 0 ? (
-            <EmptyState
-              title={t('optimize.databricks.empty.noRecommendations')}
-              description={t('optimize.databricks.empty.noNonServerless')}
-            />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('optimize.databricks.table.priority')}</TableHead>
-                    <TableHead>{t('optimize.databricks.table.resource')}</TableHead>
-                    <TableHead>{t('optimize.databricks.table.service')}</TableHead>
-                    <TableHead>{t('optimize.databricks.table.instanceType')}</TableHead>
-                    <TableHead className="text-right">
-                      {t('optimize.databricks.table.nonServerlessSpend')}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <div className="grid gap-0.5">
-                        <span>{t('optimize.databricks.table.estimatedCurrentTotal')}</span>
-                        <span className="text-muted-foreground text-xs font-normal">
-                          {t('optimize.databricks.table.estimatedEc2CostParen')}
-                        </span>
-                      </div>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <div className="grid gap-0.5">
-                        <span>{t('optimize.databricks.table.estimatedServerlessCost')}</span>
-                        <span className="text-muted-foreground text-xs font-normal">
-                          {t('optimize.databricks.table.standardMode')}
-                        </span>
-                      </div>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {t('optimize.databricks.table.serverlessDelta')}
-                    </TableHead>
-                    <TableHead>{t('optimize.databricks.table.workspace')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recommendationsQuery.rows.map((row) => (
-                    <RecommendationRow
-                      key={`${row.rank}-${row.resourceId}`}
-                      row={row}
-                      workspaceUrl={me.data?.workspaceUrl ?? null}
-                      currentWorkspaceId={me.data?.workspaceId ?? null}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="grid gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <RecommendationServiceGroupToggle
+                  value={recommendationServiceGroup}
+                  counts={recommendationGroupCounts}
+                  onChange={setRecommendationServiceGroup}
+                />
+                {showMigrationEstimateColumns ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {showServerlessModeToggle ? (
+                      <ServerlessModeToggle value={serverlessMode} onChange={setServerlessMode} />
+                    ) : null}
+                    <DeltaDisplayToggle value={deltaDisplay} onChange={setDeltaDisplay} />
+                  </div>
+                ) : null}
+              </div>
+              {filteredRecommendationRows.length === 0 ? (
+                <EmptyState
+                  title={t('optimize.databricks.empty.noRecommendations')}
+                  description={t('optimize.databricks.empty.noNonServerless')}
+                />
+              ) : !showMigrationEstimateColumns ? (
+                <AllPurposeRecommendationTable
+                  rows={filteredRecommendationRows}
+                  workspaceUrl={me.data?.workspaceUrl ?? null}
+                  currentWorkspaceId={me.data?.workspaceId ?? null}
+                />
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table className="table-fixed" style={{ width: '100%' }}>
+                    <colgroup>
+                      {RECOMMENDATION_COLUMN_ORDER.map((column) => (
+                        <col
+                          key={column}
+                          style={
+                            column === 'resource'
+                              ? undefined
+                              : { width: recommendationColumnWidths[column] }
+                          }
+                        />
+                      ))}
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow>
+                        <ResizableRecommendationHead
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('priority', event)
+                          }
+                        >
+                          {t('optimize.databricks.table.priority')}
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('resource', event)
+                          }
+                        >
+                          {t('optimize.databricks.table.resource')}
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('service', event)
+                          }
+                        >
+                          {t('optimize.databricks.table.service')}
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('instanceType', event)
+                          }
+                        >
+                          {t('optimize.databricks.table.instanceType')}
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          align="right"
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('nonServerlessSpend', event)
+                          }
+                        >
+                          {t('optimize.databricks.table.nonServerlessSpend')}
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          align="right"
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('estimatedCurrentTotal', event)
+                          }
+                        >
+                          <div className="grid gap-0.5">
+                            <div className="flex min-w-0 items-center justify-end gap-1">
+                              <span>{t('optimize.databricks.table.estimatedCurrentTotal')}</span>
+                              <EstimatedValueTooltip />
+                            </div>
+                            <span className="text-muted-foreground text-xs font-normal">
+                              {t('optimize.databricks.table.estimatedEc2CostParen')}
+                            </span>
+                          </div>
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          align="right"
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('estimatedServerlessCost', event)
+                          }
+                        >
+                          <div className="flex min-w-0 items-center justify-end gap-1">
+                            <span>{t('optimize.databricks.table.estimatedServerlessCost')}</span>
+                            <EstimatedValueTooltip />
+                          </div>
+                        </ResizableRecommendationHead>
+                        <ResizableRecommendationHead
+                          align="right"
+                          onResizeStart={(event) =>
+                            startRecommendationColumnResize('serverlessDelta', event)
+                          }
+                        >
+                          <div className="flex min-w-0 items-center justify-end gap-1">
+                            <span>{t('optimize.databricks.table.serverlessDelta')}</span>
+                            <EstimatedValueTooltip />
+                          </div>
+                        </ResizableRecommendationHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRecommendationRows.map((row) => (
+                        <RecommendationRow
+                          key={`${row.rank}-${row.resourceId}`}
+                          row={row}
+                          serverlessMode={effectiveServerlessMode}
+                          deltaDisplay={deltaDisplay}
+                          workspaceUrl={me.data?.workspaceUrl ?? null}
+                          currentWorkspaceId={me.data?.workspaceId ?? null}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
     </>
+  );
+}
+
+function RecommendationServiceGroupToggle({
+  value,
+  counts,
+  onChange,
+}: {
+  value: RecommendationServiceGroup;
+  counts: Record<RecommendationServiceGroup, number>;
+  onChange: (value: RecommendationServiceGroup) => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div
+      className="bg-muted inline-flex max-w-full flex-wrap gap-1 rounded-full p-1"
+      role="group"
+      aria-label={t('optimize.databricks.recommendations.serviceFilter.label')}
+    >
+      {RECOMMENDATION_SERVICE_GROUPS.map((option) => {
+        const active = value === option;
+        return (
+          <Button
+            key={option}
+            type="button"
+            size="sm"
+            variant={active ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 rounded-full px-3 text-sm',
+              active ? 'bg-background shadow-sm' : 'text-muted-foreground',
+            )}
+            aria-pressed={active}
+            onClick={() => onChange(option)}
+          >
+            <span>{option}</span>
+            <span
+              className={cn(
+                'ml-1.5 text-xs',
+                active ? 'text-muted-foreground' : 'text-muted-foreground/80',
+              )}
+            >
+              {counts[option]}
+            </span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function recommendationServiceGroupFor(serviceName: string): RecommendationServiceGroup | null {
+  for (const group of RECOMMENDATION_SERVICE_GROUPS) {
+    if (RECOMMENDATION_GROUP_SERVICES[group].includes(serviceName)) return group;
+  }
+  return null;
+}
+
+function DeltaDisplayToggle({
+  value,
+  onChange,
+}: {
+  value: DeltaDisplay;
+  onChange: (value: DeltaDisplay) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="bg-muted inline-flex rounded-full p-1" role="group" aria-label={t('optimize.databricks.recommendations.deltaDisplay.label')}>
+      {(['currency', 'percent'] as const).map((option) => {
+        const active = value === option;
+        return (
+          <Button
+            key={option}
+            type="button"
+            size="sm"
+            variant={active ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 min-w-8 rounded-full px-2.5 text-sm',
+              active ? 'bg-background shadow-sm' : 'text-muted-foreground',
+            )}
+            aria-pressed={active}
+            onClick={() => onChange(option)}
+          >
+            {option === 'currency' ? '$' : '%'}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ServiceRatioFilterMenu({
+  options,
+  selected,
+  onChange,
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const { t } = useI18n();
+  const availableSelected = selected.filter((serviceName) => options.includes(serviceName));
+  const selectedSet = new Set(availableSelected);
+  const allSelected = options.length > 0 && availableSelected.length === options.length;
+  const label =
+    availableSelected.length === 0 || allSelected
+      ? t('optimize.databricks.services.filter.all')
+      : availableSelected.length <= 2
+        ? availableSelected.join(', ')
+        : `${availableSelected[0]} +${availableSelected.length - 1}`;
+
+  const toggle = (serviceName: string) => {
+    if (selectedSet.has(serviceName)) {
+      onChange(availableSelected.filter((value) => value !== serviceName));
+      return;
+    }
+    onChange([...availableSelected, serviceName]);
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 max-w-[280px] gap-1.5 px-3 text-sm"
+          aria-label={t('optimize.databricks.services.filter.label')}
+        >
+          <span className="text-muted-foreground">
+            {t('optimize.databricks.services.filter.label')}
+          </span>
+          <span className="text-primary truncate font-medium">{label}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-[360px] w-[260px] overflow-y-auto p-2">
+        <DropdownMenuItem onClick={() => onChange([...options])}>
+          <Check className={cn('size-3.5', allSelected ? 'opacity-100' : 'opacity-0')} />
+          {t('optimize.databricks.services.filter.all')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {options.map((serviceName) => (
+          <DropdownMenuItem key={serviceName} onClick={() => toggle(serviceName)}>
+            <Check
+              className={cn('size-3.5', selectedSet.has(serviceName) ? 'opacity-100' : 'opacity-0')}
+            />
+            <span className="truncate">{serviceName}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ServerlessModeToggle({
+  value,
+  onChange,
+}: {
+  value: ServerlessMode;
+  onChange: (value: ServerlessMode) => void;
+}) {
+  const { t } = useI18n();
+  const options: ServerlessMode[] = ['performance', 'standard'];
+  return (
+    <div
+      className="bg-muted inline-flex rounded-full p-1"
+      role="group"
+      aria-label={t('optimize.databricks.recommendations.serverlessMode.label')}
+    >
+      {options.map((option) => {
+        const active = value === option;
+        return (
+          <Button
+            key={option}
+            type="button"
+            size="sm"
+            variant={active ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 rounded-full px-3 text-sm',
+              active ? 'bg-background shadow-sm' : 'text-muted-foreground',
+            )}
+            aria-pressed={active}
+            onClick={() => onChange(option)}
+          >
+            {t(`optimize.databricks.recommendations.serverlessMode.${option}`)}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ResizableRecommendationHead({
+  children,
+  align = 'left',
+  onResizeStart,
+}: {
+  children: ReactNode;
+  align?: 'left' | 'right';
+  onResizeStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <TableHead
+      className={cn(
+        'group relative overflow-hidden pr-4 select-none',
+        align === 'right' && 'text-right',
+      )}
+    >
+      <div className={cn('min-w-0 truncate', align === 'right' && 'text-right')}>{children}</div>
+      <button
+        type="button"
+        className="absolute inset-y-0 right-0 w-2 cursor-col-resize border-r border-transparent transition group-hover:border-primary/60 focus-visible:border-primary focus-visible:outline-none"
+        aria-label="Resize column"
+        onPointerDown={onResizeStart}
+      />
+    </TableHead>
   );
 }
 
@@ -559,6 +1035,152 @@ function ServiceRatioRow({ row }: { row: DatabricksOptimizationServiceRow }) {
 
 function RecommendationRow({
   row,
+  serverlessMode,
+  deltaDisplay,
+  workspaceUrl,
+  currentWorkspaceId,
+}: {
+  row: DatabricksOptimizationRecommendation;
+  serverlessMode: ServerlessMode;
+  deltaDisplay: DeltaDisplay;
+  workspaceUrl: string | null;
+  currentWorkspaceId: string | null;
+}) {
+  const { t } = useI18n();
+  const formatUsd = useCurrencyUsd();
+  const estimatedCurrentTotal = isFiniteNumber(row.estimatedCurrentTotalCostUsd)
+    ? row.estimatedCurrentTotalCostUsd
+    : null;
+  const estimatedEc2Cost = isFiniteNumber(row.estimatedEc2CostUsd) ? row.estimatedEc2CostUsd : null;
+  const performanceServerlessCost = isFiniteNumber(row.estimatedServerlessCostUsd)
+    ? row.estimatedServerlessCostUsd
+    : null;
+  const estimatedServerlessCost =
+    performanceServerlessCost === null
+      ? null
+      : serverlessMode === 'standard'
+        ? performanceServerlessCost * SERVERLESS_STANDARD_COST_RATIO
+        : performanceServerlessCost;
+  const estimatedServerlessDelta =
+    estimatedServerlessCost !== null && estimatedCurrentTotal !== null
+      ? estimatedServerlessCost - estimatedCurrentTotal
+      : null;
+  const estimatedServerlessDeltaPercent =
+    estimatedServerlessDelta !== null && estimatedCurrentTotal !== null && estimatedCurrentTotal > 0
+      ? (estimatedServerlessDelta / estimatedCurrentTotal) * 100
+      : null;
+  return (
+    <TableRow>
+      <TableCell className="overflow-hidden">
+        <PriorityBadge priority={row.priority} />
+      </TableCell>
+      <ResourceInfoCell row={row} workspaceUrl={workspaceUrl} currentWorkspaceId={currentWorkspaceId} />
+      <TableCell className="overflow-hidden">
+        <span className="block truncate">{row.serviceName}</span>
+      </TableCell>
+      <TableCell className="overflow-hidden truncate">
+        {row.instanceType || t('dashboard.notAvailable')}
+      </TableCell>
+      <TableCell className="overflow-hidden text-right font-medium">
+        {formatUsd(row.nonServerlessCostUsd)}
+      </TableCell>
+      <EstimatedTotalCell estimatedTotal={estimatedCurrentTotal} estimatedEc2Cost={estimatedEc2Cost} />
+      <TableCell className="overflow-hidden text-right">
+        {estimatedServerlessCost !== null ? (
+          <span className="font-medium">{formatUsd(estimatedServerlessCost)}</span>
+        ) : (
+          t('dashboard.notAvailable')
+        )}
+      </TableCell>
+      <TableCell className="overflow-hidden text-right">
+        {estimatedServerlessDelta !== null ? (
+          <span className={estimatedServerlessDelta <= 0 ? 'text-(--success)' : 'text-(--danger)'}>
+            {deltaDisplay === 'currency'
+              ? formatSignedUsd(estimatedServerlessDelta, formatUsd)
+              : formatSignedPercent(estimatedServerlessDeltaPercent)}
+          </span>
+        ) : (
+          t('dashboard.notAvailable')
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function AllPurposeRecommendationTable({
+  rows,
+  workspaceUrl,
+  currentWorkspaceId,
+}: {
+  rows: DatabricksOptimizationRecommendation[];
+  workspaceUrl: string | null;
+  currentWorkspaceId: string | null;
+}) {
+  const { t } = useI18n();
+  const formatUsd = useCurrencyUsd();
+  return (
+    <div className="overflow-x-auto">
+      <Table className="table-fixed" style={{ width: '100%' }}>
+        <colgroup>
+          <col />
+          <col style={{ width: COMPACT_RECOMMENDATION_COLUMN_WIDTH }} />
+          <col style={{ width: COMPACT_RECOMMENDATION_COLUMN_WIDTH }} />
+          <col style={{ width: TOTAL_COST_COLUMN_WIDTH }} />
+          <col style={{ width: TOTAL_COST_COLUMN_WIDTH }} />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t('optimize.databricks.table.resource')}</TableHead>
+            <TableHead>{t('optimize.databricks.table.service')}</TableHead>
+            <TableHead>{t('optimize.databricks.table.instanceType')}</TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.table.nonServerlessSpend')}
+            </TableHead>
+            <TableHead className="text-right">
+              <div className="grid gap-0.5">
+                <div className="flex min-w-0 items-center justify-end gap-1">
+                  <span>{t('optimize.databricks.table.estimatedCurrentTotal')}</span>
+                  <EstimatedValueTooltip />
+                </div>
+                <span className="text-muted-foreground text-xs font-normal">
+                  {t('optimize.databricks.table.estimatedEc2CostParen')}
+                </span>
+              </div>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const estimatedCurrentTotal = isFiniteNumber(row.estimatedCurrentTotalCostUsd)
+              ? row.estimatedCurrentTotalCostUsd
+              : null;
+            const estimatedEc2Cost = isFiniteNumber(row.estimatedEc2CostUsd)
+              ? row.estimatedEc2CostUsd
+              : null;
+            return (
+              <TableRow key={`${row.rank}-${row.resourceId}`}>
+                <ResourceInfoCell row={row} workspaceUrl={workspaceUrl} currentWorkspaceId={currentWorkspaceId} />
+                <TableCell className="overflow-hidden">
+                  <span className="block truncate">{row.serviceName}</span>
+                </TableCell>
+                <TableCell className="overflow-hidden truncate">
+                  {row.instanceType || t('dashboard.notAvailable')}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right font-medium">
+                  {formatUsd(row.totalCostUsd)}
+                </TableCell>
+                <EstimatedTotalCell estimatedTotal={estimatedCurrentTotal} estimatedEc2Cost={estimatedEc2Cost} />
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function ResourceInfoCell({
+  row,
   workspaceUrl,
   currentWorkspaceId,
 }: {
@@ -567,94 +1189,71 @@ function RecommendationRow({
   currentWorkspaceId: string | null;
 }) {
   const { t } = useI18n();
-  const formatUsd = useCurrencyUsd();
   const resourceName = row.resourceName || row.resourceId;
   const resourceUrl = databricksResourceUrl(row, workspaceUrl, currentWorkspaceId);
-  const workspacePrimary = row.workspaceName || row.workspaceId || t('dashboard.notAvailable');
-  const workspaceSecondary = row.workspaceName ? row.workspaceId : null;
-  const estimatedCurrentTotal = isFiniteNumber(row.estimatedCurrentTotalCostUsd)
-    ? row.estimatedCurrentTotalCostUsd
-    : null;
-  const estimatedEc2Cost = isFiniteNumber(row.estimatedEc2CostUsd) ? row.estimatedEc2CostUsd : null;
-  const estimatedServerlessCost = isFiniteNumber(row.estimatedServerlessCostUsd)
-    ? row.estimatedServerlessCostUsd
-    : null;
-  const estimatedServerlessDelta = isFiniteNumber(row.estimatedServerlessDeltaUsd)
-    ? row.estimatedServerlessDeltaUsd
-    : null;
+  const resourceWorkspace = `${row.workspaceName || t('dashboard.notAvailable')} | ${
+    row.workspaceId || t('dashboard.notAvailable')
+  }`;
   return (
-    <TableRow>
-      <TableCell>
-        <PriorityBadge priority={row.priority} />
-      </TableCell>
-      <TableCell className="min-w-56">
-        <div className="grid gap-0.5">
-          <ResourceNameLink href={resourceUrl} name={resourceName} />
-          <span className="text-muted-foreground text-xs">
-            {row.resourceType ?? t('dashboard.notAvailable')} · {row.resourceId}
-          </span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="grid gap-0.5">
-          <span>{row.serviceName}</span>
-          <span className="text-muted-foreground text-xs">{row.serviceCategory}</span>
-        </div>
-      </TableCell>
-      <TableCell className="min-w-36">{row.instanceType || t('dashboard.notAvailable')}</TableCell>
-      <TableCell className="text-right font-medium">
-        {formatUsd(row.nonServerlessCostUsd)}
-      </TableCell>
-      <TableCell className="min-w-56 text-right">
-        {estimatedCurrentTotal !== null ? (
-          <div className="grid gap-0.5">
-            <span className="font-medium">{formatUsd(estimatedCurrentTotal)}</span>
-            {estimatedEc2Cost !== null ? (
-              <span className="text-muted-foreground text-xs">{formatUsd(estimatedEc2Cost)}</span>
-            ) : null}
-          </div>
-        ) : (
-          t('dashboard.notAvailable')
-        )}
-      </TableCell>
-      <TableCell className="min-w-44 text-right">
-        {estimatedServerlessCost !== null ? (
-          <span className="font-medium">{formatUsd(estimatedServerlessCost)}</span>
-        ) : (
-          t('dashboard.notAvailable')
-        )}
-      </TableCell>
-      <TableCell className="min-w-32 text-right">
-        {estimatedServerlessDelta !== null ? (
-          <span className={estimatedServerlessDelta <= 0 ? 'text-(--success)' : 'text-(--danger)'}>
-            {formatSignedUsd(estimatedServerlessDelta, formatUsd)}
-          </span>
-        ) : (
-          t('dashboard.notAvailable')
-        )}
-      </TableCell>
-      <TableCell className="min-w-40">
-        <div className="grid gap-0.5">
-          <span>{workspacePrimary}</span>
-          {workspaceSecondary ? (
-            <span className="text-muted-foreground text-xs">{workspaceSecondary}</span>
-          ) : null}
-        </div>
-      </TableCell>
-    </TableRow>
+    <TableCell className="min-w-0 overflow-hidden">
+      <div className="grid min-w-0 gap-0.5">
+        <ResourceNameLink href={resourceUrl} name={resourceName} />
+        <span className="text-muted-foreground truncate text-xs">{row.resourceId}</span>
+        <span className="text-muted-foreground truncate text-xs">{resourceWorkspace}</span>
+      </div>
+    </TableCell>
+  );
+}
+
+function EstimatedTotalCell({
+  estimatedTotal,
+  estimatedEc2Cost,
+}: {
+  estimatedTotal: number | null;
+  estimatedEc2Cost: number | null;
+}) {
+  const { t } = useI18n();
+  const formatUsd = useCurrencyUsd();
+  if (estimatedTotal === null) {
+    return <TableCell className="overflow-hidden text-right">{t('dashboard.notAvailable')}</TableCell>;
+  }
+  return (
+    <TableCell className="overflow-hidden text-right">
+      <div className="grid gap-0.5">
+        <span className="font-medium">{formatUsd(estimatedTotal)}</span>
+        {estimatedEc2Cost !== null ? (
+          <span className="text-muted-foreground text-xs">{formatUsd(estimatedEc2Cost)}</span>
+        ) : null}
+      </div>
+    </TableCell>
+  );
+}
+
+function EstimatedValueTooltip() {
+  const { t } = useI18n();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Info
+          className="text-muted-foreground size-3.5 shrink-0"
+          aria-label={t('optimize.databricks.table.estimatedValue')}
+        />
+      </TooltipTrigger>
+      <TooltipContent>{t('optimize.databricks.table.estimatedValue')}</TooltipContent>
+    </Tooltip>
   );
 }
 
 function ResourceNameLink({ href, name }: { href: string | null; name: string }) {
   if (!href) {
-    return <span className="font-medium">{name}</span>;
+    return <span className="truncate font-medium">{name}</span>;
   }
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="text-primary inline-flex min-w-0 items-center gap-1 font-medium hover:underline"
+      className="text-primary inline-flex max-w-full min-w-0 items-center gap-1 font-medium hover:underline"
     >
       <span className="min-w-0 truncate">{name}</span>
       <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
@@ -779,6 +1378,14 @@ function isFiniteNumber(value: number | null | undefined): value is number {
 function formatSignedUsd(value: number, formatUsd: (value: number) => string): string {
   if (value === 0) return formatUsd(0);
   return `${value > 0 ? '+' : '-'}${formatUsd(Math.abs(value))}`;
+}
+
+function formatSignedPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'N/A';
+  if (Math.abs(value) < 0.05) return '0%';
+  const absValue = Math.abs(value);
+  const formatted = absValue < 10 ? absValue.toFixed(1) : String(Math.round(absValue));
+  return `${value > 0 ? '+' : '-'}${formatted}%`;
 }
 
 function compactUsd(value: number): string {
