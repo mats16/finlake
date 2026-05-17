@@ -273,6 +273,11 @@ export const ja: Dictionary = {
         dbuQuantityEstimate: 'DBU 合計',
         ec2ReferenceInstance: 'EC2 参照インスタンス',
         serverlessRatio: 'サーバレス比率',
+        utilization: '稼働率',
+        utilizationDescription:
+          'CPU user + system を、観測できたノード起動時間で重み付けした期間平均です。',
+        allPurposeServerlessEstimateDescription:
+          '合計 DBU x 稼働率 x サーバレス DBU 単価で試算しています。',
       },
       empty: {
         noData: 'Databricks 最適化データがありません',

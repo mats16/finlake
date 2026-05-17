@@ -65,12 +65,14 @@ import {
   Server,
 } from 'lucide-react';
 import {
+  buildDatabricksClusterUtilizationStatement,
   buildDatabricksRecommendationsStatement,
   buildDatabricksServicesStatement,
   buildDatabricksSummaryStatement,
   buildDatabricksTrendStatement,
   buildDatabricksWorkspacesStatement,
   resolveDatabricksOptimizeSources,
+  type DatabricksClusterUtilizationRow,
   type DatabricksOptimizationRecommendation,
   type DatabricksOptimizationServiceRow,
   type DatabricksOptimizationSummary,
@@ -159,6 +161,10 @@ interface DatabricksOptimizationTrendRow {
   serverlessRatio: number | null;
 }
 
+type AllPurposeRecommendationRow = DatabricksOptimizationRecommendation & {
+  cpuUtilizationPercent: number | null;
+};
+
 function rangeForPeriod(period: Period) {
   const end = stableTomorrow();
   const start = new Date(end);
@@ -240,6 +246,10 @@ export function DatabricksOptimize() {
     () => buildDatabricksRecommendationsStatement(sourceTables, scopedRange),
     [scopedRange, sourceTables],
   );
+  const clusterUtilizationStatement = useMemo(
+    () => buildDatabricksClusterUtilizationStatement(scopedRange),
+    [scopedRange],
+  );
   const summaryQuery = useSqlStatement<DatabricksOptimizationSummary>(summaryStatement, {
     enabled: sqlEnabled,
     requestKey: ['optimize', 'databricks', 'summary', scopedRange, sourceTables],
@@ -257,6 +267,13 @@ export function DatabricksOptimize() {
     {
       enabled: sqlEnabled,
       requestKey: ['optimize', 'databricks', 'recommendations', scopedRange, sourceTables],
+    },
+  );
+  const clusterUtilizationQuery = useSqlStatement<DatabricksClusterUtilizationRow>(
+    clusterUtilizationStatement,
+    {
+      enabled: sqlEnabled && recommendationServiceGroup === 'ALL_PURPOSE',
+      requestKey: ['optimize', 'databricks', 'cluster-utilization', scopedRange],
     },
   );
   const summary = summaryQuery.rows[0]
@@ -336,6 +353,27 @@ export function DatabricksOptimize() {
       ),
     [recommendationRows, recommendationServiceGroup],
   );
+  const clusterUtilizationByResource = useMemo(() => {
+    const rows = new Map<string, number | null>();
+    for (const row of clusterUtilizationQuery.rows) {
+      rows.set(
+        clusterUtilizationKey(row.workspaceId, row.clusterId),
+        normalizeRatio(row.cpuUtilizationPercent),
+      );
+    }
+    return rows;
+  }, [clusterUtilizationQuery.rows]);
+  const allPurposeRecommendationRows = useMemo<AllPurposeRecommendationRow[]>(
+    () =>
+      filteredRecommendationRows.map((row) => ({
+        ...row,
+        cpuUtilizationPercent:
+          clusterUtilizationByResource.get(
+            clusterUtilizationKey(row.workspaceId, row.resourceId),
+          ) ?? null,
+      })),
+    [clusterUtilizationByResource, filteredRecommendationRows],
+  );
   const showMigrationEstimateColumns = recommendationServiceGroup !== 'ALL_PURPOSE';
   const showServerlessModeToggle = recommendationServiceGroup === 'JOBS';
   const effectiveServerlessMode = showServerlessModeToggle ? serverlessMode : 'standard';
@@ -394,6 +432,7 @@ export function DatabricksOptimize() {
     trendQuery.refetch();
     servicesQuery.refetch();
     recommendationsQuery.refetch();
+    clusterUtilizationQuery.refetch();
   };
 
   return (
@@ -619,14 +658,12 @@ export function DatabricksOptimize() {
                   counts={recommendationGroupCounts}
                   onChange={setRecommendationServiceGroup}
                 />
-                {showMigrationEstimateColumns ? (
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {showServerlessModeToggle ? (
-                      <ServerlessModeToggle value={serverlessMode} onChange={setServerlessMode} />
-                    ) : null}
-                    <DeltaDisplayToggle value={deltaDisplay} onChange={setDeltaDisplay} />
-                  </div>
-                ) : null}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {showServerlessModeToggle ? (
+                    <ServerlessModeToggle value={serverlessMode} onChange={setServerlessMode} />
+                  ) : null}
+                  <DeltaDisplayToggle value={deltaDisplay} onChange={setDeltaDisplay} />
+                </div>
               </div>
               {filteredRecommendationRows.length === 0 ? (
                 <EmptyState
@@ -635,7 +672,8 @@ export function DatabricksOptimize() {
                 />
               ) : !showMigrationEstimateColumns ? (
                 <AllPurposeRecommendationTable
-                  rows={filteredRecommendationRows}
+                  rows={allPurposeRecommendationRows}
+                  deltaDisplay={deltaDisplay}
                   workspaceUrl={me.data?.workspaceUrl ?? null}
                   currentWorkspaceId={me.data?.workspaceId ?? null}
                 />
@@ -701,7 +739,7 @@ export function DatabricksOptimize() {
                           <div className="grid gap-0.5">
                             <div className="flex min-w-0 items-center justify-end gap-1">
                               <span>{t('optimize.databricks.table.estimatedCurrentTotal')}</span>
-                              <EstimatedValueTooltip />
+                              <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
                             </div>
                             <span className="text-muted-foreground text-xs font-normal">
                               {t('optimize.databricks.table.estimatedEc2CostParen')}
@@ -716,7 +754,7 @@ export function DatabricksOptimize() {
                         >
                           <div className="flex min-w-0 items-center justify-end gap-1">
                             <span>{t('optimize.databricks.table.estimatedServerlessCost')}</span>
-                            <EstimatedValueTooltip />
+                            <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
                           </div>
                         </ResizableRecommendationHead>
                         <ResizableRecommendationHead
@@ -727,7 +765,7 @@ export function DatabricksOptimize() {
                         >
                           <div className="flex min-w-0 items-center justify-end gap-1">
                             <span>{t('optimize.databricks.table.serverlessDelta')}</span>
-                            <EstimatedValueTooltip />
+                            <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
                           </div>
                         </ResizableRecommendationHead>
                       </TableRow>
@@ -1076,14 +1114,8 @@ function RecommendationRow({
       : serverlessMode === 'standard'
         ? performanceServerlessCost * SERVERLESS_STANDARD_COST_RATIO
         : performanceServerlessCost;
-  const estimatedServerlessDelta =
-    estimatedServerlessCost !== null && estimatedCurrentTotal !== null
-      ? estimatedServerlessCost - estimatedCurrentTotal
-      : null;
-  const estimatedServerlessDeltaPercent =
-    estimatedServerlessDelta !== null && estimatedCurrentTotal !== null && estimatedCurrentTotal > 0
-      ? (estimatedServerlessDelta / estimatedCurrentTotal) * 100
-      : null;
+  const { delta: estimatedServerlessDelta, deltaPercent: estimatedServerlessDeltaPercent } =
+    computeServerlessDelta(estimatedServerlessCost, estimatedCurrentTotal);
   return (
     <TableRow>
       <TableCell className="overflow-hidden">
@@ -1131,10 +1163,12 @@ function RecommendationRow({
 
 function AllPurposeRecommendationTable({
   rows,
+  deltaDisplay,
   workspaceUrl,
   currentWorkspaceId,
 }: {
-  rows: DatabricksOptimizationRecommendation[];
+  rows: AllPurposeRecommendationRow[];
+  deltaDisplay: DeltaDisplay;
   workspaceUrl: string | null;
   currentWorkspaceId: string | null;
 }) {
@@ -1147,8 +1181,11 @@ function AllPurposeRecommendationTable({
           <col />
           <col style={{ width: COMPACT_RECOMMENDATION_COLUMN_WIDTH }} />
           <col style={{ width: COMPACT_RECOMMENDATION_COLUMN_WIDTH }} />
+          <col style={{ width: COMPACT_RECOMMENDATION_COLUMN_WIDTH }} />
           <col style={{ width: TOTAL_COST_COLUMN_WIDTH }} />
           <col style={{ width: TOTAL_COST_COLUMN_WIDTH }} />
+          <col style={{ width: ESTIMATED_SERVERLESS_COST_COLUMN_WIDTH }} />
+          <col style={{ width: DELTA_COLUMN_WIDTH }} />
         </colgroup>
         <TableHeader>
           <TableRow>
@@ -1156,17 +1193,37 @@ function AllPurposeRecommendationTable({
             <TableHead>{t('optimize.databricks.table.service')}</TableHead>
             <TableHead>{t('optimize.databricks.table.instanceType')}</TableHead>
             <TableHead className="text-right">
+              <div className="flex min-w-0 items-center justify-end gap-1">
+                <span>{t('optimize.databricks.table.utilization')}</span>
+                <InfoTooltip label={t('optimize.databricks.table.utilizationDescription')} />
+              </div>
+            </TableHead>
+            <TableHead className="text-right">
               {t('optimize.databricks.table.nonServerlessSpend')}
             </TableHead>
             <TableHead className="text-right">
               <div className="grid gap-0.5">
                 <div className="flex min-w-0 items-center justify-end gap-1">
                   <span>{t('optimize.databricks.table.estimatedCurrentTotal')}</span>
-                  <EstimatedValueTooltip />
+                  <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
                 </div>
                 <span className="text-muted-foreground text-xs font-normal">
                   {t('optimize.databricks.table.estimatedEc2CostParen')}
                 </span>
+              </div>
+            </TableHead>
+            <TableHead className="text-right">
+              <div className="flex min-w-0 items-center justify-end gap-1">
+                <span>{t('optimize.databricks.table.estimatedServerlessCost')}</span>
+                <InfoTooltip
+                  label={t('optimize.databricks.table.allPurposeServerlessEstimateDescription')}
+                />
+              </div>
+            </TableHead>
+            <TableHead className="text-right">
+              <div className="flex min-w-0 items-center justify-end gap-1">
+                <span>{t('optimize.databricks.table.serverlessDelta')}</span>
+                <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
               </div>
             </TableHead>
           </TableRow>
@@ -1179,6 +1236,11 @@ function AllPurposeRecommendationTable({
             const estimatedEc2Cost = isFiniteNumber(row.estimatedEc2CostUsd)
               ? row.estimatedEc2CostUsd
               : null;
+            const estimatedServerlessCost = estimatedAllPurposeServerlessCost(row);
+            const {
+              delta: estimatedServerlessDelta,
+              deltaPercent: estimatedServerlessDeltaPercent,
+            } = computeServerlessDelta(estimatedServerlessCost, estimatedCurrentTotal);
             return (
               <TableRow key={`${row.rank}-${row.resourceId}`}>
                 <ResourceInfoCell
@@ -1192,13 +1254,41 @@ function AllPurposeRecommendationTable({
                 <TableCell className="overflow-hidden truncate">
                   {row.instanceType || t('dashboard.notAvailable')}
                 </TableCell>
+                <TableCell
+                  className={cn(
+                    'overflow-hidden text-right font-medium',
+                    utilizationToneClass(row.cpuUtilizationPercent),
+                  )}
+                >
+                  {formatRatio(row.cpuUtilizationPercent)}
+                </TableCell>
                 <TableCell className="overflow-hidden text-right font-medium">
-                  {formatUsd(row.totalCostUsd)}
+                  {formatUsd(row.nonServerlessCostUsd)}
                 </TableCell>
                 <EstimatedTotalCell
                   estimatedTotal={estimatedCurrentTotal}
                   estimatedEc2Cost={estimatedEc2Cost}
                 />
+                <TableCell className="overflow-hidden text-right font-medium">
+                  {estimatedServerlessCost !== null
+                    ? formatUsd(estimatedServerlessCost)
+                    : t('dashboard.notAvailable')}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {estimatedServerlessDelta !== null ? (
+                    <span
+                      className={
+                        estimatedServerlessDelta <= 0 ? 'text-(--success)' : 'text-(--danger)'
+                      }
+                    >
+                      {deltaDisplay === 'currency'
+                        ? formatSignedUsd(estimatedServerlessDelta, formatUsd)
+                        : formatSignedPercent(estimatedServerlessDeltaPercent)}
+                    </span>
+                  ) : (
+                    t('dashboard.notAvailable')
+                  )}
+                </TableCell>
               </TableRow>
             );
           })}
@@ -1260,17 +1350,13 @@ function EstimatedTotalCell({
   );
 }
 
-function EstimatedValueTooltip() {
-  const { t } = useI18n();
+function InfoTooltip({ label }: { label: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Info
-          className="text-muted-foreground size-3.5 shrink-0"
-          aria-label={t('optimize.databricks.table.estimatedValue')}
-        />
+        <Info className="text-muted-foreground size-3.5 shrink-0" aria-label={label} />
       </TooltipTrigger>
-      <TooltipContent>{t('optimize.databricks.table.estimatedValue')}</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }
@@ -1406,9 +1492,48 @@ function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function clusterUtilizationKey(workspaceId: string | null | undefined, clusterId: string): string {
+  return `${workspaceId ?? ''}:${clusterId}`;
+}
+
+function utilizationToneClass(value: number | null | undefined): string {
+  const ratio = normalizeRatio(value);
+  if (ratio === null) return '';
+  if (ratio >= 70) return 'text-(--success)';
+  if (ratio >= 30) return 'text-(--warning)';
+  return 'text-(--danger)';
+}
+
+function estimatedAllPurposeServerlessCost(row: AllPurposeRecommendationRow): number | null {
+  const dbuQuantity = isFiniteNumber(row.dbuQuantityEstimate) ? row.dbuQuantityEstimate : null;
+  const utilizationRatio = normalizeRatio(row.cpuUtilizationPercent);
+  const serverlessUnitPrice = isFiniteNumber(row.serverlessUnitPriceUsd)
+    ? row.serverlessUnitPriceUsd
+    : null;
+  if (dbuQuantity === null || utilizationRatio === null || serverlessUnitPrice === null) {
+    return null;
+  }
+  return dbuQuantity * (utilizationRatio / 100) * serverlessUnitPrice;
+}
+
 function formatSignedUsd(value: number, formatUsd: (value: number) => string): string {
   if (value === 0) return formatUsd(0);
   return `${value > 0 ? '+' : '-'}${formatUsd(Math.abs(value))}`;
+}
+
+function computeServerlessDelta(
+  estimatedServerlessCost: number | null,
+  estimatedCurrentTotal: number | null,
+): { delta: number | null; deltaPercent: number | null } {
+  const delta =
+    estimatedServerlessCost !== null && estimatedCurrentTotal !== null
+      ? estimatedServerlessCost - estimatedCurrentTotal
+      : null;
+  const deltaPercent =
+    delta !== null && estimatedCurrentTotal !== null && estimatedCurrentTotal > 0
+      ? (delta / estimatedCurrentTotal) * 100
+      : null;
+  return { delta, deltaPercent };
 }
 
 function formatSignedPercent(value: number | null): string {

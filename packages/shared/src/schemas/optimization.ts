@@ -86,6 +86,14 @@ export type DatabricksOptimizationRecommendation = z.infer<
   typeof DatabricksOptimizationRecommendationSchema
 >;
 
+export const DatabricksClusterUtilizationRowSchema = z.object({
+  workspaceId: z.string().nullable(),
+  clusterId: z.string(),
+  cpuUtilizationPercent: z.number().nullable(),
+});
+
+export type DatabricksClusterUtilizationRow = z.infer<typeof DatabricksClusterUtilizationRowSchema>;
+
 export const DatabricksOptimizationErrorSchema = z.object({
   tableName: z.string(),
   message: z.string(),

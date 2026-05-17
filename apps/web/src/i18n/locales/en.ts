@@ -269,6 +269,11 @@ export const en = {
         dbuQuantityEstimate: 'Total DBUs',
         ec2ReferenceInstance: 'EC2 reference instance',
         serverlessRatio: 'Serverless ratio',
+        utilization: 'Utilization',
+        utilizationDescription:
+          'Average CPU user + system percent weighted by observed node runtime.',
+        allPurposeServerlessEstimateDescription:
+          'Estimated as total DBUs x utilization x serverless DBU unit price.',
       },
       empty: {
         noData: 'No Databricks optimization data',

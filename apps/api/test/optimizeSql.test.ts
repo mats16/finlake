@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DatabricksOptimizationResponseSchema } from '@finlake/shared';
 import {
+  DatabricksClusterUtilizationRowSchema,
+  DatabricksOptimizationResponseSchema,
+} from '@finlake/shared';
+import {
+  buildDatabricksClusterUtilizationSql,
+  buildDatabricksClusterUtilizationStatement,
   buildDatabricksOptimizeCte,
   buildDatabricksRecommendationsSql,
   buildDatabricksServicesSql,
@@ -71,6 +76,37 @@ test('databricks optimization params include date, workspace, and billing accoun
   assert.equal(params.find((p) => p.name === 'end_ts')?.value, '2026-02-01T00:00:00.000Z');
   assert.equal(params.find((p) => p.name === 'workspace_id')?.value, '123456789');
   assert.equal(params.find((p) => p.name === 'billing_account_id_0')?.value, 'abc-123');
+});
+
+test('buildDatabricksClusterUtilizationSql weights CPU by overlapped node runtime', () => {
+  const sql = buildDatabricksClusterUtilizationSql();
+
+  assert.match(sql, /FROM system\.compute\.node_timeline/);
+  assert.match(sql, /GREATEST\(start_time, :start_ts\)/);
+  assert.match(sql, /LEAST\(end_time, :end_ts\)/);
+  assert.match(sql, /TIMESTAMPDIFF\(\s+SECOND,/);
+  assert.match(sql, /COALESCE\(cpu_user_percent, 0\) \+ COALESCE\(cpu_system_percent, 0\)/);
+  assert.match(sql, /SUM\(cpu_percent \* overlap_seconds\)/);
+  assert.match(sql, /weighted_cpu_seconds \/ observed_node_seconds/);
+  assert.match(sql, /:workspace_id IS NULL OR CAST\(workspace_id AS STRING\) = :workspace_id/);
+});
+
+test('buildDatabricksClusterUtilizationStatement includes date and workspace params', () => {
+  const statement = buildDatabricksClusterUtilizationStatement({
+    start: '2026-01-01T00:00:00.000Z',
+    end: '2026-02-01T00:00:00.000Z',
+    workspaceId: '123456789',
+  });
+
+  assert.equal(
+    statement.params.find((p) => p.name === 'start_ts')?.value,
+    '2026-01-01T00:00:00.000Z',
+  );
+  assert.equal(
+    statement.params.find((p) => p.name === 'end_ts')?.value,
+    '2026-02-01T00:00:00.000Z',
+  );
+  assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
 });
 
 test('buildDatabricksSummarySql separates serverless, non-serverless, and unknown cost', () => {
@@ -259,4 +295,15 @@ test('DatabricksOptimizationResponseSchema parses API response shape', () => {
   });
 
   assert.equal(response.recommendations[0]?.resourceId, 'warehouse-1');
+});
+
+test('DatabricksClusterUtilizationRowSchema parses cluster utilization rows', () => {
+  const row = DatabricksClusterUtilizationRowSchema.parse({
+    workspaceId: '123',
+    clusterId: 'cluster-1',
+    cpuUtilizationPercent: 42.5,
+  });
+
+  assert.equal(row.clusterId, 'cluster-1');
+  assert.equal(row.cpuUtilizationPercent, 42.5);
 });

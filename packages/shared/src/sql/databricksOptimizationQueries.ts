@@ -130,6 +130,15 @@ export function buildDatabricksRecommendationsStatement(
   };
 }
 
+export function buildDatabricksClusterUtilizationStatement(
+  range: DatabricksOptimizationRange,
+): SqlStatementInput {
+  return {
+    query: buildDatabricksClusterUtilizationSql(),
+    params: databricksClusterUtilizationParams(range),
+  };
+}
+
 export function buildDatabricksOptimizeCte(sources: DatabricksOptimizeSource[]): string {
   const selects = sources
     .map(
@@ -174,6 +183,60 @@ filtered AS (
     AND charge_period_start < :end_ts
     AND (:workspace_id IS NULL OR workspace_id = :workspace_id)
 )
+`;
+}
+
+export function databricksClusterUtilizationParams(range: DatabricksOptimizationRange): SqlParam[] {
+  return [
+    { name: 'start_ts', value: range.start, type: 'TIMESTAMP' },
+    { name: 'end_ts', value: range.end, type: 'TIMESTAMP' },
+    { name: 'workspace_id', value: range.workspaceId ?? null, type: 'STRING' },
+  ];
+}
+
+export function buildDatabricksClusterUtilizationSql(): string {
+  return /* sql */ `
+WITH overlapped_node_timeline AS (
+  SELECT
+    CAST(workspace_id AS STRING) AS workspace_id,
+    cluster_id,
+    CAST(
+      GREATEST(
+        TIMESTAMPDIFF(
+          SECOND,
+          GREATEST(start_time, :start_ts),
+          LEAST(end_time, :end_ts)
+        ),
+        0
+      ) AS DOUBLE
+    ) AS overlap_seconds,
+    CAST(COALESCE(cpu_user_percent, 0) + COALESCE(cpu_system_percent, 0) AS DOUBLE) AS cpu_percent
+  FROM system.compute.node_timeline
+  WHERE start_time < :end_ts
+    AND end_time > :start_ts
+    AND (:workspace_id IS NULL OR CAST(workspace_id AS STRING) = :workspace_id)
+    AND cluster_id IS NOT NULL
+    AND TRIM(cluster_id) <> ''
+),
+cluster_metrics AS (
+  SELECT
+    workspace_id,
+    cluster_id,
+    CAST(SUM(cpu_percent * overlap_seconds) AS DOUBLE) AS weighted_cpu_seconds,
+    CAST(SUM(overlap_seconds) AS DOUBLE) AS observed_node_seconds
+  FROM overlapped_node_timeline
+  WHERE overlap_seconds > 0
+  GROUP BY workspace_id, cluster_id
+)
+SELECT
+  workspace_id,
+  cluster_id,
+  CASE
+    WHEN observed_node_seconds > 0
+      THEN CAST(weighted_cpu_seconds / observed_node_seconds AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS cpu_utilization_percent
+FROM cluster_metrics
 `;
 }
 
