@@ -192,9 +192,13 @@ export const en = {
     underConstructionTitle: 'Under construction',
     underConstructionDesc: 'This Optimize surface is being prepared.',
     databricks: {
-      title: 'Databricks Optimization',
+      title: 'Optimize / Databricks',
       desc: 'Track serverless adoption and prioritize Databricks workloads to review.',
       failedToLoad: 'Failed to load Databricks optimization signals.',
+      tabs: {
+        serverless: 'Serverless adoption',
+        query: 'Query',
+      },
       workspaces: {
         all: 'All workspaces',
       },

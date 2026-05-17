@@ -19,6 +19,7 @@ import {
 import {
   Alert,
   AlertDescription,
+  AlertTitle,
   Badge,
   Button,
   Card,
@@ -56,6 +57,7 @@ import {
 import {
   AlertCircle,
   Check,
+  Construction,
   DollarSign,
   ExternalLink,
   Gauge,
@@ -79,13 +81,14 @@ import {
   type DatabricksOptimizationWorkspace,
   type DatabricksTrendGrain,
 } from '@finlake/shared';
-import { PageHeader } from '../../components/PageHeader';
 import { useAppSettings, useDataSources, useMe, useSqlStatement } from '../../api/hooks';
 import { useCurrencyUsd, useI18n } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
 
 const PERIODS = ['last30', 'last90', 'last180', 'last12m'] as const;
+const DATABRICKS_OPTIMIZE_TABS = ['serverless', 'query'] as const;
 type Period = (typeof PERIODS)[number];
+type DatabricksOptimizeTab = (typeof DATABRICKS_OPTIMIZE_TABS)[number];
 type DeltaDisplay = 'currency' | 'percent';
 type ServerlessMode = 'performance' | 'standard';
 type RecommendationServiceGroup = 'JOBS' | 'SQL' | 'ALL_PURPOSE';
@@ -186,6 +189,7 @@ function sqlError(tableName: string, error: unknown) {
 export function DatabricksOptimize() {
   const { t, locale } = useI18n();
   const formatUsd = useCurrencyUsd();
+  const [activeTab, setActiveTab] = useState<DatabricksOptimizeTab>('serverless');
   const [period, setPeriod] = useState<Period>('last30');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('all');
   const [selectedServiceRatioServices, setSelectedServiceRatioServices] = useState<string[]>(
@@ -211,7 +215,7 @@ export function DatabricksOptimize() {
       ),
     [appSettings.data?.settings, dataSources.data?.items],
   );
-  const sqlEnabled = dataSources.isSuccess && appSettings.isSuccess;
+  const sqlEnabled = activeTab === 'serverless' && dataSources.isSuccess && appSettings.isSuccess;
   const workspaceStatement = useMemo(
     () => buildDatabricksWorkspacesStatement(sourceTables, baseRange),
     [baseRange, sourceTables],
@@ -435,48 +439,88 @@ export function DatabricksOptimize() {
     clusterUtilizationQuery.refetch();
   };
 
+  const header = (
+    <header className="page-header optimize-page-header">
+      <div className="optimize-page-header-row">
+        <div className="page-header-content">
+          <h2>{t('optimize.databricks.title')}</h2>
+        </div>
+        {activeTab === 'serverless' ? (
+          <div className="page-header-actions">
+            <div className="flex flex-wrap justify-end gap-2">
+              <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
+                <SelectTrigger className="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
+                  {workspaceOptions.map((workspace) => {
+                    const value = workspace.workspaceId ?? '';
+                    if (!value) return null;
+                    return (
+                      <SelectItem key={value} value={value}>
+                        {workspace.workspaceName || value}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERIODS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {t(`optimize.databricks.period.${option}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" onClick={refresh} disabled={loading}>
+                <RefreshCcw /> {t('dashboard.refresh')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <nav className="upper-tabs" role="tablist" aria-label={t('optimize.databricks.title')}>
+        {DATABRICKS_OPTIMIZE_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={activeTab === tab ? 'active' : ''}
+            onClick={() => setActiveTab(tab)}
+          >
+            {t(`optimize.databricks.tabs.${tab}`)}
+          </button>
+        ))}
+      </nav>
+    </header>
+  );
+
+  if (activeTab === 'query') {
+    return (
+      <>
+        {header}
+        <Card>
+          <CardContent>
+            <Alert>
+              <Construction />
+              <AlertTitle>{t('optimize.underConstructionTitle')}</AlertTitle>
+              <AlertDescription>{t('optimize.underConstructionDesc')}</AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
+      </>
+    );
+  }
+
   return (
     <>
-      <PageHeader
-        title={t('optimize.databricks.title')}
-        subtitle={t('optimize.databricks.desc')}
-        actions={
-          <div className="flex flex-wrap justify-end gap-2">
-            <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
-                {workspaceOptions.map((workspace) => {
-                  const value = workspace.workspaceId ?? '';
-                  if (!value) return null;
-                  return (
-                    <SelectItem key={value} value={value}>
-                      {workspace.workspaceName || value}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERIODS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {t(`optimize.databricks.period.${option}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={refresh} disabled={loading}>
-              <RefreshCcw /> {t('dashboard.refresh')}
-            </Button>
-          </div>
-        }
-      />
+      {header}
 
       {errors.length > 0 ? (
         <Alert variant="destructive" className="mb-4">
@@ -488,307 +532,329 @@ export function DatabricksOptimize() {
         </Alert>
       ) : null}
 
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          icon={DollarSign}
-          label={t('optimize.databricks.kpi.totalCost')}
-          value={summary ? formatUsd(summary.totalCostUsd) : ''}
-          detail={t('optimize.databricks.kpi.effectiveCost')}
-          loading={loading}
-        />
-        <KpiCard
-          icon={Server}
-          label={t('optimize.databricks.kpi.nonServerlessSpend')}
-          value={summary ? formatUsd(summary.nonServerlessCostUsd) : ''}
-          detail={t('optimize.databricks.kpi.spendToReview')}
-          loading={loading}
-          tone={summary && summary.nonServerlessCostUsd > 0 ? 'bad' : 'good'}
-        />
-        <KpiCard
-          icon={Gauge}
-          label={t('optimize.databricks.kpi.serverlessRatio')}
-          value={formatRatio(summary?.serverlessRatio)}
-          detail={t('optimize.databricks.kpi.knownSpendOnly')}
-          loading={loading}
-          tone={ratioTone(summary?.serverlessRatio)}
-        />
-        <KpiCard
-          icon={ListChecks}
-          label={t('optimize.databricks.kpi.candidates')}
-          value={summary ? String(summary.candidateResourceCount) : ''}
-          detail={t('optimize.databricks.kpi.resourceLevel')}
-          loading={loading}
-        />
-      </div>
-
-      {!loading && !hasData && errors.length === 0 ? (
-        <Card className="mb-4">
-          <CardContent>
-            <EmptyState
-              title={t('optimize.databricks.empty.noData')}
-              description={t('optimize.databricks.empty.enableFocus')}
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              icon={DollarSign}
+              label={t('optimize.databricks.kpi.totalCost')}
+              value={summary ? formatUsd(summary.totalCostUsd) : ''}
+              detail={t('optimize.databricks.kpi.effectiveCost')}
+              loading={loading}
             />
-          </CardContent>
-        </Card>
-      ) : null}
+            <KpiCard
+              icon={Server}
+              label={t('optimize.databricks.kpi.nonServerlessSpend')}
+              value={summary ? formatUsd(summary.nonServerlessCostUsd) : ''}
+              detail={t('optimize.databricks.kpi.spendToReview')}
+              loading={loading}
+              tone={summary && summary.nonServerlessCostUsd > 0 ? 'bad' : 'good'}
+            />
+            <KpiCard
+              icon={Gauge}
+              label={t('optimize.databricks.kpi.serverlessRatio')}
+              value={formatRatio(summary?.serverlessRatio)}
+              detail={t('optimize.databricks.kpi.knownSpendOnly')}
+              loading={loading}
+              tone={ratioTone(summary?.serverlessRatio)}
+            />
+            <KpiCard
+              icon={ListChecks}
+              label={t('optimize.databricks.kpi.candidates')}
+              value={summary ? String(summary.candidateResourceCount) : ''}
+              detail={t('optimize.databricks.kpi.resourceLevel')}
+              loading={loading}
+            />
+          </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">{t('optimize.databricks.monthly.title')}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <Skeleton className="h-80 w-full" />
-            ) : monthly.length === 0 ? (
-              <EmptyState
-                title={t('optimize.databricks.empty.noMonthly')}
-                description={t('optimize.databricks.empty.adjustFilters')}
-              />
-            ) : (
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={monthly} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                    <YAxis
-                      yAxisId="cost"
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={(value) => compactUsd(Number(value))}
-                    />
-                    <YAxis
-                      yAxisId="ratio"
-                      orientation="right"
-                      domain={[0, 100]}
-                      allowDataOverflow
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={(value) => `${Math.round(Number(value))}%`}
-                    />
-                    <RechartsTooltip
-                      content={<MonthlyTooltip formatUsd={formatUsd} formatRatio={formatRatio} />}
-                    />
-                    <Legend />
-                    <Bar
-                      yAxisId="cost"
-                      dataKey="serverlessCostUsd"
-                      stackId="cost"
-                      name={t('optimize.databricks.legend.serverless')}
-                      fill={SERVERLESS_COLOR}
-                    />
-                    <Bar
-                      yAxisId="cost"
-                      dataKey="nonServerlessCostUsd"
-                      stackId="cost"
-                      name={t('optimize.databricks.legend.nonServerless')}
-                      fill={NON_SERVERLESS_COLOR}
-                    />
-                    <Bar
-                      yAxisId="cost"
-                      dataKey="unknownCostUsd"
-                      stackId="cost"
-                      name={t('optimize.databricks.legend.other')}
-                      fill={UNKNOWN_COLOR}
-                    />
-                    <Line
-                      yAxisId="ratio"
-                      type="monotone"
-                      dataKey="serverlessRatio"
-                      name={t('optimize.databricks.legend.ratio')}
-                      stroke={RATIO_COLOR}
-                      strokeWidth={2}
-                      dot={false}
-                      connectNulls
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle className="text-sm">{t('optimize.databricks.services.title')}</CardTitle>
-              <ServiceRatioFilterMenu
-                options={serviceRatioOptions}
-                selected={selectedServiceRatioServices}
-                onChange={setSelectedServiceRatioServices}
-              />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="grid gap-3">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <Skeleton key={index} className="h-12 w-full" />
-                ))}
-              </div>
-            ) : serviceRows.length === 0 ? (
-              <EmptyState
-                title={t('optimize.databricks.empty.noServices')}
-                description={t('optimize.databricks.empty.adjustFilters')}
-              />
-            ) : (
-              <div className="grid gap-4">
-                {filteredServiceRows.map((row) => (
-                  <ServiceRatioRow key={`${row.serviceCategory}-${row.serviceName}`} row={row} />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">
-            {t('optimize.databricks.recommendations.title')}
-          </CardTitle>
-          <CardDescription>{t('optimize.databricks.recommendations.desc')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <Skeleton className="h-72 w-full" />
-          ) : (
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <RecommendationServiceGroupToggle
-                  value={recommendationServiceGroup}
-                  counts={recommendationGroupCounts}
-                  onChange={setRecommendationServiceGroup}
-                />
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  {showServerlessModeToggle ? (
-                    <ServerlessModeToggle value={serverlessMode} onChange={setServerlessMode} />
-                  ) : null}
-                  <DeltaDisplayToggle value={deltaDisplay} onChange={setDeltaDisplay} />
-                </div>
-              </div>
-              {filteredRecommendationRows.length === 0 ? (
+          {!loading && !hasData && errors.length === 0 ? (
+            <Card className="mb-4">
+              <CardContent>
                 <EmptyState
-                  title={t('optimize.databricks.empty.noRecommendations')}
-                  description={t('optimize.databricks.empty.noNonServerless')}
+                  title={t('optimize.databricks.empty.noData')}
+                  description={t('optimize.databricks.empty.enableFocus')}
                 />
-              ) : !showMigrationEstimateColumns ? (
-                <AllPurposeRecommendationTable
-                  rows={allPurposeRecommendationRows}
-                  deltaDisplay={deltaDisplay}
-                  workspaceUrl={me.data?.workspaceUrl ?? null}
-                  currentWorkspaceId={me.data?.workspaceId ?? null}
-                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">{t('optimize.databricks.monthly.title')}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <Skeleton className="h-80 w-full" />
+                ) : monthly.length === 0 ? (
+                  <EmptyState
+                    title={t('optimize.databricks.empty.noMonthly')}
+                    description={t('optimize.databricks.empty.adjustFilters')}
+                  />
+                ) : (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart
+                        data={monthly}
+                        margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                        <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                        <YAxis
+                          yAxisId="cost"
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => compactUsd(Number(value))}
+                        />
+                        <YAxis
+                          yAxisId="ratio"
+                          orientation="right"
+                          domain={[0, 100]}
+                          allowDataOverflow
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => `${Math.round(Number(value))}%`}
+                        />
+                        <RechartsTooltip
+                          content={
+                            <MonthlyTooltip formatUsd={formatUsd} formatRatio={formatRatio} />
+                          }
+                        />
+                        <Legend />
+                        <Bar
+                          yAxisId="cost"
+                          dataKey="serverlessCostUsd"
+                          stackId="cost"
+                          name={t('optimize.databricks.legend.serverless')}
+                          fill={SERVERLESS_COLOR}
+                        />
+                        <Bar
+                          yAxisId="cost"
+                          dataKey="nonServerlessCostUsd"
+                          stackId="cost"
+                          name={t('optimize.databricks.legend.nonServerless')}
+                          fill={NON_SERVERLESS_COLOR}
+                        />
+                        <Bar
+                          yAxisId="cost"
+                          dataKey="unknownCostUsd"
+                          stackId="cost"
+                          name={t('optimize.databricks.legend.other')}
+                          fill={UNKNOWN_COLOR}
+                        />
+                        <Line
+                          yAxisId="ratio"
+                          type="monotone"
+                          dataKey="serverlessRatio"
+                          name={t('optimize.databricks.legend.ratio')}
+                          stroke={RATIO_COLOR}
+                          strokeWidth={2}
+                          dot={false}
+                          connectNulls
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle className="text-sm">
+                    {t('optimize.databricks.services.title')}
+                  </CardTitle>
+                  <ServiceRatioFilterMenu
+                    options={serviceRatioOptions}
+                    selected={selectedServiceRatioServices}
+                    onChange={setSelectedServiceRatioServices}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="grid gap-3">
+                    {Array.from({ length: 6 }).map((_, index) => (
+                      <Skeleton key={index} className="h-12 w-full" />
+                    ))}
+                  </div>
+                ) : serviceRows.length === 0 ? (
+                  <EmptyState
+                    title={t('optimize.databricks.empty.noServices')}
+                    description={t('optimize.databricks.empty.adjustFilters')}
+                  />
+                ) : (
+                  <div className="grid gap-4">
+                    {filteredServiceRows.map((row) => (
+                      <ServiceRatioRow
+                        key={`${row.serviceCategory}-${row.serviceName}`}
+                        row={row}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                {t('optimize.databricks.recommendations.title')}
+              </CardTitle>
+              <CardDescription>{t('optimize.databricks.recommendations.desc')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <Skeleton className="h-72 w-full" />
               ) : (
-                <div className="overflow-x-auto">
-                  <Table className="table-fixed" style={{ width: '100%' }}>
-                    <colgroup>
-                      {RECOMMENDATION_COLUMN_ORDER.map((column) => (
-                        <col
-                          key={column}
-                          style={
-                            column === 'resource'
-                              ? undefined
-                              : { width: recommendationColumnWidths[column] }
-                          }
-                        />
-                      ))}
-                    </colgroup>
-                    <TableHeader>
-                      <TableRow>
-                        <ResizableRecommendationHead
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('priority', event)
-                          }
-                        >
-                          {t('optimize.databricks.table.priority')}
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('resource', event)
-                          }
-                        >
-                          {t('optimize.databricks.table.resource')}
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('service', event)
-                          }
-                        >
-                          {t('optimize.databricks.table.service')}
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('instanceType', event)
-                          }
-                        >
-                          {t('optimize.databricks.table.instanceType')}
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          align="right"
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('nonServerlessSpend', event)
-                          }
-                        >
-                          {t('optimize.databricks.table.nonServerlessSpend')}
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          align="right"
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('estimatedCurrentTotal', event)
-                          }
-                        >
-                          <div className="grid gap-0.5">
-                            <div className="flex min-w-0 items-center justify-end gap-1">
-                              <span>{t('optimize.databricks.table.estimatedCurrentTotal')}</span>
-                              <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
-                            </div>
-                            <span className="text-muted-foreground text-xs font-normal">
-                              {t('optimize.databricks.table.estimatedEc2CostParen')}
-                            </span>
-                          </div>
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          align="right"
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('estimatedServerlessCost', event)
-                          }
-                        >
-                          <div className="flex min-w-0 items-center justify-end gap-1">
-                            <span>{t('optimize.databricks.table.estimatedServerlessCost')}</span>
-                            <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
-                          </div>
-                        </ResizableRecommendationHead>
-                        <ResizableRecommendationHead
-                          align="right"
-                          onResizeStart={(event) =>
-                            startRecommendationColumnResize('serverlessDelta', event)
-                          }
-                        >
-                          <div className="flex min-w-0 items-center justify-end gap-1">
-                            <span>{t('optimize.databricks.table.serverlessDelta')}</span>
-                            <InfoTooltip label={t('optimize.databricks.table.estimatedValue')} />
-                          </div>
-                        </ResizableRecommendationHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredRecommendationRows.map((row) => (
-                        <RecommendationRow
-                          key={`${row.rank}-${row.resourceId}`}
-                          row={row}
-                          serverlessMode={effectiveServerlessMode}
-                          deltaDisplay={deltaDisplay}
-                          workspaceUrl={me.data?.workspaceUrl ?? null}
-                          currentWorkspaceId={me.data?.workspaceId ?? null}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
+                <div className="grid gap-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <RecommendationServiceGroupToggle
+                      value={recommendationServiceGroup}
+                      counts={recommendationGroupCounts}
+                      onChange={setRecommendationServiceGroup}
+                    />
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {showServerlessModeToggle ? (
+                        <ServerlessModeToggle value={serverlessMode} onChange={setServerlessMode} />
+                      ) : null}
+                      <DeltaDisplayToggle value={deltaDisplay} onChange={setDeltaDisplay} />
+                    </div>
+                  </div>
+                  {filteredRecommendationRows.length === 0 ? (
+                    <EmptyState
+                      title={t('optimize.databricks.empty.noRecommendations')}
+                      description={t('optimize.databricks.empty.noNonServerless')}
+                    />
+                  ) : !showMigrationEstimateColumns ? (
+                    <AllPurposeRecommendationTable
+                      rows={allPurposeRecommendationRows}
+                      deltaDisplay={deltaDisplay}
+                      workspaceUrl={me.data?.workspaceUrl ?? null}
+                      currentWorkspaceId={me.data?.workspaceId ?? null}
+                    />
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table className="table-fixed" style={{ width: '100%' }}>
+                        <colgroup>
+                          {RECOMMENDATION_COLUMN_ORDER.map((column) => (
+                            <col
+                              key={column}
+                              style={
+                                column === 'resource'
+                                  ? undefined
+                                  : { width: recommendationColumnWidths[column] }
+                              }
+                            />
+                          ))}
+                        </colgroup>
+                        <TableHeader>
+                          <TableRow>
+                            <ResizableRecommendationHead
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('priority', event)
+                              }
+                            >
+                              {t('optimize.databricks.table.priority')}
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('resource', event)
+                              }
+                            >
+                              {t('optimize.databricks.table.resource')}
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('service', event)
+                              }
+                            >
+                              {t('optimize.databricks.table.service')}
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('instanceType', event)
+                              }
+                            >
+                              {t('optimize.databricks.table.instanceType')}
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              align="right"
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('nonServerlessSpend', event)
+                              }
+                            >
+                              {t('optimize.databricks.table.nonServerlessSpend')}
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              align="right"
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('estimatedCurrentTotal', event)
+                              }
+                            >
+                              <div className="grid gap-0.5">
+                                <div className="flex min-w-0 items-center justify-end gap-1">
+                                  <span>
+                                    {t('optimize.databricks.table.estimatedCurrentTotal')}
+                                  </span>
+                                  <InfoTooltip
+                                    label={t('optimize.databricks.table.estimatedValue')}
+                                  />
+                                </div>
+                                <span className="text-muted-foreground text-xs font-normal">
+                                  {t('optimize.databricks.table.estimatedEc2CostParen')}
+                                </span>
+                              </div>
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              align="right"
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('estimatedServerlessCost', event)
+                              }
+                            >
+                              <div className="flex min-w-0 items-center justify-end gap-1">
+                                <span>
+                                  {t('optimize.databricks.table.estimatedServerlessCost')}
+                                </span>
+                                <InfoTooltip
+                                  label={t('optimize.databricks.table.estimatedValue')}
+                                />
+                              </div>
+                            </ResizableRecommendationHead>
+                            <ResizableRecommendationHead
+                              align="right"
+                              onResizeStart={(event) =>
+                                startRecommendationColumnResize('serverlessDelta', event)
+                              }
+                            >
+                              <div className="flex min-w-0 items-center justify-end gap-1">
+                                <span>{t('optimize.databricks.table.serverlessDelta')}</span>
+                                <InfoTooltip
+                                  label={t('optimize.databricks.table.estimatedValue')}
+                                />
+                              </div>
+                            </ResizableRecommendationHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredRecommendationRows.map((row) => (
+                            <RecommendationRow
+                              key={`${row.rank}-${row.resourceId}`}
+                              row={row}
+                              serverlessMode={effectiveServerlessMode}
+                              deltaDisplay={deltaDisplay}
+                              workspaceUrl={me.data?.workspaceUrl ?? null}
+                              currentWorkspaceId={me.data?.workspaceId ?? null}
+                            />
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </>
   );
 }

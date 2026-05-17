@@ -196,9 +196,13 @@ export const ja: Dictionary = {
     underConstructionTitle: '工事中',
     underConstructionDesc: 'この最適化画面は準備中です。',
     databricks: {
-      title: 'Databricks 最適化',
+      title: 'Optimize / Databricks',
       desc: 'サーバレス化の進捗を追跡し、優先的に見直す Databricks ワークロードを特定します。',
       failedToLoad: 'Databricks 最適化シグナルの読み込みに失敗しました。',
+      tabs: {
+        serverless: 'Serverless adoption',
+        query: 'Query',
+      },
       workspaces: {
         all: 'すべてのワークスペース',
       },
