@@ -1,4 +1,10 @@
-import { useRef, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import {
+  useRef,
+  useMemo,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
 import {
   Bar,
   CartesianGrid,
@@ -176,8 +182,9 @@ export function DatabricksOptimize() {
   const formatUsd = useCurrencyUsd();
   const [period, setPeriod] = useState<Period>('last30');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('all');
-  const [selectedServiceRatioServices, setSelectedServiceRatioServices] =
-    useState<string[]>(DEFAULT_SERVICE_RATIO_FILTERS);
+  const [selectedServiceRatioServices, setSelectedServiceRatioServices] = useState<string[]>(
+    DEFAULT_SERVICE_RATIO_FILTERS,
+  );
   const [recommendationServiceGroup, setRecommendationServiceGroup] =
     useState<RecommendationServiceGroup>('JOBS');
   const [serverlessMode, setServerlessMode] = useState<ServerlessMode>('standard');
@@ -334,7 +341,9 @@ export function DatabricksOptimize() {
   const effectiveServerlessMode = showServerlessModeToggle ? serverlessMode : 'standard';
   const hasData = Boolean(summary && summary.totalCostUsd > 0);
 
-  const resizingColRef = useRef<{ column: RecommendationColumnKey; colEl: HTMLElement } | null>(null);
+  const resizingColRef = useRef<{ column: RecommendationColumnKey; colEl: HTMLElement } | null>(
+    null,
+  );
 
   const startRecommendationColumnResize = (
     column: RecommendationColumnKey,
@@ -349,7 +358,9 @@ export function DatabricksOptimize() {
 
     // Find the <col> element to update width directly during drag (avoids re-renders)
     const table = (event.target as HTMLElement).closest('table');
-    const colEl = table?.querySelectorAll('col')[RECOMMENDATION_COLUMN_ORDER.indexOf(column)] as HTMLElement | undefined;
+    const colEl = table?.querySelectorAll('col')[RECOMMENDATION_COLUMN_ORDER.indexOf(column)] as
+      | HTMLElement
+      | undefined;
     if (colEl) resizingColRef.current = { column, colEl };
 
     document.body.style.cursor = 'col-resize';
@@ -808,7 +819,11 @@ function DeltaDisplayToggle({
 }) {
   const { t } = useI18n();
   return (
-    <div className="bg-muted inline-flex rounded-full p-1" role="group" aria-label={t('optimize.databricks.recommendations.deltaDisplay.label')}>
+    <div
+      className="bg-muted inline-flex rounded-full p-1"
+      role="group"
+      aria-label={t('optimize.databricks.recommendations.deltaDisplay.label')}
+    >
       {(['currency', 'percent'] as const).map((option) => {
         const active = value === option;
         return (
@@ -1074,7 +1089,11 @@ function RecommendationRow({
       <TableCell className="overflow-hidden">
         <PriorityBadge priority={row.priority} />
       </TableCell>
-      <ResourceInfoCell row={row} workspaceUrl={workspaceUrl} currentWorkspaceId={currentWorkspaceId} />
+      <ResourceInfoCell
+        row={row}
+        workspaceUrl={workspaceUrl}
+        currentWorkspaceId={currentWorkspaceId}
+      />
       <TableCell className="overflow-hidden">
         <span className="block truncate">{row.serviceName}</span>
       </TableCell>
@@ -1084,7 +1103,10 @@ function RecommendationRow({
       <TableCell className="overflow-hidden text-right font-medium">
         {formatUsd(row.nonServerlessCostUsd)}
       </TableCell>
-      <EstimatedTotalCell estimatedTotal={estimatedCurrentTotal} estimatedEc2Cost={estimatedEc2Cost} />
+      <EstimatedTotalCell
+        estimatedTotal={estimatedCurrentTotal}
+        estimatedEc2Cost={estimatedEc2Cost}
+      />
       <TableCell className="overflow-hidden text-right">
         {estimatedServerlessCost !== null ? (
           <span className="font-medium">{formatUsd(estimatedServerlessCost)}</span>
@@ -1159,7 +1181,11 @@ function AllPurposeRecommendationTable({
               : null;
             return (
               <TableRow key={`${row.rank}-${row.resourceId}`}>
-                <ResourceInfoCell row={row} workspaceUrl={workspaceUrl} currentWorkspaceId={currentWorkspaceId} />
+                <ResourceInfoCell
+                  row={row}
+                  workspaceUrl={workspaceUrl}
+                  currentWorkspaceId={currentWorkspaceId}
+                />
                 <TableCell className="overflow-hidden">
                   <span className="block truncate">{row.serviceName}</span>
                 </TableCell>
@@ -1169,7 +1195,10 @@ function AllPurposeRecommendationTable({
                 <TableCell className="overflow-hidden text-right font-medium">
                   {formatUsd(row.totalCostUsd)}
                 </TableCell>
-                <EstimatedTotalCell estimatedTotal={estimatedCurrentTotal} estimatedEc2Cost={estimatedEc2Cost} />
+                <EstimatedTotalCell
+                  estimatedTotal={estimatedCurrentTotal}
+                  estimatedEc2Cost={estimatedEc2Cost}
+                />
               </TableRow>
             );
           })}
@@ -1215,7 +1244,9 @@ function EstimatedTotalCell({
   const { t } = useI18n();
   const formatUsd = useCurrencyUsd();
   if (estimatedTotal === null) {
-    return <TableCell className="overflow-hidden text-right">{t('dashboard.notAvailable')}</TableCell>;
+    return (
+      <TableCell className="overflow-hidden text-right">{t('dashboard.notAvailable')}</TableCell>
+    );
   }
   return (
     <TableCell className="overflow-hidden text-right">
