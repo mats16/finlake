@@ -853,8 +853,6 @@ export function DatabricksOptimize() {
               )}
             </CardContent>
           </Card>
-        </>
-      )}
     </>
   );
 }
