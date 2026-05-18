@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Alert,
@@ -35,7 +36,7 @@ import {
 import {
   ACCOUNT_PRICES_DEFAULT,
   CATALOG_SETTING_KEY,
-  LAKEFLOW_PIPELINE_SETTING_KEYS,
+  DATABRICKS_FOCUS_VERSION,
   medallionSchemaNamesFromSettings,
   normalizeS3Prefix,
   s3BucketFromUrl,
@@ -51,7 +52,7 @@ import { useI18n } from '../../i18n';
 import { displayNameForRow, findTemplateById, findTemplateForRow } from './dataSourceCatalog';
 import type { DatabricksFocusDraft } from './DataSources';
 import { type AwsFocusDraft, type AwsSetupMode, useAwsFocusForm } from './useAwsFocusForm';
-import { catalogTableUrl, numberSetting } from './utils';
+import { catalogTableUrl } from './utils';
 
 const AWS_BCM_DATA_EXPORTS_URL =
   'https://us-east-1.console.aws.amazon.com/costmanagement/home#/bcm-data-exports';
@@ -1041,7 +1042,7 @@ function AwsTransformationSection({ form }: { form: ReturnType<typeof useAwsFocu
                 : 'dataSources.systemTables.setupAndSchedule',
             )}
           </Button>
-          {form.sourceSetup && form.jobId !== null ? (
+          {form.sourceSetup && form.pipelineId ? (
             <Button
               type="button"
               variant="secondary"
@@ -1056,6 +1057,7 @@ function AwsTransformationSection({ form }: { form: ReturnType<typeof useAwsFocu
         </div>
         <DatabricksResourceLinks
           workspaceUrl={form.workspaceUrl}
+          pipelineId={form.pipelineId}
           tableFqn={form.sourceSetup && form.remoteCatalog ? form.fqn : null}
         />
         {!form.remoteCatalog ? (
@@ -1085,8 +1087,7 @@ function AwsTransformationSection({ form }: { form: ReturnType<typeof useAwsFocu
             <Info />
             <AlertDescription>
               {t('dataSources.systemTables.runOk', {
-                jobId: String(form.runJob.data.jobId),
-                runId: String(form.runJob.data.runId),
+                updateId: form.runJob.data.updateId,
               })}
             </AlertDescription>
           </Alert>
@@ -1159,10 +1160,16 @@ export function FocusViewSection({
   onCreated?: (row: DataSource) => void;
 }) {
   const { t } = useI18n();
+  const qc = useQueryClient();
   const me = useMe();
   const settings = useAppSettings();
-  const createDs = useCreateDataSource();
-  const setupDs = useSetupDataSource();
+  const deferInvalidationUntilModalClose = row === null;
+  const createDs = useCreateDataSource({
+    invalidateOnSuccess: !deferInvalidationUntilModalClose,
+  });
+  const setupDs = useSetupDataSource({
+    invalidateOnSuccess: !deferInvalidationUntilModalClose,
+  });
   const runJob = useRunDataSourceJob();
 
   const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
@@ -1178,8 +1185,8 @@ export function FocusViewSection({
   const [setupProgressModalOpen, setSetupProgressModalOpen] = useState(false);
   const [createdRowAfterSetup, setCreatedRowAfterSetup] = useState<DataSource | null>(null);
   const [lastSetupWasUpdate, setLastSetupWasUpdate] = useState(false);
-  const sharedJobId = numberSetting(settings.data?.settings[LAKEFLOW_PIPELINE_SETTING_KEYS.jobId]);
-  const jobId = result?.jobId ?? sharedJobId;
+  const [setupInFlight, setSetupInFlight] = useState(false);
+  const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const isSetup = Boolean(row?.enabled || result);
 
@@ -1200,6 +1207,8 @@ export function FocusViewSection({
     : `${silverSchema}.${tableName}`;
 
   const onSetup = async () => {
+    if (setupInFlight || createDs.isPending || setupDs.isPending) return;
+    setSetupInFlight(true);
     setResult(null);
     setLastSetupWasUpdate(Boolean(row?.enabled));
     setSetupProgressModalOpen(true);
@@ -1240,6 +1249,20 @@ export function FocusViewSection({
         },
       });
       setResult(r);
+      if (!row) {
+        setCreatedRowAfterSetup({
+          ...dataSource,
+          tableName,
+          focusVersion: dataSource.focusVersion ?? DATABRICKS_FOCUS_VERSION,
+          pipelineId: r.pipelineId,
+          enabled: true,
+          config: {
+            ...dataSource.config,
+            accountPricesTable: accountPrices,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
       setSetupSteps((steps) =>
         updateDatabricksSetupSteps(steps, {
           systemGrants: {
@@ -1267,6 +1290,8 @@ export function FocusViewSection({
           ...(failed === 'systemGrants' ? { lakeflowJob: { status: 'idle', detail: null } } : {}),
         }),
       );
+    } finally {
+      setSetupInFlight(false);
     }
   };
 
@@ -1274,15 +1299,21 @@ export function FocusViewSection({
     if (!row) return;
     await runJob.mutateAsync(toDataSourceKey(row));
   };
-  const setupBusy = setupDs.isPending || createDs.isPending;
+  const setupBusy = setupInFlight || setupDs.isPending || createDs.isPending;
   const setupErrorMessage =
     (createDs.error as Error | null)?.message ?? (setupDs.error as Error | null)?.message ?? null;
   const closeSetupProgressModal = () => {
     if (setupBusy) return;
     setSetupProgressModalOpen(false);
+    const didSetup = createdRowAfterSetup !== null || result !== null;
     if (createdRowAfterSetup) {
       onCreated?.(createdRowAfterSetup);
       setCreatedRowAfterSetup(null);
+    }
+    if (didSetup) {
+      qc.invalidateQueries({ queryKey: ['dataSources'] });
+      qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['transformations'] });
     }
   };
 
@@ -1322,7 +1353,7 @@ export function FocusViewSection({
                 : 'dataSources.systemTables.setupAndSchedule',
             )}
           </Button>
-          {row?.enabled && jobId !== null ? (
+          {row?.enabled && pipelineId ? (
             <Button
               type="button"
               variant="secondary"
@@ -1337,6 +1368,7 @@ export function FocusViewSection({
         </div>
         <DatabricksResourceLinks
           workspaceUrl={workspaceUrl}
+          pipelineId={pipelineId}
           tableFqn={isSetup && remoteCatalog ? fqn : null}
         />
         <DatabricksSetupProgressModal
@@ -1373,8 +1405,7 @@ export function FocusViewSection({
             <Info />
             <AlertDescription>
               {t('dataSources.systemTables.runOk', {
-                jobId: String(runJob.data.jobId),
-                runId: String(runJob.data.runId),
+                updateId: runJob.data.updateId,
               })}
             </AlertDescription>
           </Alert>
@@ -1434,13 +1465,15 @@ function DatabricksSetupProgressModal({
 
 function DatabricksResourceLinks({
   workspaceUrl,
+  pipelineId,
   tableFqn,
 }: {
   workspaceUrl: string | null;
+  pipelineId: string | null;
   tableFqn: string | null;
 }) {
   const { t } = useI18n();
-  if (!tableFqn) return null;
+  if (!tableFqn && !pipelineId) return null;
 
   return (
     <div className="border-border bg-background/35 mt-4 rounded-md border p-3">
@@ -1448,11 +1481,20 @@ function DatabricksResourceLinks({
         {t('dataSources.systemTables.resourcesTitle')}
       </div>
       <div className="grid grid-cols-1 gap-2">
-        <ResourceLink
-          label={t('dataSources.systemTables.tableResource')}
-          id={tableFqn}
-          href={catalogTableUrl(workspaceUrl, tableFqn)}
-        />
+        {pipelineId ? (
+          <ResourceLink
+            label={t('dataSources.systemTables.pipelineResource')}
+            id={pipelineId}
+            href={databricksPipelineUrl(workspaceUrl, pipelineId)}
+          />
+        ) : null}
+        {tableFqn ? (
+          <ResourceLink
+            label={t('dataSources.systemTables.tableResource')}
+            id={tableFqn}
+            href={catalogTableUrl(workspaceUrl, tableFqn)}
+          />
+        ) : null}
       </div>
     </div>
   );

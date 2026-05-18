@@ -1,6 +1,7 @@
 import { settingsToRecord, type DatabaseClient } from '@finlake/db';
 import {
   type Env,
+  type DataSource,
   type TransformationResource,
   type TransformationPipelinesResponse,
 } from '@finlake/shared';
@@ -32,6 +33,7 @@ export async function listTransformationPipelines(
   userToken: string | undefined,
 ): Promise<TransformationPipelinesResponse> {
   const rawSettings = await db.repos.appSettings.list();
+  const dataSources = await db.repos.dataSources.list();
   const appSettings = settingsToRecord(rawSettings);
   const shared = sharedPipelineIds(appSettings);
   const generatedAt = new Date().toISOString();
@@ -41,6 +43,7 @@ export async function listTransformationPipelines(
     env,
     userToken,
     shared,
+    dataSources,
     consoleHost,
     fallbackDays,
   );
@@ -55,6 +58,7 @@ async function listTransformationResources(
   env: Env,
   userToken: string | undefined,
   shared: SharedPipelineIds,
+  dataSources: DataSource[],
   consoleHost: string | null,
   days: string[],
 ): Promise<TransformationResource[]> {
@@ -62,8 +66,13 @@ async function listTransformationResources(
   if (shared.jobId !== null) {
     resources.push(jobResource(env, userToken, shared, consoleHost, days));
   }
-  if (shared.pipelineId) {
-    resources.push(pipelineResource(env, userToken, shared, consoleHost, days));
+  const pipelineIds = new Set<string>();
+  if (shared.pipelineId) pipelineIds.add(shared.pipelineId);
+  for (const source of dataSources) {
+    if (source.pipelineId) pipelineIds.add(source.pipelineId);
+  }
+  for (const pipelineId of pipelineIds) {
+    resources.push(pipelineResource(env, userToken, pipelineId, consoleHost, days));
   }
   return Promise.all(resources);
 }
@@ -130,14 +139,10 @@ async function jobResource(
 async function pipelineResource(
   env: Env,
   userToken: string | undefined,
-  shared: SharedPipelineIds,
+  pipelineId: string,
   consoleHost: string | null,
   days: string[],
 ): Promise<TransformationResource> {
-  const pipelineId = shared.pipelineId;
-  if (!pipelineId) {
-    throw new Error('pipelineResource called without a pipeline id');
-  }
   const wc = await workspaceClient(env, userToken);
   const fallback = baseResource('pipeline', pipelineId, pipelineUrl(pipelineId, consoleHost), days);
 

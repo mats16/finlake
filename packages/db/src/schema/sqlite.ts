@@ -69,6 +69,7 @@ export const dataSources = sqliteTable(
     accountId: text('account_id').notNull(),
     tableName: text('table_name').notNull(),
     focusVersion: text('focus_version'),
+    pipelineId: text('pipeline_id'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     configJson: text('config_json').notNull().default('{}'),
     updatedAt: text('updated_at').notNull(),

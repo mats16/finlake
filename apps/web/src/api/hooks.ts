@@ -578,8 +578,9 @@ export function useDataSource(key: DataSourceKey | undefined) {
   });
 }
 
-export function useCreateDataSource() {
+export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
     mutationFn: (body: DataSourceCreateBody) =>
       apiFetch<DataSource>('/api/integrations/configurations', {
@@ -588,7 +589,9 @@ export function useCreateDataSource() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(dataSourceQueryKey(data), data);
-      qc.invalidateQueries({ queryKey: ['dataSources'] });
+      if (invalidateOnSuccess) {
+        qc.invalidateQueries({ queryKey: ['dataSources'] });
+      }
     },
   });
 }
@@ -624,8 +627,9 @@ export function useDeleteDataSource() {
   });
 }
 
-export function useSetupDataSource() {
+export function useSetupDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
     mutationFn: ({ key, body }: { key: DataSourceKey; body: DataSourceSetupBody }) =>
       apiFetch<DataSourceSetupResult>(dsConfigPath(key, '/setup'), {
@@ -633,21 +637,27 @@ export function useSetupDataSource() {
         body: JSON.stringify(body),
       }),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: dataSourceQueryKey(data.dataSourceKey) });
-      qc.invalidateQueries({ queryKey: ['dataSources'] });
-      qc.invalidateQueries({ queryKey: ['appSettings'] });
-      qc.invalidateQueries({ queryKey: ['transformations'] });
+      if (invalidateOnSuccess) {
+        qc.invalidateQueries({ queryKey: dataSourceQueryKey(data.dataSourceKey) });
+        qc.invalidateQueries({ queryKey: ['dataSources'] });
+        qc.invalidateQueries({ queryKey: ['appSettings'] });
+        qc.invalidateQueries({ queryKey: ['transformations'] });
+      }
     },
   });
 }
 
 export function useRunDataSourceJob() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (key: DataSourceKey) =>
       apiFetch<DataSourceRunResult>(dsConfigPath(key, '/run'), {
         method: 'POST',
         body: JSON.stringify({}),
       }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transformations'] });
+    },
   });
 }
 

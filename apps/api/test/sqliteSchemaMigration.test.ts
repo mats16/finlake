@@ -83,6 +83,7 @@ test('SqliteClient migrates legacy data_sources table on bootstrap', async () =>
 
     const afterColumns = await readColumnNames(path);
     assert.ok(afterColumns.includes('account_id'), 'account_id column is created');
+    assert.ok(afterColumns.includes('pipeline_id'), 'pipeline_id column is created');
     assert.ok(!afterColumns.includes('id'), 'legacy id column is removed');
     assert.ok(!afterColumns.includes('template_id'), 'legacy template_id column is removed');
     assert.ok(
@@ -115,8 +116,62 @@ test('SqliteClient bootstrap is a no-op when schema is already current', async (
       assert.equal(rows.length, 1, 'no migration runs against the current schema');
       assert.equal(rows[0]?.providerName, 'aws');
       assert.equal(rows[0]?.accountId, '123456789012');
+      assert.equal(rows[0]?.pipelineId, null);
     } finally {
       await second.close();
+    }
+  });
+});
+
+test('SqliteClient adds pipeline_id to existing data_sources without dropping rows', async () => {
+  await withTempDb(async (path) => {
+    const raw = createClient({ url: `file:${path}` });
+    try {
+      await raw.execute(
+        `CREATE TABLE data_sources (
+          name TEXT NOT NULL,
+          provider_name TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          table_name TEXT NOT NULL,
+          focus_version TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          config_json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(provider_name, account_id)
+        )`,
+      );
+      await raw.execute({
+        sql: `INSERT INTO data_sources
+          (name, provider_name, account_id, table_name, focus_version, enabled, config_json, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          'AWS',
+          'aws',
+          '123456789012',
+          'aws_123456789012_usage',
+          '1.2',
+          1,
+          '{}',
+          new Date().toISOString(),
+        ],
+      });
+    } finally {
+      raw.close();
+    }
+
+    const db = await SqliteClient.create({ sqlitePath: path });
+    try {
+      const rows = await db.repos.dataSources.list();
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.pipelineId, null);
+
+      const updated = await db.repos.dataSources.update(
+        { providerName: 'aws', accountId: '123456789012' },
+        { pipelineId: 'silver-pipeline-1' },
+      );
+      assert.equal(updated.pipelineId, 'silver-pipeline-1');
+    } finally {
+      await db.close();
     }
   });
 });

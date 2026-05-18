@@ -79,6 +79,7 @@ export const dataSources = pgTable(
     accountId: text('account_id').notNull(),
     tableName: text('table_name').notNull(),
     focusVersion: text('focus_version'),
+    pipelineId: text('pipeline_id'),
     enabled: boolean('enabled').notNull().default(true),
     config: jsonb('config').notNull().default({}),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

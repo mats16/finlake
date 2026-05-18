@@ -17,7 +17,6 @@ import {
 } from '../../api/hooks';
 import {
   CATALOG_SETTING_KEY,
-  LAKEFLOW_PIPELINE_SETTING_KEYS,
   AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT,
   externalLocationNameForBucket,
   finlakeAwsResourceTags,
@@ -38,7 +37,7 @@ import {
   type ExternalLocationSummary,
   type StorageCredentialSummary,
 } from '@finlake/shared';
-import { configString, messageOf, numberSetting } from './utils';
+import { configString, messageOf } from './utils';
 
 const AWS_BCM_REGION = 'us-east-1';
 const AWS_EXPORT_NAME_DEFAULT = 'finlake-focus-1-2';
@@ -539,11 +538,7 @@ export function useAwsFocusForm(row: DataSource | null, options: UseAwsFocusForm
     !effectiveS3Prefix ||
     !selectedS3Bucket ||
     !dirty;
-  const sharedJobId = numberSetting(settings.data?.settings[LAKEFLOW_PIPELINE_SETTING_KEYS.jobId]);
-  const sharedPipelineId =
-    settings.data?.settings[LAKEFLOW_PIPELINE_SETTING_KEYS.pipelineId] || null;
-  const jobId = result?.jobId ?? sharedJobId;
-  const pipelineId = result?.pipelineId ?? sharedPipelineId;
+  const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const fqn = remoteCatalog
     ? unquotedFqn(remoteCatalog, silverSchema, tableName)
@@ -1052,7 +1047,6 @@ export function useAwsFocusForm(row: DataSource | null, options: UseAwsFocusForm
     remoteCatalog,
     tableName,
     setTableName,
-    jobId,
     pipelineId,
     workspaceUrl,
     fqn,

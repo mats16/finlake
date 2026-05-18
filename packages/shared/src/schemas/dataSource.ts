@@ -136,6 +136,7 @@ export const DataSourceSchema = z.object({
   accountId: DataSourceAccountIdSchema,
   tableName: DataSourceIdentifierSchema,
   focusVersion: z.string().min(1).max(32).nullable(),
+  pipelineId: z.string().min(1).nullable(),
   enabled: z.boolean(),
   config: z.record(z.string(), z.unknown()),
   updatedAt: z.string().datetime(),
@@ -192,7 +193,7 @@ export const DATA_SOURCE_TEMPLATES = [
   },
   {
     id: 'aws',
-    name: 'Amazon Web Services',
+    name: 'AWS',
     description: 'Billing and Cost Management',
     subtitle: '',
     focus_version: AWS_FOCUS_VERSION,
@@ -290,8 +291,9 @@ export type DataSourcePreflightResult = z.infer<typeof DataSourcePreflightResult
 
 export const DataSourceRunResultSchema = z.object({
   dataSourceKey: DataSourceKeySchema,
-  jobId: z.number().int().positive(),
-  runId: z.number().int().positive(),
+  pipelineId: z.string().min(1),
+  updateId: z.string().min(1),
+  requestId: z.string().min(1).nullable(),
 });
 export type DataSourceRunResult = z.infer<typeof DataSourceRunResultSchema>;
 

@@ -61,18 +61,18 @@ const FALLBACK_TEMPLATE: DataSourceTemplate = {
 
 const PRICING_PROVIDER_CONFIGS = [
   {
-    key: 'aws',
-    template: PRICING_AWS_TEMPLATE,
-    logo: { kind: 'aws' as const },
-    path: '/pricing/aws',
-    matches: (row: PricingNotebookState) => row.id.startsWith('aws_'),
-  },
-  {
     key: 'databricks',
     template: PRICING_DATABRICKS_TEMPLATE,
     logo: { kind: 'databricks' as const },
     path: '/pricing/databricks',
     matches: (row: PricingNotebookState) => row.id.startsWith('databricks_'),
+  },
+  {
+    key: 'aws',
+    template: PRICING_AWS_TEMPLATE,
+    logo: { kind: 'aws' as const },
+    path: '/pricing/aws',
+    matches: (row: PricingNotebookState) => row.id.startsWith('aws_'),
   },
 ] as const;
 

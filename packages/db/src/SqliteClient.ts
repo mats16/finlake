@@ -133,6 +133,7 @@ export class SqliteClient implements DatabaseClient {
         account_id TEXT NOT NULL,
         table_name TEXT NOT NULL,
         focus_version TEXT,
+        pipeline_id TEXT,
         enabled INTEGER NOT NULL DEFAULT 1,
         config_json TEXT NOT NULL DEFAULT '{}',
         updated_at TEXT NOT NULL,
@@ -172,7 +173,7 @@ export class SqliteClient implements DatabaseClient {
       'write',
     );
     await this.dropColumnIfExists('data_sources', 'job_id');
-    await this.dropColumnIfExists('data_sources', 'pipeline_id');
+    await this.addColumnIfMissing('data_sources', 'pipeline_id', 'TEXT');
     await this.migrateWorkspacesDomainColumn();
     await this.migrateAppSettingKey('focus_pipeline_job_id', 'lakeflow_pipeline_job_id');
     await this.migrateAppSettingKey('focus_pipeline_id', 'lakeflow_pipeline_id');
@@ -233,6 +234,17 @@ export class SqliteClient implements DatabaseClient {
       if (/syntax error|near "DROP"/i.test(message)) return;
       throw err;
     }
+  }
+
+  private async addColumnIfMissing(
+    table: string,
+    column: string,
+    definition: string,
+  ): Promise<void> {
+    const info = await this.raw.execute(`PRAGMA table_info(${table})`);
+    const columns = new Set(info.rows.map((row) => String(row.name)));
+    if (columns.has(column)) return;
+    await this.raw.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   async healthCheck(): Promise<{ ok: true; backend: 'sqlite' }> {
@@ -533,6 +545,7 @@ class SqliteDataSourcesRepo implements DataSourcesRepo {
         accountId: input.accountId,
         tableName: input.tableName,
         focusVersion: input.focusVersion ?? null,
+        pipelineId: input.pipelineId ?? null,
         enabled: input.enabled,
         configJson: JSON.stringify(input.config ?? {}),
         updatedAt: new Date().toISOString(),
@@ -550,6 +563,7 @@ class SqliteDataSourcesRepo implements DataSourcesRepo {
     if (patch.name !== undefined) set.name = patch.name;
     if (patch.tableName !== undefined) set.tableName = patch.tableName;
     if (patch.focusVersion !== undefined) set.focusVersion = patch.focusVersion;
+    if (patch.pipelineId !== undefined) set.pipelineId = patch.pipelineId;
     if (patch.enabled !== undefined) set.enabled = patch.enabled;
     if (patch.config !== undefined) set.configJson = JSON.stringify(patch.config);
 
@@ -634,6 +648,7 @@ function toDataSource(row: typeof s.dataSources.$inferSelect): DataSourceValue {
     accountId: row.accountId,
     tableName: row.tableName,
     focusVersion: row.focusVersion,
+    pipelineId: row.pipelineId,
     enabled: row.enabled,
     config: JSON.parse(row.configJson) as Record<string, unknown>,
     updatedAt: row.updatedAt,

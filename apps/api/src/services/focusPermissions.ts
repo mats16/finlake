@@ -32,7 +32,7 @@ import {
   type PipelineScheduleParams,
 } from './databricksJobs.js';
 import { DataSourceSetupError } from './dataSourceErrors.js';
-import { readFocusConfig, resourceLabelBase, workspacePathFor } from './dataSourceSetup.js';
+import { readFocusConfig, sourceSilverPipelineName, workspacePathFor } from './dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineSql.js';
 import { z } from 'zod';
 
@@ -223,10 +223,9 @@ export async function preflightFocusDataSource(
       await uploadPipelineFile(appClient, workspacePath, pipelineSql);
       return 'pipeline source file uploaded by app service principal';
     });
-    const labelBase = resourceLabelBase(source);
     const scheduleParams: PipelineScheduleParams = {
-      pipelineName: `${labelBase}-pipeline`,
-      jobName: `${labelBase}-job`,
+      pipelineName: sourceSilverPipelineName(source),
+      jobName: 'finops-master-job',
       files: [{ workspacePath, pipelineSql }],
       catalog,
       schema: medallionSchemas.silver,

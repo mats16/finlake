@@ -113,6 +113,7 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
     assert.equal(status, 201);
     assert.equal(body.providerName, PROVIDER_AWS);
     assert.equal(body.accountId, '123456789012');
+    assert.equal(body.pipelineId, null);
 
     const stored = await env.db.repos.dataSources.get({
       providerName: PROVIDER_AWS,
@@ -120,6 +121,7 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
     });
     assert.ok(stored, 'row should be retrievable via composite PK');
     assert.equal(stored.name, 'AWS prod');
+    assert.equal(stored.pipelineId, null);
   } finally {
     await env.close();
   }

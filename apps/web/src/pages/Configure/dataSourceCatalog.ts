@@ -117,6 +117,7 @@ export function findTemplateForRow(row: {
 /** Legacy names that should be treated as the template's canonical name. */
 export const LEGACY_TEMPLATE_NAMES: Record<string, string[]> = {
   databricks_focus13: ['Databricks System Tables'],
+  aws: ['Amazon Web Services'],
 };
 
 export const PRICING_AWS_TEMPLATE: DataSourceTemplate = {

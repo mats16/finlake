@@ -4,7 +4,7 @@ import {
   awsUsageTableName,
   buildAwsFocusSilverPipelineSql,
 } from '../src/services/awsFocusTransformPipelineSql.js';
-import { buildUsageGoldSql } from '../src/services/dataSourceSetup.js';
+import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
 import {
   AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT,
@@ -46,6 +46,25 @@ test('awsUsageTableName derives canonical AWS silver table name', () => {
 test('awsUsageTableName rejects non-account identifiers', () => {
   assert.throws(() => awsUsageTableName('aws_usage'));
   assert.throws(() => awsUsageTableName('12345'));
+});
+
+test('sourceSilverPipelineName follows ingest pipeline naming convention', () => {
+  assert.equal(
+    sourceSilverPipelineName({
+      providerName: 'databricks',
+      accountId: 'default',
+      config: {},
+    }),
+    'finops-ingest-databricks-pipeline',
+  );
+  assert.equal(
+    sourceSilverPipelineName({
+      providerName: 'aws',
+      accountId: '123456789012',
+      config: {},
+    }),
+    'finops-ingest-aws-123456789012-pipeline',
+  );
 });
 
 test('buildAwsFocusSilverPipelineSql embeds source-specific values without gold rollup', () => {

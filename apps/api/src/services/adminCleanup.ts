@@ -50,11 +50,16 @@ export async function cleanupFinLakeResources(
   const pipelineId =
     settings[LAKEFLOW_PIPELINE_SETTING_KEYS.pipelineId] ??
     settings[LEGACY_SHARED_PIPELINE_SETTING_KEYS.pipelineId];
+  const dataSources = await db.repos.dataSources.list();
+  const sourcePipelineIds = Array.from(
+    new Set(dataSources.flatMap((source) => (source.pipelineId ? [source.pipelineId] : []))),
+  ).filter((id) => id !== pipelineId);
 
   resources.push(
     ...(await Promise.all([
       deleteJobResource(wc, jobId),
       deletePipelineResource(wc, pipelineId),
+      ...sourcePipelineIds.map((id) => deletePipelineResource(wc, id)),
       deleteWorkspaceResource(wc, settings[SHARED_PIPELINE_SETTING_KEYS.workspaceRoot]),
       deleteGenieResource(db, env, settings[GENIE_SPACE_SETTING_KEY]),
       deleteCatalogResource(env, settings[CATALOG_SETTING_KEY], {

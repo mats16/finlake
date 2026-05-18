@@ -66,13 +66,18 @@ export interface DataSourceValue {
   accountId: string;
   tableName: string;
   focusVersion: string | null;
+  pipelineId: string | null;
   enabled: boolean;
   config: Record<string, unknown>;
   updatedAt: string;
 }
 
-export type DataSourceCreateInput = Omit<DataSourceValue, 'updatedAt' | 'focusVersion'> & {
+export type DataSourceCreateInput = Omit<
+  DataSourceValue,
+  'updatedAt' | 'focusVersion' | 'pipelineId'
+> & {
   focusVersion?: string | null;
+  pipelineId?: string | null;
 };
 
 export type DataSourceUpdatePatch = Partial<
