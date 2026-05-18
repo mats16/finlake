@@ -10,12 +10,14 @@ export { isTerminalSqlStatus } from '@finlake/shared';
 export function submitSqlStatement(
   input: SqlStatementSubmitRequest,
 ): Promise<SqlStatementSubmitResponse> {
-  return apiFetch<SqlStatementSubmitResponse>('/api/sql', {
+  return apiFetch<SqlStatementSubmitResponse>('/api/sql/statements', {
     method: 'POST',
     body: JSON.stringify(input),
   });
 }
 
 export function getSqlStatement(statement_id: string): Promise<SqlStatementResultResponse> {
-  return apiFetch<SqlStatementResultResponse>(`/api/sql/${encodeURIComponent(statement_id)}`);
+  return apiFetch<SqlStatementResultResponse>(
+    `/api/sql/statements/${encodeURIComponent(statement_id)}`,
+  );
 }

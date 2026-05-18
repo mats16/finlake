@@ -51,7 +51,28 @@ async function startServer(
   };
 }
 
-test('POST /api/sql submits one read-only statement and returns statement_id', async () => {
+test('legacy /api/sql statement routes are not registered', async () => {
+  const env = await startServer({
+    submitRaw: async () => ({ statement_id: 'stmt-legacy', status: 'PENDING' }),
+    getRaw: async (statementId) => ({ statement_id: statementId, status: 'RUNNING' }),
+  });
+  try {
+    const [submit, result] = await Promise.all([
+      fetch(`${env.base}/api/sql`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'SELECT 1', params: [] }),
+      }),
+      fetch(`${env.base}/api/sql/stmt-legacy`),
+    ]);
+    assert.equal(submit.status, 404);
+    assert.equal(result.status, 404);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /api/sql/statements submits one read-only statement and returns statement_id', async () => {
   const calls: Array<{ query: string; params: unknown[]; warehouseId?: string }> = [];
   const env = await startServer({
     submitRaw: async (query, params, warehouseId) => {
@@ -60,7 +81,7 @@ test('POST /api/sql submits one read-only statement and returns statement_id', a
     },
   });
   try {
-    const res = await fetch(`${env.base}/api/sql`, {
+    const res = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -82,7 +103,7 @@ test('POST /api/sql submits one read-only statement and returns statement_id', a
   }
 });
 
-test('POST /api/sql falls back to env SQL_WAREHOUSE_ID when no override is supplied', async () => {
+test('POST /api/sql/statements falls back to env SQL_WAREHOUSE_ID when no override is supplied', async () => {
   const calls: Array<{ query: string; params: unknown[]; warehouseId?: string }> = [];
   const env = await startServer({
     submitRaw: async (query, params, warehouseId) => {
@@ -91,7 +112,7 @@ test('POST /api/sql falls back to env SQL_WAREHOUSE_ID when no override is suppl
     },
   });
   try {
-    const res = await fetch(`${env.base}/api/sql`, {
+    const res = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
@@ -104,7 +125,7 @@ test('POST /api/sql falls back to env SQL_WAREHOUSE_ID when no override is suppl
   }
 });
 
-test('GET /api/sql/:statement_id returns succeeded rows', async () => {
+test('GET /api/sql/statements/:statement_id returns succeeded rows', async () => {
   const env = await startServer({
     submitRaw: async () => ({ statement_id: 'stmt-123', status: 'PENDING' }),
     getRaw: async (statementId) => ({
@@ -115,12 +136,12 @@ test('GET /api/sql/:statement_id returns succeeded rows', async () => {
     }),
   });
   try {
-    await fetch(`${env.base}/api/sql`, {
+    await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
     });
-    const res = await fetch(`${env.base}/api/sql/stmt-123`);
+    const res = await fetch(`${env.base}/api/sql/statements/stmt-123`);
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
       statement_id: string;
@@ -135,7 +156,7 @@ test('GET /api/sql/:statement_id returns succeeded rows', async () => {
   }
 });
 
-test('POST /api/sql reuses cached succeeded results across warehouse_id overrides', async () => {
+test('POST /api/sql/statements reuses cached succeeded results across warehouse_id overrides', async () => {
   let submitCount = 0;
   const env = await startServer({
     submitRaw: async () => {
@@ -150,7 +171,7 @@ test('POST /api/sql reuses cached succeeded results across warehouse_id override
     }),
   });
   try {
-    const first = await fetch(`${env.base}/api/sql`, {
+    const first = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -160,9 +181,9 @@ test('POST /api/sql reuses cached succeeded results across warehouse_id override
       }),
     });
     assert.equal(first.status, 200);
-    await fetch(`${env.base}/api/sql/stmt-cache`);
+    await fetch(`${env.base}/api/sql/statements/stmt-cache`);
 
-    const second = await fetch(`${env.base}/api/sql`, {
+    const second = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -186,7 +207,7 @@ test('POST /api/sql reuses cached succeeded results across warehouse_id override
   }
 });
 
-test('POST /api/sql does not cache non-succeeded statement results', async () => {
+test('POST /api/sql/statements does not cache non-succeeded statement results', async () => {
   let submitCount = 0;
   const env = await startServer({
     submitRaw: async () => {
@@ -200,13 +221,13 @@ test('POST /api/sql does not cache non-succeeded statement results', async () =>
     }),
   });
   try {
-    const first = await fetch(`${env.base}/api/sql`, {
+    const first = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'noncache-user' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
     });
     const firstBody = (await first.json()) as { statement_id: string };
-    const failed = await fetch(`${env.base}/api/sql/${firstBody.statement_id}`, {
+    const failed = await fetch(`${env.base}/api/sql/statements/${firstBody.statement_id}`, {
       headers: { 'x-test-user': 'noncache-user' },
     });
     assert.equal(failed.status, 200);
@@ -220,7 +241,7 @@ test('POST /api/sql does not cache non-succeeded statement results', async () =>
     assert.equal(failedBody.error, 'boom');
     assert.equal(failedBody.result, undefined);
 
-    const second = await fetch(`${env.base}/api/sql`, {
+    const second = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'noncache-user' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
@@ -232,7 +253,7 @@ test('POST /api/sql does not cache non-succeeded statement results', async () =>
   }
 });
 
-test('POST /api/sql rate limits uncached submissions per user', async () => {
+test('POST /api/sql/statements rate limits uncached submissions per user', async () => {
   const env = await startServer(
     {
       submitRaw: async () => ({ statement_id: 'stmt-rate', status: 'PENDING' }),
@@ -240,14 +261,14 @@ test('POST /api/sql rate limits uncached submissions per user', async () => {
     { env: { SQL_API_SUBMIT_RATE_LIMIT_PER_MINUTE: 1 } },
   );
   try {
-    const first = await fetch(`${env.base}/api/sql`, {
+    const first = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'rate-user' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
     });
     assert.equal(first.status, 200);
 
-    const second = await fetch(`${env.base}/api/sql`, {
+    const second = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'rate-user' },
       body: JSON.stringify({ query: 'SELECT 2', params: [] }),
@@ -258,21 +279,21 @@ test('POST /api/sql rate limits uncached submissions per user', async () => {
   }
 });
 
-test('GET /api/sql/:statement_id rejects unknown statements and owner mismatches', async () => {
+test('GET /api/sql/statements/:statement_id rejects unknown statements and owner mismatches', async () => {
   const env = await startServer({
     submitRaw: async () => ({ statement_id: 'stmt-owned', status: 'PENDING' }),
     getRaw: async (statementId) => ({ statement_id: statementId, status: 'RUNNING' }),
   });
   try {
-    const unknown = await fetch(`${env.base}/api/sql/missing-stmt`);
+    const unknown = await fetch(`${env.base}/api/sql/statements/missing-stmt`);
     assert.equal(unknown.status, 404);
 
-    await fetch(`${env.base}/api/sql`, {
+    await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'alice' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
     });
-    const mismatch = await fetch(`${env.base}/api/sql/stmt-owned`, {
+    const mismatch = await fetch(`${env.base}/api/sql/statements/stmt-owned`, {
       headers: { 'x-test-user': 'bob' },
     });
     assert.equal(mismatch.status, 403);

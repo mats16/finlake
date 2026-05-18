@@ -72,8 +72,8 @@ export function sqlRouter(
   buildExecutor: ExecutorFactory = buildUserExecutor,
 ): Router {
   const router = Router();
-  router.post('/', submitSqlHandler(db, env, buildExecutor));
-  router.get('/:statement_id', getSqlHandler(db, env, buildExecutor));
+  router.post('/statements', submitSqlHandler(db, env, buildExecutor));
+  router.get('/statements/:statement_id', getSqlHandler(db, env, buildExecutor));
   return router;
 }
 
