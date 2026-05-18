@@ -27,7 +27,6 @@ export const EnvSchema = z.object({
   DATABRICKS_APP_PORT: z.coerce.number().int().optional(),
   DATABRICKS_WORKSPACE_ID: z.string().optional(),
 
-  SQL_WAREHOUSE_ID: z.string().optional(),
   SQL_API_CACHE_TTL_SEC: z.coerce.number().int().nonnegative().default(300),
   SQL_API_STATEMENT_TTL_SEC: z.coerce.number().int().nonnegative().default(900),
   SQL_API_SUBMIT_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().nonnegative().default(60),

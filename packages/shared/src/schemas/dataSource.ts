@@ -262,6 +262,7 @@ export type DataSourcePermissionStep = z.infer<typeof DataSourcePermissionStepSc
 
 export const DataSourceSystemTableGrantsBodySchema = z.object({
   accountPricesTable: z.string().min(1).max(256).optional(),
+  warehouseId: z.string().min(1).max(256).optional(),
 });
 export type DataSourceSystemTableGrantsBody = z.infer<typeof DataSourceSystemTableGrantsBodySchema>;
 

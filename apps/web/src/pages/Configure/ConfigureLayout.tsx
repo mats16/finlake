@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useI18n } from '../../i18n';
 import { CONFIGURE, matchesPathPrefix } from '../../components/layout/AppShell';
+import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
 
 export function ConfigureLayout() {
   const { t } = useI18n();
@@ -8,7 +9,10 @@ export function ConfigureLayout() {
   return (
     <>
       <header className="page-header configure-header">
-        <h2>{t('configure.title')}</h2>
+        <div className="configure-header-row">
+          <h2>{t('configure.title')}</h2>
+          <SqlWarehouseSelector triggerClassName="w-full sm:w-[280px]" />
+        </div>
         <nav className="upper-tabs">
           {CONFIGURE.items.map((tab) => (
             <NavLink

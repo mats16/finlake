@@ -9,6 +9,11 @@ export const GenieSetupResponseSchema = z.object({
 });
 export type GenieSetupResponse = z.infer<typeof GenieSetupResponseSchema>;
 
+export const GenieSetupRequestSchema = z.object({
+  warehouseId: z.string().min(1).max(256).optional(),
+});
+export type GenieSetupRequest = z.infer<typeof GenieSetupRequestSchema>;
+
 export const GenieChatRequestSchema = z.object({
   content: z.string().trim().min(1).max(10_000),
   conversationId: z.string().trim().min(1).optional(),

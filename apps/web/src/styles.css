@@ -666,6 +666,24 @@ a {
   gap: 16px;
 }
 
+.configure-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.configure-header-row h2 {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .configure-header-row {
+    flex-direction: column;
+  }
+}
+
 .upper-tabs {
   display: flex;
   gap: 28px;

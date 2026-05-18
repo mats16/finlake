@@ -16,6 +16,7 @@ export function adminRouter(db: DatabaseClient, env: Env): Router {
       res.json(
         await cleanupFinLakeResources(db, env, {
           deleteCatalog: parsed.data.deleteCatalog,
+          warehouseId: parsed.data.warehouseId,
           userToken: req.user?.accessToken,
         }),
       );

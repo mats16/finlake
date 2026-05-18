@@ -55,11 +55,13 @@ export async function revokeFocusSystemTables(
   db: DatabaseClient,
   userToken: string | undefined,
   key: DataSourceKey,
+  body: Pick<DataSourceSystemTableGrantsBody, 'warehouseId'> = {},
 ): Promise<DataSourceSystemTableGrantsResult> {
   const source = await getDatabricksSource(db, key);
   const existing = readFocusConfig(source.config);
   return applyFocusSystemTableGrants('revoke', env, userToken, key, source, {
     accountPricesTable: existing.accountPricesTable,
+    warehouseId: body.warehouseId,
   });
 }
 
@@ -96,10 +98,10 @@ async function applyFocusSystemTableGrants(
     };
   }
 
-  const executor = buildUserExecutor(env, userToken);
+  const executor = buildUserExecutor(env, userToken, body.warehouseId);
   if (!executor) {
     throw new DataSourceSetupError(
-      'OBO access token + DATABRICKS_HOST + SQL_WAREHOUSE_ID required to manage system table grants.',
+      'OBO access token + DATABRICKS_HOST + selected SQL warehouse required to manage system table grants.',
       400,
     );
   }
@@ -148,19 +150,28 @@ export async function preflightFocusDataSource(
   const sp = (env.DATABRICKS_CLIENT_ID ?? '').trim();
   const steps: DataSourcePermissionStep[] = [];
   const warnings: string[] = [];
+  const warehouseId = body.warehouseId?.trim();
 
   for (const [key, value] of [
     ['DATABRICKS_HOST', env.DATABRICKS_HOST],
     ['DATABRICKS_CLIENT_ID', env.DATABRICKS_CLIENT_ID],
     ['DATABRICKS_CLIENT_SECRET', env.DATABRICKS_CLIENT_SECRET],
     ['DATABRICKS_APP_NAME', env.DATABRICKS_APP_NAME],
-    ['SQL_WAREHOUSE_ID', env.SQL_WAREHOUSE_ID],
   ] as const) {
     if (typeof value === 'string' && value.trim().length > 0) {
       steps.push({ label: key, status: 'ok', message: 'configured' });
     } else {
       steps.push({ label: key, status: 'error', message: `${key} is not configured.` });
     }
+  }
+  if (warehouseId) {
+    steps.push({ label: 'SQL warehouse selection', status: 'ok', message: 'configured' });
+  } else {
+    steps.push({
+      label: 'SQL warehouse selection',
+      status: 'error',
+      message: 'Select a SQL warehouse before running preflight.',
+    });
   }
   if (!catalog) {
     steps.push({
@@ -174,7 +185,7 @@ export async function preflightFocusDataSource(
   }
 
   const appClient = buildAppWorkspaceClient(env);
-  const appExecutor = buildAppExecutor(env);
+  const appExecutor = buildAppExecutor(env, warehouseId);
   if (!appClient || !appExecutor || !env.DATABRICKS_APP_NAME || !sp) {
     steps.push({
       label: 'App service principal authentication',
@@ -189,7 +200,7 @@ export async function preflightFocusDataSource(
     return `Authenticated as ${me.userName ?? me.id ?? sp}`;
   });
 
-  await pushStep(steps, `SQL warehouse ${env.SQL_WAREHOUSE_ID}`, async () => {
+  await pushStep(steps, `SQL warehouse ${warehouseId}`, async () => {
     await appExecutor.run('SELECT 1 AS ok', [], SelectOneSchema);
     return 'App service principal can use the SQL warehouse.';
   });

@@ -58,6 +58,7 @@ const GENIE_TEXT_INSTRUCTIONS = [
 export async function setupFinLakeGenieSpace(
   env: Env,
   db: DatabaseClient,
+  warehouseId?: string,
 ): Promise<GenieSetupResponse> {
   const settings = settingsToRecord(await db.repos.appSettings.list());
   const existingSpaceId = settings[GENIE_SPACE_SETTING_KEY]?.trim();
@@ -90,8 +91,9 @@ export async function setupFinLakeGenieSpace(
   }
 
   const host = normalizeHost(env.DATABRICKS_HOST);
-  if (!host || !env.SQL_WAREHOUSE_ID) {
-    throw new GenieServiceError('DATABRICKS_HOST and SQL_WAREHOUSE_ID are required.', 500);
+  const selectedWarehouseId = warehouseId?.trim();
+  if (!host || !selectedWarehouseId) {
+    throw new GenieServiceError('DATABRICKS_HOST and selected SQL warehouse are required.', 500);
   }
 
   const token = await fetchServicePrincipalToken(host, env, GenieServiceError);
@@ -101,7 +103,7 @@ export async function setupFinLakeGenieSpace(
     {
       title: GENIE_SPACE_TITLE,
       description: 'FinLake Genie Space for exploring usage and daily cost facts.',
-      warehouseId: env.SQL_WAREHOUSE_ID,
+      warehouseId: selectedWarehouseId,
       parentPath: GENIE_SPACE_PARENT_PATH,
       serializedSpace: buildSerializedSpace(tables),
     },

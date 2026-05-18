@@ -223,7 +223,7 @@ export function buildUserExecutor(
   token: string | undefined,
   warehouseId?: string,
 ): StatementExecutor | undefined {
-  const resolvedWarehouseId = warehouseId ?? env.SQL_WAREHOUSE_ID;
+  const resolvedWarehouseId = warehouseId?.trim();
   if (!token || !resolvedWarehouseId) return undefined;
   const wc = buildUserWorkspaceClient(env, token);
   if (!wc) return undefined;

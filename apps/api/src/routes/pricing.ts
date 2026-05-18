@@ -1,6 +1,11 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { DatabaseClient } from '@finlake/db';
-import { PricingNotebookSetupInputSchema, type Env, type PricingId } from '@finlake/shared';
+import {
+  PricingNotebookDeleteBodySchema,
+  PricingNotebookSetupInputSchema,
+  type Env,
+  type PricingId,
+} from '@finlake/shared';
 import { DataSourceSetupError } from '../services/dataSourceErrors.js';
 import { submitManagedNotebookRunById } from '../services/notebookRuns.js';
 import {
@@ -61,7 +66,16 @@ export function pricingRouter(db: DatabaseClient, env: Env): Router {
     try {
       const id = parsePricingId(req, res);
       if (!id) return;
-      res.json(await deletePricingNotebookData(env, db, req.user?.accessToken, id));
+      const parsed = PricingNotebookDeleteBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: { message: 'Invalid input', issues: parsed.error.issues } });
+        return;
+      }
+      res.json(
+        await deletePricingNotebookData(env, db, req.user?.accessToken, id, {
+          warehouseId: parsed.data.warehouseId,
+        }),
+      );
     } catch (err) {
       handleSetupError(err, res, next);
     }

@@ -118,7 +118,7 @@ async function ensureWorkspaceDir(wc: WorkspaceClient, dir: string): Promise<voi
 }
 
 export interface UploadWorkspaceFileOptions {
-  format?: 'SOURCE' | 'JUPYTER';
+  format?: 'SOURCE' | 'JUPYTER' | 'RAW';
   language?: 'SQL' | 'PYTHON' | 'SCALA' | 'R';
 }
 
@@ -136,7 +136,7 @@ export async function uploadPipelineFile(
     path,
     content: Buffer.from(content, 'utf8').toString('base64'),
     format: options.format ?? 'SOURCE',
-    language: options.language ?? 'SQL',
+    language: options.format === 'RAW' ? undefined : (options.language ?? 'SQL'),
     overwrite: true,
   });
 }

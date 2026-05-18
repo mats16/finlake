@@ -12,6 +12,7 @@ resources:
         - catalog.schemas:read
         - catalog.tables:read
         - catalog.connections
+        - workspace.workspace
       #resources:
       # Uncomment to bind Lakebase. Leave commented when Lakebase isn't available.
       # - name: lakebase

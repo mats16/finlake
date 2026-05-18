@@ -1,6 +1,6 @@
 import { Router, type Response } from 'express';
 import type { DatabaseClient } from '@finlake/db';
-import { GenieChatRequestSchema, type Env } from '@finlake/shared';
+import { GenieChatRequestSchema, GenieSetupRequestSchema, type Env } from '@finlake/shared';
 import {
   GenieServiceError,
   askFinLakeGenie,
@@ -17,7 +17,12 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
 
   router.post('/setup', async (req, res, next) => {
     try {
-      const result = await setupFinLakeGenieSpace(env, db);
+      const parsed = GenieSetupRequestSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: { message: 'Invalid input', issues: parsed.error.issues } });
+        return;
+      }
+      const result = await setupFinLakeGenieSpace(env, db, parsed.data.warehouseId);
       res.json(result);
     } catch (err) {
       if (err instanceof GenieServiceError) {

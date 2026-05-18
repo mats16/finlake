@@ -39,7 +39,7 @@ export const ADMIN_CLEANUP_SETTING_KEYS = [
 export async function cleanupFinLakeResources(
   db: DatabaseClient,
   env: Env,
-  opts: { deleteCatalog: boolean; userToken?: string },
+  opts: { deleteCatalog: boolean; userToken?: string; warehouseId?: string },
 ): Promise<AdminCleanupResponse> {
   const settings = settingsToRecord(await db.repos.appSettings.list());
   const resources: AdminCleanupResourceResult[] = [];
@@ -65,6 +65,7 @@ export async function cleanupFinLakeResources(
       deleteCatalogResource(env, settings[CATALOG_SETTING_KEY], {
         deleteCatalog: opts.deleteCatalog,
         userToken: opts.userToken,
+        warehouseId: opts.warehouseId,
       }),
     ])),
   );
@@ -148,19 +149,19 @@ async function deleteGenieResource(
 async function deleteCatalogResource(
   env: Env,
   catalog: string | undefined,
-  opts: { deleteCatalog: boolean; userToken?: string },
+  opts: { deleteCatalog: boolean; userToken?: string; warehouseId?: string },
 ): Promise<AdminCleanupResourceResult> {
   const name = catalog?.trim();
   if (!opts.deleteCatalog) {
     return skipped('catalog', name || null, 'Physical catalog deletion was not requested.');
   }
   if (!name) return skipped('catalog', null, 'No saved catalog name.');
-  const executor = buildUserExecutor(env, opts.userToken);
+  const executor = buildUserExecutor(env, opts.userToken, opts.warehouseId);
   if (!executor) {
     return failed(
       'catalog',
       name,
-      'OBO access token, DATABRICKS_HOST, and SQL_WAREHOUSE_ID are required to drop the catalog.',
+      'OBO access token, DATABRICKS_HOST, and selected SQL warehouse are required to drop the catalog.',
     );
   }
   try {

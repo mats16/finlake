@@ -19,6 +19,8 @@ import {
 import { CATALOG_SETTING_KEY, GENIE_SPACE_SETTING_KEY } from '@finlake/shared';
 import { AlertCircle, ExternalLink, MoreVertical, Sparkles, Trash2 } from 'lucide-react';
 import { PageHeader } from '../../components/PageHeader';
+import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
+import { useSelectedSqlWarehouse } from '../../contexts/SqlWarehouseContext';
 import { useAppSettings, useDeleteGenieSpace, useMe, useSetupGenieSpace } from '../../api/hooks';
 import { useI18n } from '../../i18n';
 
@@ -27,6 +29,7 @@ export function Genie() {
   const settings = useAppSettings();
   const setup = useSetupGenieSpace();
   const deleteSpace = useDeleteGenieSpace();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   const me = useMe();
   const appSettings = settings.data?.settings ?? {};
   const genieSpaceId = appSettings[GENIE_SPACE_SETTING_KEY]?.trim() || '';
@@ -44,16 +47,19 @@ export function Genie() {
         title={t('explore.genie.title')}
         subtitle={t('explore.genie.desc')}
         actions={
-          genieSpaceId ? (
-            <GenieActions
-              genieSpaceUrl={genieSpaceUrl}
-              deletePending={deleteSpace.isPending}
-              onDelete={() => {
-                if (!window.confirm(t('genie.confirmDelete'))) return;
-                deleteSpace.mutate();
-              }}
-            />
-          ) : null
+          <div className="flex flex-wrap justify-end gap-2">
+            <SqlWarehouseSelector triggerClassName="w-full sm:w-[280px]" />
+            {genieSpaceId ? (
+              <GenieActions
+                genieSpaceUrl={genieSpaceUrl}
+                deletePending={deleteSpace.isPending}
+                onDelete={() => {
+                  if (!window.confirm(t('genie.confirmDelete'))) return;
+                  deleteSpace.mutate();
+                }}
+              />
+            ) : null}
+          </div>
         }
       />
 
@@ -76,6 +82,7 @@ export function Genie() {
           catalog={catalog}
           setupError={setup.error instanceof Error ? setup.error.message : null}
           setupPending={setup.isPending}
+          setupDisabled={!selectedWarehouseId}
           onSetup={() => setup.mutate()}
         />
       )}
@@ -192,11 +199,13 @@ function GenieSetupCard({
   catalog,
   setupError,
   setupPending,
+  setupDisabled,
   onSetup,
 }: {
   catalog: string;
   setupError: string | null;
   setupPending: boolean;
+  setupDisabled: boolean;
   onSetup: () => void;
 }) {
   const { t } = useI18n();
@@ -227,7 +236,11 @@ function GenieSetupCard({
             </Alert>
           ) : null}
 
-          <Button type="button" onClick={onSetup} disabled={!catalog || setupPending}>
+          <Button
+            type="button"
+            onClick={onSetup}
+            disabled={!catalog || setupPending || setupDisabled}
+          >
             {setupPending ? <Spinner /> : <Sparkles />}
             {setupPending ? t('genie.settingUp') : t('genie.setupAction')}
           </Button>
