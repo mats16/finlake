@@ -957,7 +957,7 @@ export const ja: Dictionary = {
     warningTitle: '一部のプラットフォームを確認できませんでした',
     noAwsAccountsTitle: 'AWS アカウントが未連携です',
     noAwsAccountsDesc:
-      'Amazon Web Services へ同期するには、先に FinLakeServiceRole の Unity Catalog サービス資格情報を作成してください。',
+      'Amazon Web Services へ同期するには、先に Integrations で AWS データソースを有効化してください。',
     required: '必須',
     awsNotLinked: 'AWS 未連携',
     allowedValuesAny: '任意の値',

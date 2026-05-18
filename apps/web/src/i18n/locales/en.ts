@@ -947,7 +947,7 @@ export const en = {
     warningTitle: 'Some platforms could not be checked',
     noAwsAccountsTitle: 'No AWS account linked',
     noAwsAccountsDesc:
-      'Create a Unity Catalog service credential for FinLakeServiceRole before syncing Amazon Web Services.',
+      'Enable an AWS data source in Integrations before syncing Amazon Web Services.',
     required: 'Required',
     awsNotLinked: 'No AWS account',
     allowedValuesAny: 'Any value',
