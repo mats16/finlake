@@ -17,6 +17,7 @@ export const ja: Dictionary = {
     transformations: '変換パイプライン',
     pricing: '価格表',
     configureCatalog: 'システム管理',
+    workspaces: 'ワークスペース',
     genie: 'Genie',
     optimize: '最適化',
     optimizeDatabricks: 'Databricks',
@@ -45,13 +46,50 @@ export const ja: Dictionary = {
     settings: '設定',
     databricksConsole: 'Databricks コンソール',
   },
+  workspaceMapping: {
+    title: 'ワークスペースマッピングが必要です',
+    desc: '{workspace} の Databricks ワークスペースドメインを入力してください。',
+    domain: 'ワークスペースドメイン',
+    domainPlaceholder: 'dbc-1234567890123456.cloud.databricks.com',
+    saveAndOpen: '保存して開く',
+    loadFailed: 'ワークスペースマッピングを確認できませんでした',
+    invalidDomain:
+      '.databricks.com または .azuredatabricks.net で終わる Databricks ワークスペースドメインを入力してください。',
+  },
+  workspaces: {
+    title: 'ワークスペースドメイン',
+    desc: 'Databricks の workspace_id と domain の対応を確認・修正します。',
+    refresh: '更新',
+    loadFailed: 'ワークスペースマッピングを読み込めませんでした',
+    addTitle: 'ワークスペースマッピングを追加',
+    updateTitle: 'ワークスペースマッピングを更新',
+    modalDesc:
+      'Databricks ワークスペースの domain または URL を入力してください。FinLake には domain のみ保存されます。',
+    workspaceId: 'Workspace ID',
+    workspaceIdPlaceholder: '1234567890123456',
+    domain: 'ワークスペースドメイン',
+    add: 'マッピングを追加',
+    update: '更新',
+    edit: '編集',
+    delete: '削除',
+    deleteConfirm: '{id} のワークスペースマッピングを削除しますか？',
+    emptyDesc: 'ワークスペースマッピングはまだありません。',
+    invalidWorkspaceId: 'Workspace ID は数字のみ、最大 32 桁で入力してください。',
+    useCurrentWorkspace: '現在のワークスペースを使用',
+    columns: {
+      workspaceId: 'Workspace ID',
+      domain: 'Domain',
+      updatedAt: '更新日時',
+      actions: '操作',
+    },
+  },
   theme: {
     switchToDark: 'ダークモードに切り替え',
     switchToLight: 'ライトモードに切り替え',
   },
   pricing: {
     title: '価格表',
-    desc: 'EC2 と RDS の AWS 価格データを作成・実行します。',
+    desc: 'プロバイダーの価格データテーブルを作成・実行します。',
     loadFailed: '価格データの状態を読み込めませんでした',
     catalogMissingTitle: 'カタログが未設定です',
     catalogMissingDesc:
@@ -196,9 +234,13 @@ export const ja: Dictionary = {
     underConstructionTitle: '工事中',
     underConstructionDesc: 'この最適化画面は準備中です。',
     databricks: {
-      title: 'Databricks 最適化',
+      title: 'Optimize / Databricks',
       desc: 'サーバレス化の進捗を追跡し、優先的に見直す Databricks ワークロードを特定します。',
       failedToLoad: 'Databricks 最適化シグナルの読み込みに失敗しました。',
+      tabs: {
+        serverless: 'Serverless',
+        query: 'SQL',
+      },
       workspaces: {
         all: 'すべてのワークスペース',
       },
@@ -223,10 +265,69 @@ export const ja: Dictionary = {
       },
       services: {
         title: 'サービス別サーバレス比率',
+        filter: {
+          label: 'サービスフィルタ',
+          all: 'すべてのサービス',
+        },
       },
       recommendations: {
         title: '優先的に見直すリソース',
-        desc: '非サーバレス支出とサービス適性で重み付けして並べています。',
+        desc: 'JOBS、SQL、ALL_PURPOSE を切り替えて、見直し対象のコスト候補を確認します。',
+        serviceFilter: {
+          label: 'サービス',
+          all: 'すべて',
+        },
+        serverlessMode: {
+          label: 'Serverless jobs mode',
+          performance: 'Performance',
+          standard: 'Standard',
+        },
+        deltaDisplay: {
+          label: '差額表示',
+        },
+      },
+      query: {
+        failedToLoad: 'SQL ウェアハウスのクエリシグナルを読み込めませんでした。',
+        otherWarehouses: 'その他の Warehouse',
+        warehouses: {
+          all: 'すべての Warehouse',
+        },
+        kpi: {
+          warehouseCost: 'SQL Warehouse コスト',
+          sqlWarehouses: 'SQL Warehouse 利用の EffectiveCost',
+          allocatedCost: 'クエリ配賦コスト',
+          executionTimeAllocation: '実行時間に比例して Warehouse コストを配賦',
+          executionTime: 'クエリ実行時間',
+          aggregatedQueryTime: 'Query History の合計実行時間',
+          warehouses: 'Warehouses',
+          executions: '実行 {count} 件',
+        },
+        warehouseTrend: {
+          title: 'SQL Warehouse 別コスト',
+          desc: 'Databricks SQL Warehouse 利用の EffectiveCost を積み上げ表示します。',
+        },
+        attribution: {
+          title: 'クエリ別コスト配賦',
+          desc: '正規化した statement text でクエリを集計し、実行時間に比例して Warehouse コストを配賦します。',
+        },
+        table: {
+          query: 'クエリ',
+          warehouse: 'Warehouse',
+          status: 'ステータス',
+          allocatedCost: '配賦コスト',
+          executionTime: '実行時間',
+          executionRatio: '比率',
+          executions: '実行数',
+          avgDuration: '平均時間',
+          user: 'ユーザー',
+          read: 'Read',
+        },
+        empty: {
+          noWarehouseCost: 'SQL Warehouse コストがありません',
+          noQueries: 'Query History の行がありません',
+          noQueriesDesc:
+            'system.query.history への権限を付与するか、期間またはワークスペース条件を変更してください。',
+        },
       },
       legend: {
         serverless: 'サーバレス',
@@ -246,12 +347,22 @@ export const ja: Dictionary = {
         service: 'サービス',
         sku: 'SKU',
         instanceType: 'インスタンスタイプ',
-        nonServerlessSpend: '現行 Databricks 費用',
-        estimatedCurrentTotal: '現行構成の推定コスト',
-        estimatedEc2Cost: '推定 EC2 費用',
+        nonServerlessSpend: 'DBU 費用',
+        estimatedServerlessCost: 'サーバレス費用',
+        estimatedValue: '推定値',
+        serverlessDelta: '差額',
+        estimatedCurrentTotal: '総費用',
+        currentCost: '現在コスト',
+        estimatedEc2Cost: '推定 VM 費用',
+        estimatedEc2CostParen: '(VM 費用)',
         dbuQuantityEstimate: 'DBU 合計',
         ec2ReferenceInstance: 'EC2 参照インスタンス',
         serverlessRatio: 'サーバレス比率',
+        utilization: '稼働率',
+        utilizationDescription:
+          'CPU user + system を、観測できたノード起動時間で重み付けした期間平均です。',
+        allPurposeServerlessEstimateDescription:
+          '合計 DBU x 稼働率 x サーバレス DBU 単価で試算しています。',
       },
       empty: {
         noData: 'Databricks 最適化データがありません',
@@ -1088,6 +1199,10 @@ export const ja: Dictionary = {
       },
       pricing_aws: {
         description: 'EC2 と RDS の料金表データ',
+        subtitle: '',
+      },
+      pricing_databricks: {
+        description: 'Databricks の list/account 料金表データ',
         subtitle: '',
       },
     },

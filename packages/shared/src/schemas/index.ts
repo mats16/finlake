@@ -15,3 +15,4 @@ export * from './admin.js';
 export * from './optimization.js';
 export * from './sql.js';
 export * from './pricing.js';
+export * from './workspace.js';

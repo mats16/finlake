@@ -55,6 +55,12 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const workspaces = sqliteTable('workspaces', {
+  id: text('id').primaryKey(),
+  domain: text('domain').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const dataSources = sqliteTable(
   'data_sources',
   {

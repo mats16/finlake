@@ -9,7 +9,8 @@ import { logger } from './logger.js';
  * Phase 1b: this is intentionally a stub that throws. The full implementation
  * wires `@databricks/lakebase`'s `createLakebasePool()` (returns a `pg.Pool`)
  * into Drizzle (`drizzle-orm/node-postgres`) and reuses the same Repositories
- * interface as SqliteClient.
+ * interface as SqliteClient. Include the same one-time `workspaces`
+ * `deployment_name` to `domain` migration that SqliteClient runs.
  *
  * It is gated behind DB_BACKEND=lakebase or auto with PGHOST/LAKEBASE_INSTANCE_NAME
  * present, so SQLite-only deployments never touch this file.

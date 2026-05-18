@@ -71,6 +71,10 @@ export const DatabricksOptimizationRecommendationSchema = z.object({
   totalCostUsd: z.number(),
   nonServerlessCostUsd: z.number(),
   dbuQuantityEstimate: z.number().nullable(),
+  serverlessSkuNameBase: z.string().nullable(),
+  serverlessUnitPriceUsd: z.number().nullable(),
+  estimatedServerlessCostUsd: z.number().nullable(),
+  estimatedServerlessDeltaUsd: z.number().nullable(),
   ec2ReferenceInstanceType: z.string().nullable(),
   ec2HourlyPriceUsd: z.number().nullable(),
   estimatedEc2CostUsd: z.number().nullable(),
@@ -81,6 +85,58 @@ export const DatabricksOptimizationRecommendationSchema = z.object({
 export type DatabricksOptimizationRecommendation = z.infer<
   typeof DatabricksOptimizationRecommendationSchema
 >;
+
+export const DatabricksClusterUtilizationRowSchema = z.object({
+  workspaceId: z.string().nullable(),
+  clusterId: z.string(),
+  cpuUtilizationPercent: z.number().nullable(),
+});
+
+export type DatabricksClusterUtilizationRow = z.infer<typeof DatabricksClusterUtilizationRowSchema>;
+
+export const DatabricksQueryWarehouseTrendRowSchema = z.object({
+  period: z.string(),
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string().nullable(),
+  warehouseId: z.string(),
+  warehouseName: z.string().nullable(),
+  costUsd: z.number(),
+});
+
+export type DatabricksQueryWarehouseTrendRow = z.infer<
+  typeof DatabricksQueryWarehouseTrendRowSchema
+>;
+
+export const DatabricksQueryAttributionRowSchema = z.object({
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string().nullable(),
+  warehouseId: z.string(),
+  warehouseName: z.string().nullable(),
+  queryHash: z.string(),
+  latestStatementId: z.string().nullable(),
+  statementText: z.string(),
+  statementType: z.string().nullable(),
+  executedBy: z.string().nullable(),
+  clientApplication: z.string().nullable(),
+  executionStatus: z.string().nullable(),
+  executionCount: z.number(),
+  failedCount: z.number(),
+  canceledCount: z.number(),
+  queryExecutionMs: z.number(),
+  avgExecutionMs: z.number().nullable(),
+  maxExecutionMs: z.number().nullable(),
+  warehouseQueryExecutionMs: z.number().nullable(),
+  warehouseCostUsd: z.number().nullable(),
+  allocatedCostUsd: z.number().nullable(),
+  readBytes: z.number().nullable(),
+  readRows: z.number().nullable(),
+  producedRows: z.number().nullable(),
+  spilledLocalBytes: z.number().nullable(),
+  firstStartTime: z.string().nullable(),
+  lastEndTime: z.string().nullable(),
+});
+
+export type DatabricksQueryAttributionRow = z.infer<typeof DatabricksQueryAttributionRowSchema>;
 
 export const DatabricksOptimizationErrorSchema = z.object({
   tableName: z.string(),

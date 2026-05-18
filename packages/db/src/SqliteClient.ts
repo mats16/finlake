@@ -24,6 +24,8 @@ import type {
   SetupStateValue,
   UserPreferencesRepo,
   UserPreferencesValue,
+  WorkspacesRepo,
+  WorkspaceValue,
 } from './repositories/index.js';
 import { ensureParentDir } from './paths.js';
 import { logger } from './logger.js';
@@ -51,6 +53,7 @@ export class SqliteClient implements DatabaseClient {
       cachedAggregations: new SqliteCachedAggregationsRepo(db),
       setupState: new SqliteSetupStateRepo(db),
       appSettings: new SqliteAppSettingsRepo(db),
+      workspaces: new SqliteWorkspacesRepo(db),
       dataSources: new SqliteDataSourcesRepo(db),
       pricingData: new SqlitePricingDataRepo(db),
     };
@@ -119,6 +122,11 @@ export class SqliteClient implements DatabaseClient {
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )`,
+      `CREATE TABLE IF NOT EXISTS workspaces (
+        id TEXT PRIMARY KEY,
+        domain TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
       `CREATE TABLE IF NOT EXISTS data_sources (
         name TEXT NOT NULL,
         provider_name TEXT NOT NULL,
@@ -165,6 +173,7 @@ export class SqliteClient implements DatabaseClient {
     );
     await this.dropColumnIfExists('data_sources', 'job_id');
     await this.dropColumnIfExists('data_sources', 'pipeline_id');
+    await this.migrateWorkspacesDomainColumn();
     await this.migrateAppSettingKey('focus_pipeline_job_id', 'lakeflow_pipeline_job_id');
     await this.migrateAppSettingKey('focus_pipeline_id', 'lakeflow_pipeline_id');
     logger.debug('SQLite schema bootstrap complete');
@@ -182,6 +191,13 @@ export class SqliteClient implements DatabaseClient {
       sql: 'DELETE FROM app_settings WHERE key = ?',
       args: [oldKey],
     });
+  }
+
+  private async migrateWorkspacesDomainColumn(): Promise<void> {
+    const info = await this.raw.execute('PRAGMA table_info(workspaces)');
+    const columns = new Set(info.rows.map((row) => String(row.name)));
+    if (columns.has('domain') || !columns.has('deployment_name')) return;
+    await this.raw.execute('ALTER TABLE workspaces RENAME COLUMN deployment_name TO domain');
   }
 
   /**
@@ -567,6 +583,48 @@ class SqliteDataSourcesRepo implements DataSourcesRepo {
     const result = await this.db.run(sql`delete from data_sources`);
     return result.rowsAffected;
   }
+}
+
+class SqliteWorkspacesRepo implements WorkspacesRepo {
+  constructor(private db: Db) {}
+
+  async get(id: string): Promise<WorkspaceValue | null> {
+    const rows = await this.db.select().from(s.workspaces).where(eq(s.workspaces.id, id)).limit(1);
+    const row = rows[0];
+    return row ? toWorkspace(row) : null;
+  }
+
+  async list(): Promise<WorkspaceValue[]> {
+    const rows = await this.db.select().from(s.workspaces).orderBy(s.workspaces.id);
+    return rows.map(toWorkspace);
+  }
+
+  async upsert(id: string, domain: string): Promise<WorkspaceValue> {
+    const updatedAt = new Date().toISOString();
+    const row = { id, domain, updatedAt };
+    await this.db.insert(s.workspaces).values(row).onConflictDoUpdate({
+      target: s.workspaces.id,
+      set: { domain, updatedAt },
+    });
+    return row;
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.delete(s.workspaces).where(eq(s.workspaces.id, id));
+  }
+
+  async clear(): Promise<number> {
+    const result = await this.db.run(sql`delete from workspaces`);
+    return result.rowsAffected;
+  }
+}
+
+function toWorkspace(row: typeof s.workspaces.$inferSelect): WorkspaceValue {
+  return {
+    id: row.id,
+    domain: row.domain,
+    updatedAt: row.updatedAt,
+  };
 }
 
 function toDataSource(row: typeof s.dataSources.$inferSelect): DataSourceValue {

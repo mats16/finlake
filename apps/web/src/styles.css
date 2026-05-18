@@ -299,6 +299,19 @@ a {
   flex-shrink: 0;
 }
 
+.optimize-page-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+}
+
+.optimize-page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .success-action-button {
   --ring: var(--success);
   border-color: var(--success);
@@ -344,26 +357,40 @@ a {
   border-bottom: 1px solid var(--border);
 }
 
-.upper-tabs a {
+.upper-tabs a,
+.upper-tabs button {
   margin-bottom: -1px;
   padding: 4px 0 10px;
   border-bottom: 3px solid transparent;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  background: transparent;
   color: var(--muted-foreground);
+  cursor: pointer;
   font-size: 15px;
   font-weight: 600;
+  font-family: inherit;
   white-space: nowrap;
   transition:
     border-color 120ms,
     color 120ms;
 }
 
-.upper-tabs a:hover {
+.upper-tabs a:hover,
+.upper-tabs button:hover {
   color: var(--foreground);
 }
 
-.upper-tabs a.active {
+.upper-tabs a.active,
+.upper-tabs button.active {
   border-bottom-color: var(--primary);
   color: var(--foreground);
+}
+
+.upper-tabs button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* Account menu trigger button used in sidebar footer. */

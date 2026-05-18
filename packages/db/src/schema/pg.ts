@@ -65,6 +65,12 @@ export const appSettings = pgTable('app_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  domain: text('domain').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const dataSources = pgTable(
   'data_sources',
   {

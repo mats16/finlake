@@ -48,6 +48,9 @@ import type {
   UsageDailyResponse,
   UsageTopWorkloadRow,
   UpdateBudgetInput,
+  WorkspaceMapping,
+  WorkspaceMappingListResponse,
+  WorkspaceMappingUpsertBody,
 } from '@finlake/shared';
 import { apiFetch } from './client';
 import { getSqlStatement, submitSqlStatement } from './sql';
@@ -245,6 +248,54 @@ export function useMe() {
     queryKey: ['me'],
     queryFn: () => apiFetch<MeResponse>('/api/me'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function workspaceQueryKey(id: string) {
+  return ['workspaces', id];
+}
+
+export const WORKSPACE_MAPPING_STALE_MS = 5 * 60 * 1000;
+
+export function workspaceQueryOptions(id: string) {
+  return {
+    queryKey: workspaceQueryKey(id),
+    queryFn: () => apiFetch<WorkspaceMapping>(`/api/workspaces/${encodeURIComponent(id)}`),
+    staleTime: WORKSPACE_MAPPING_STALE_MS,
+  };
+}
+
+export function useWorkspaces() {
+  return useQuery({
+    queryKey: ['workspaces'],
+    queryFn: () => apiFetch<WorkspaceMappingListResponse>('/api/workspaces'),
+  });
+}
+
+export function useUpsertWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: WorkspaceMappingUpsertBody }) =>
+      apiFetch<WorkspaceMapping>(`/api/workspaces/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(workspaceQueryKey(data.id), data);
+      qc.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: workspaceQueryKey(id) });
+      qc.invalidateQueries({ queryKey: ['workspaces'] });
+    },
   });
 }
 

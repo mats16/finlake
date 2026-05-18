@@ -12,6 +12,7 @@ import { Catalog } from './pages/Configure/Catalog';
 import { Transformations } from './pages/Configure/Transformations';
 import { GovernedTags } from './pages/Configure/GovernedTags';
 import { Pricing } from './pages/Configure/Pricing';
+import { Workspaces } from './pages/Configure/Workspaces';
 import { Credentials } from './pages/ExternalData/Credentials';
 import { CostExplore } from './pages/Explore/CostExplore';
 import { Genie } from './pages/Explore/Genie';
@@ -41,8 +42,10 @@ export function App() {
           <Route path="/tags" element={<GovernedTags />} />
           <Route path="/transformations" element={<Transformations />} />
           <Route path="/pricing" element={<Navigate to="/pricing/aws" replace />} />
-          <Route path="/pricing/aws" element={<Pricing />} />
+          <Route path="/pricing/aws" element={<Pricing provider="aws" />} />
+          <Route path="/pricing/databricks" element={<Pricing provider="databricks" />} />
           <Route path="/credentials" element={<Credentials />} />
+          <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/admin" element={<Catalog />} />
         </Route>
 
@@ -50,6 +53,7 @@ export function App() {
         <Route path="/configure/data-sources" element={<Navigate to="/integrations" replace />} />
         <Route path="/data-sources" element={<Navigate to="/integrations" replace />} />
         <Route path="/configure/credentials" element={<Navigate to="/credentials" replace />} />
+        <Route path="/configure/workspaces" element={<Navigate to="/workspaces" replace />} />
         <Route
           path="/configure/transformations"
           element={<Navigate to="/transformations" replace />}
