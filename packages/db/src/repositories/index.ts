@@ -120,6 +120,18 @@ export interface AppSettingsRepo {
   deleteMany(keys: readonly string[]): Promise<number>;
 }
 
+export interface WorkspaceValue {
+  id: string;
+  domain: string;
+  updatedAt: string;
+}
+
+export interface WorkspacesRepo {
+  get(id: string): Promise<WorkspaceValue | null>;
+  upsert(id: string, domain: string): Promise<WorkspaceValue>;
+  clear(): Promise<number>;
+}
+
 export function settingsToRecord(rows: AppSettingValue[]): Record<string, string> {
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 }
@@ -130,6 +142,7 @@ export interface Repositories {
   cachedAggregations: CachedAggregationsRepo;
   setupState: SetupStateRepo;
   appSettings: AppSettingsRepo;
+  workspaces: WorkspacesRepo;
   dataSources: DataSourcesRepo;
   pricingData: PricingDataRepo;
 }

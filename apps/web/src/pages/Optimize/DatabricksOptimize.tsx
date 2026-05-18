@@ -2,6 +2,8 @@ import {
   useRef,
   useMemo,
   useState,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -19,7 +21,6 @@ import {
 import {
   Alert,
   AlertDescription,
-  AlertTitle,
   Badge,
   Button,
   Card,
@@ -27,6 +28,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -36,6 +43,10 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
+  Field,
+  FieldGroup,
+  FieldLabel,
+  Input,
   Progress,
   Select,
   SelectContent,
@@ -43,6 +54,7 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
+  Spinner,
   Table,
   TableBody,
   TableCell,
@@ -57,7 +69,8 @@ import {
 import {
   AlertCircle,
   Check,
-  Construction,
+  Clock,
+  Database,
   DollarSign,
   ExternalLink,
   Gauge,
@@ -68,6 +81,8 @@ import {
 } from 'lucide-react';
 import {
   buildDatabricksClusterUtilizationStatement,
+  buildDatabricksQueryAttributionStatement,
+  buildDatabricksQueryWarehouseTrendStatement,
   buildDatabricksRecommendationsStatement,
   buildDatabricksServicesStatement,
   buildDatabricksSummaryStatement,
@@ -79,9 +94,18 @@ import {
   type DatabricksOptimizationServiceRow,
   type DatabricksOptimizationSummary,
   type DatabricksOptimizationWorkspace,
+  type DatabricksQueryAttributionRow,
+  type DatabricksQueryWarehouseTrendRow,
   type DatabricksTrendGrain,
+  type WorkspaceMapping,
 } from '@finlake/shared';
-import { useAppSettings, useDataSources, useMe, useSqlStatement } from '../../api/hooks';
+import { apiFetch, type ApiError } from '../../api/client';
+import {
+  useAppSettings,
+  useDataSources,
+  useSqlStatement,
+  useUpsertWorkspace,
+} from '../../api/hooks';
 import { useCurrencyUsd, useI18n } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
 
@@ -92,11 +116,26 @@ type DatabricksOptimizeTab = (typeof DATABRICKS_OPTIMIZE_TABS)[number];
 type DeltaDisplay = 'currency' | 'percent';
 type ServerlessMode = 'performance' | 'standard';
 type RecommendationServiceGroup = 'JOBS' | 'SQL' | 'ALL_PURPOSE';
+interface DatabricksLinkTarget {
+  path: string;
+  params?: Record<string, string>;
+}
 
 const SERVERLESS_COLOR = '#49A078';
 const NON_SERVERLESS_COLOR = '#E4572E';
 const UNKNOWN_COLOR = '#718096';
 const RATIO_COLOR = '#3B82F6';
+const WAREHOUSE_STACK_COLORS = [
+  '#2563EB',
+  '#16A34A',
+  '#DC2626',
+  '#9333EA',
+  '#EA580C',
+  '#0891B2',
+  '#4F46E5',
+  '#65A30D',
+  '#64748B',
+];
 const DEFAULT_SERVICE_RATIO_FILTERS = ['SQL', 'ALL_PURPOSE', 'DLT', 'JOBS'];
 const RECOMMENDATION_SERVICE_GROUPS: RecommendationServiceGroup[] = ['JOBS', 'SQL', 'ALL_PURPOSE'];
 const RECOMMENDATION_GROUP_SERVICES: Record<RecommendationServiceGroup, string[]> = {
@@ -164,6 +203,26 @@ interface DatabricksOptimizationTrendRow {
   serverlessRatio: number | null;
 }
 
+interface WarehouseStackSeries {
+  key: string;
+  label: string;
+  color: string;
+  totalCostUsd: number;
+}
+
+interface QueryWarehouseOption {
+  key: string;
+  label: string;
+  warehouseId: string;
+  totalCostUsd: number;
+}
+
+type WarehouseStackDatum = {
+  period: string;
+  label: string;
+  totalCostUsd: number;
+} & Record<string, string | number>;
+
 type AllPurposeRecommendationRow = DatabricksOptimizationRecommendation & {
   cpuUtilizationPercent: number | null;
 };
@@ -192,6 +251,7 @@ export function DatabricksOptimize() {
   const [activeTab, setActiveTab] = useState<DatabricksOptimizeTab>('serverless');
   const [period, setPeriod] = useState<Period>('last30');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('all');
+  const [selectedQueryWarehouseKey, setSelectedQueryWarehouseKey] = useState('all');
   const [selectedServiceRatioServices, setSelectedServiceRatioServices] = useState<string[]>(
     DEFAULT_SERVICE_RATIO_FILTERS,
   );
@@ -206,7 +266,6 @@ export function DatabricksOptimize() {
   const trendGrain: DatabricksTrendGrain = period === 'last30' ? 'day' : 'month';
   const dataSources = useDataSources();
   const appSettings = useAppSettings();
-  const me = useMe();
   const sourceTables = useMemo(
     () =>
       resolveDatabricksOptimizeSources(
@@ -215,13 +274,15 @@ export function DatabricksOptimize() {
       ),
     [appSettings.data?.settings, dataSources.data?.items],
   );
-  const sqlEnabled = activeTab === 'serverless' && dataSources.isSuccess && appSettings.isSuccess;
+  const sourceSqlEnabled = dataSources.isSuccess && appSettings.isSuccess;
+  const serverlessSqlEnabled = activeTab === 'serverless' && sourceSqlEnabled;
+  const querySqlEnabled = activeTab === 'query' && sourceSqlEnabled;
   const workspaceStatement = useMemo(
     () => buildDatabricksWorkspacesStatement(sourceTables, baseRange),
     [baseRange, sourceTables],
   );
   const workspacesQuery = useSqlStatement<DatabricksOptimizationWorkspace>(workspaceStatement, {
-    enabled: sqlEnabled,
+    enabled: sourceSqlEnabled,
     requestKey: ['optimize', 'databricks', 'workspaces', baseRange, sourceTables],
   });
   const workspaceOptions = workspacesQuery.rows;
@@ -255,29 +316,58 @@ export function DatabricksOptimize() {
     [scopedRange],
   );
   const summaryQuery = useSqlStatement<DatabricksOptimizationSummary>(summaryStatement, {
-    enabled: sqlEnabled,
+    enabled: serverlessSqlEnabled,
     requestKey: ['optimize', 'databricks', 'summary', scopedRange, sourceTables],
   });
   const trendQuery = useSqlStatement<DatabricksOptimizationTrendRow>(trendStatement, {
-    enabled: sqlEnabled,
+    enabled: serverlessSqlEnabled,
     requestKey: ['optimize', 'databricks', 'trend', trendGrain, scopedRange, sourceTables],
   });
   const servicesQuery = useSqlStatement<DatabricksOptimizationServiceRow>(servicesStatement, {
-    enabled: sqlEnabled,
+    enabled: serverlessSqlEnabled,
     requestKey: ['optimize', 'databricks', 'services', scopedRange, sourceTables],
   });
   const recommendationsQuery = useSqlStatement<DatabricksOptimizationRecommendation>(
     recommendationsStatement,
     {
-      enabled: sqlEnabled,
+      enabled: serverlessSqlEnabled,
       requestKey: ['optimize', 'databricks', 'recommendations', scopedRange, sourceTables],
     },
   );
   const clusterUtilizationQuery = useSqlStatement<DatabricksClusterUtilizationRow>(
     clusterUtilizationStatement,
     {
-      enabled: sqlEnabled && recommendationServiceGroup === 'ALL_PURPOSE',
+      enabled: serverlessSqlEnabled && recommendationServiceGroup === 'ALL_PURPOSE',
       requestKey: ['optimize', 'databricks', 'cluster-utilization', scopedRange],
+    },
+  );
+  const queryWarehouseTrendStatement = useMemo(
+    () => buildDatabricksQueryWarehouseTrendStatement(sourceTables, scopedRange, trendGrain),
+    [scopedRange, sourceTables, trendGrain],
+  );
+  const queryAttributionStatement = useMemo(
+    () => buildDatabricksQueryAttributionStatement(sourceTables, scopedRange),
+    [scopedRange, sourceTables],
+  );
+  const queryWarehouseTrendQuery = useSqlStatement<DatabricksQueryWarehouseTrendRow>(
+    queryWarehouseTrendStatement,
+    {
+      enabled: querySqlEnabled,
+      requestKey: [
+        'optimize',
+        'databricks',
+        'query-warehouse-trend',
+        trendGrain,
+        scopedRange,
+        sourceTables,
+      ],
+    },
+  );
+  const queryAttributionQuery = useSqlStatement<DatabricksQueryAttributionRow>(
+    queryAttributionStatement,
+    {
+      enabled: querySqlEnabled,
+      requestKey: ['optimize', 'databricks', 'query-attribution', scopedRange, sourceTables],
     },
   );
   const summary = summaryQuery.rows[0]
@@ -300,6 +390,17 @@ export function DatabricksOptimize() {
     sqlError('trend', trendQuery.error),
     sqlError('services', servicesQuery.error),
     sqlError('recommendations', recommendationsQuery.error),
+  ].filter((error): error is { tableName: string; message: string } => Boolean(error));
+  const queryLoading =
+    dataSources.isLoading ||
+    appSettings.isLoading ||
+    workspacesQuery.isLoading ||
+    queryWarehouseTrendQuery.isLoading ||
+    queryAttributionQuery.isLoading;
+  const queryErrors = [
+    sqlError('workspaces', workspacesQuery.error),
+    sqlError('warehouse_cost', queryWarehouseTrendQuery.error),
+    sqlError('query_history', queryAttributionQuery.error),
   ].filter((error): error is { tableName: string; message: string } => Boolean(error));
 
   const monthly = useMemo(
@@ -382,6 +483,70 @@ export function DatabricksOptimize() {
   const showServerlessModeToggle = recommendationServiceGroup === 'JOBS';
   const effectiveServerlessMode = showServerlessModeToggle ? serverlessMode : 'standard';
   const hasData = Boolean(summary && summary.totalCostUsd > 0);
+  const warehouseTrend = useMemo(
+    () =>
+      queryWarehouseTrendQuery.rows.map((row) => ({
+        ...row,
+        label: trendLabel(row.period, trendGrain, locale),
+      })),
+    [locale, queryWarehouseTrendQuery.rows, trendGrain],
+  );
+  const queryAttributionRows = queryAttributionQuery.rows;
+  const queryWarehouseOptions = useMemo(
+    () => buildQueryWarehouseOptions(warehouseTrend, queryAttributionRows),
+    [queryAttributionRows, warehouseTrend],
+  );
+  const queryWarehouseFilterKey =
+    selectedQueryWarehouseKey === 'all' ||
+    queryWarehouseOptions.some((option) => option.key === selectedQueryWarehouseKey)
+      ? selectedQueryWarehouseKey
+      : 'all';
+  const filteredWarehouseTrend = useMemo(
+    () =>
+      queryWarehouseFilterKey === 'all'
+        ? warehouseTrend
+        : warehouseTrend.filter((row) => warehouseKey(row) === queryWarehouseFilterKey),
+    [queryWarehouseFilterKey, warehouseTrend],
+  );
+  const filteredQueryAttributionRows = useMemo(
+    () =>
+      queryWarehouseFilterKey === 'all'
+        ? queryAttributionRows
+        : queryAttributionRows.filter((row) => warehouseKey(row) === queryWarehouseFilterKey),
+    [queryAttributionRows, queryWarehouseFilterKey],
+  );
+  const warehouseChart = useMemo(
+    () =>
+      buildWarehouseStackChart(
+        filteredWarehouseTrend,
+        t('optimize.databricks.query.otherWarehouses'),
+      ),
+    [filteredWarehouseTrend, t],
+  );
+  const { queryTotalWarehouseCost, queryWarehouseCount } = useMemo(() => {
+    const keys = new Set<string>();
+    let cost = 0;
+    for (const row of filteredWarehouseTrend) {
+      cost += row.costUsd;
+      keys.add(warehouseKey(row));
+    }
+    return { queryTotalWarehouseCost: cost, queryWarehouseCount: keys.size };
+  }, [filteredWarehouseTrend]);
+  const { queryAllocatedCost, queryExecutionCount, queryTotalExecutionMs } = useMemo(() => {
+    let allocated = 0;
+    let executions = 0;
+    let executionMs = 0;
+    for (const row of filteredQueryAttributionRows) {
+      allocated += isFiniteNumber(row.allocatedCostUsd) ? row.allocatedCostUsd : 0;
+      executions += row.executionCount;
+      executionMs += row.queryExecutionMs;
+    }
+    return {
+      queryAllocatedCost: allocated,
+      queryExecutionCount: executions,
+      queryTotalExecutionMs: executionMs,
+    };
+  }, [filteredQueryAttributionRows]);
 
   const resizingColRef = useRef<{ column: RecommendationColumnKey; colEl: HTMLElement } | null>(
     null,
@@ -437,6 +602,8 @@ export function DatabricksOptimize() {
     servicesQuery.refetch();
     recommendationsQuery.refetch();
     clusterUtilizationQuery.refetch();
+    queryWarehouseTrendQuery.refetch();
+    queryAttributionQuery.refetch();
   };
 
   const header = (
@@ -445,7 +612,7 @@ export function DatabricksOptimize() {
         <div className="page-header-content">
           <h2>{t('optimize.databricks.title')}</h2>
         </div>
-        {activeTab === 'serverless' ? (
+        {activeTab === 'serverless' || activeTab === 'query' ? (
           <div className="page-header-actions">
             <div className="flex flex-wrap justify-end gap-2">
               <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
@@ -477,7 +644,31 @@ export function DatabricksOptimize() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" onClick={refresh} disabled={loading}>
+              {activeTab === 'query' ? (
+                <Select
+                  value={queryWarehouseFilterKey}
+                  onValueChange={setSelectedQueryWarehouseKey}
+                >
+                  <SelectTrigger className="w-64">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      {t('optimize.databricks.query.warehouses.all')}
+                    </SelectItem>
+                    {queryWarehouseOptions.map((warehouse) => (
+                      <SelectItem key={warehouse.key} value={warehouse.key}>
+                        {warehouse.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              <Button
+                variant="outline"
+                onClick={refresh}
+                disabled={activeTab === 'query' ? queryLoading : loading}
+              >
                 <RefreshCcw /> {t('dashboard.refresh')}
               </Button>
             </div>
@@ -505,13 +696,121 @@ export function DatabricksOptimize() {
     return (
       <>
         {header}
-        <Card>
+
+        {queryErrors.length > 0 ? (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle />
+            <AlertDescription>
+              {t('optimize.databricks.query.failedToLoad')}{' '}
+              {queryErrors.map((error) => `${error.tableName}: ${error.message}`).join('; ')}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard
+            icon={Database}
+            label={t('optimize.databricks.query.kpi.warehouseCost')}
+            value={formatUsd(queryTotalWarehouseCost)}
+            detail={t('optimize.databricks.query.kpi.sqlWarehouses')}
+            loading={queryLoading}
+          />
+          <KpiCard
+            icon={DollarSign}
+            label={t('optimize.databricks.query.kpi.allocatedCost')}
+            value={formatUsd(queryAllocatedCost)}
+            detail={t('optimize.databricks.query.kpi.executionTimeAllocation')}
+            loading={queryLoading}
+          />
+          <KpiCard
+            icon={Clock}
+            label={t('optimize.databricks.query.kpi.executionTime')}
+            value={formatDurationMs(queryTotalExecutionMs, locale)}
+            detail={t('optimize.databricks.query.kpi.aggregatedQueryTime')}
+            loading={queryLoading}
+          />
+          <KpiCard
+            icon={Server}
+            label={t('optimize.databricks.query.kpi.warehouses')}
+            value={String(queryWarehouseCount)}
+            detail={t('optimize.databricks.query.kpi.executions', {
+              count: String(Math.round(queryExecutionCount)),
+            })}
+            loading={queryLoading}
+          />
+        </div>
+
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="text-sm">
+              {t('optimize.databricks.query.warehouseTrend.title')}
+            </CardTitle>
+            <CardDescription>{t('optimize.databricks.query.warehouseTrend.desc')}</CardDescription>
+          </CardHeader>
           <CardContent>
-            <Alert>
-              <Construction />
-              <AlertTitle>{t('optimize.underConstructionTitle')}</AlertTitle>
-              <AlertDescription>{t('optimize.underConstructionDesc')}</AlertDescription>
-            </Alert>
+            {queryLoading ? (
+              <Skeleton className="h-80 w-full" />
+            ) : warehouseChart.data.length === 0 ? (
+              <EmptyState
+                title={t('optimize.databricks.query.empty.noWarehouseCost')}
+                description={t('optimize.databricks.empty.adjustFilters')}
+              />
+            ) : (
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={warehouseChart.data}
+                    margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value) => compactUsd(Number(value))}
+                    />
+                    <RechartsTooltip
+                      content={
+                        <WarehouseCostTooltip
+                          series={warehouseChart.series}
+                          formatUsd={formatUsd}
+                        />
+                      }
+                    />
+                    <Legend />
+                    {warehouseChart.series.map((series) => (
+                      <Bar
+                        key={series.key}
+                        dataKey={series.key}
+                        stackId="warehouse-cost"
+                        name={series.label}
+                        fill={series.color}
+                      />
+                    ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">
+              {t('optimize.databricks.query.attribution.title')}
+            </CardTitle>
+            <CardDescription>{t('optimize.databricks.query.attribution.desc')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {queryLoading ? (
+              <Skeleton className="h-72 w-full" />
+            ) : filteredQueryAttributionRows.length === 0 ? (
+              <EmptyState
+                title={t('optimize.databricks.query.empty.noQueries')}
+                description={t('optimize.databricks.query.empty.noQueriesDesc')}
+              />
+            ) : (
+              <QueryAttributionTable rows={filteredQueryAttributionRows} />
+            )}
           </CardContent>
         </Card>
       </>
@@ -718,8 +1017,6 @@ export function DatabricksOptimize() {
                 <AllPurposeRecommendationTable
                   rows={allPurposeRecommendationRows}
                   deltaDisplay={deltaDisplay}
-                  workspaceUrl={me.data?.workspaceUrl ?? null}
-                  currentWorkspaceId={me.data?.workspaceId ?? null}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -821,8 +1118,6 @@ export function DatabricksOptimize() {
                           row={row}
                           serverlessMode={effectiveServerlessMode}
                           deltaDisplay={deltaDisplay}
-                          workspaceUrl={me.data?.workspaceUrl ?? null}
-                          currentWorkspaceId={me.data?.workspaceId ?? null}
                         />
                       ))}
                     </TableBody>
@@ -834,6 +1129,168 @@ export function DatabricksOptimize() {
         </CardContent>
       </Card>
     </>
+  );
+}
+
+function QueryAttributionTable({ rows }: { rows: DatabricksQueryAttributionRow[] }) {
+  const { t, locale } = useI18n();
+  const formatUsd = useCurrencyUsd();
+
+  return (
+    <div className="overflow-x-auto">
+      <Table className="table-fixed" style={{ width: '100%' }}>
+        <colgroup>
+          <col />
+          <col style={{ width: 220 }} />
+          <col style={{ width: 112 }} />
+          <col style={{ width: 128 }} />
+          <col style={{ width: 120 }} />
+          <col style={{ width: 92 }} />
+          <col style={{ width: 116 }} />
+          <col style={{ width: 116 }} />
+          <col style={{ width: 180 }} />
+          <col style={{ width: 116 }} />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t('optimize.databricks.query.table.query')}</TableHead>
+            <TableHead>{t('optimize.databricks.query.table.warehouse')}</TableHead>
+            <TableHead>{t('optimize.databricks.query.table.status')}</TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.query.table.allocatedCost')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.query.table.executionTime')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.query.table.executionRatio')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.query.table.executions')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.query.table.avgDuration')}
+            </TableHead>
+            <TableHead>{t('optimize.databricks.query.table.user')}</TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.query.table.read')}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const queryTarget = databricksQueryTarget(row);
+            return (
+              <TableRow key={`${row.warehouseId}-${row.queryHash}`}>
+                <TableCell className="min-w-0 overflow-hidden">
+                  <div className="grid min-w-0 gap-1">
+                    <ResourceNameLink
+                      target={queryTarget}
+                      name={row.statementText}
+                      workspaceId={row.workspaceId}
+                      workspaceName={row.workspaceName}
+                    />
+                    <span className="text-muted-foreground truncate text-xs">
+                      {row.statementType || t('dashboard.notAvailable')}
+                      {row.clientApplication ? ` | ${row.clientApplication}` : ''}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="min-w-0 overflow-hidden">
+                  <div className="grid min-w-0 gap-0.5">
+                    <span className="truncate font-medium">
+                      {row.warehouseName || row.warehouseId}
+                    </span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {row.warehouseId}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="overflow-hidden">
+                  <QueryStatusBadge row={row} />
+                </TableCell>
+                <TableCell className="overflow-hidden text-right font-medium">
+                  {isFiniteNumber(row.allocatedCostUsd)
+                    ? formatUsd(row.allocatedCostUsd)
+                    : t('dashboard.notAvailable')}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {formatDurationMs(row.queryExecutionMs, locale)}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {formatRatio(queryExecutionRatio(row))}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {formatInteger(row.executionCount, locale)}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {isFiniteNumber(row.avgExecutionMs)
+                    ? formatDurationMs(row.avgExecutionMs, locale)
+                    : t('dashboard.notAvailable')}
+                </TableCell>
+                <TableCell className="overflow-hidden truncate">
+                  {row.executedBy || t('dashboard.notAvailable')}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {formatBytes(row.readBytes ?? 0, locale)}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function QueryStatusBadge({ row }: { row: DatabricksQueryAttributionRow }) {
+  const status = row.executionStatus ?? 'UNKNOWN';
+  if (row.failedCount > 0) {
+    return <Badge variant="destructive">{status}</Badge>;
+  }
+  if (row.canceledCount > 0) {
+    return <Badge variant="outline">{status}</Badge>;
+  }
+  return <Badge variant="secondary">{status}</Badge>;
+}
+
+function queryExecutionRatio(row: DatabricksQueryAttributionRow): number | null {
+  if (!isFiniteNumber(row.warehouseQueryExecutionMs) || row.warehouseQueryExecutionMs <= 0) {
+    return null;
+  }
+  return (row.queryExecutionMs / row.warehouseQueryExecutionMs) * 100;
+}
+
+function WarehouseCostTooltip({
+  active,
+  payload,
+  label,
+  series,
+  formatUsd,
+}: {
+  active?: boolean;
+  payload?: Array<{ dataKey?: string; value?: number; color?: string }>;
+  label?: string;
+  series: WarehouseStackSeries[];
+  formatUsd: (value: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  const labels = new Map(series.map((item) => [item.key, item.label]));
+  return (
+    <div className="bg-popover text-popover-foreground border-border rounded-md border px-3 py-2 text-xs shadow-md">
+      <p className="m-0 mb-1 font-medium">{label}</p>
+      {payload
+        .filter((item) => Number(item.value ?? 0) > 0)
+        .map((item) => (
+          <p key={item.dataKey} className="m-0 flex items-center justify-between gap-5">
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: item.color }} />
+              <span className="truncate">{labels.get(String(item.dataKey)) ?? item.dataKey}</span>
+            </span>
+            <span>{formatUsd(Number(item.value ?? 0))}</span>
+          </p>
+        ))}
+    </div>
   );
 }
 
@@ -1134,14 +1591,10 @@ function RecommendationRow({
   row,
   serverlessMode,
   deltaDisplay,
-  workspaceUrl,
-  currentWorkspaceId,
 }: {
   row: DatabricksOptimizationRecommendation;
   serverlessMode: ServerlessMode;
   deltaDisplay: DeltaDisplay;
-  workspaceUrl: string | null;
-  currentWorkspaceId: string | null;
 }) {
   const { t } = useI18n();
   const formatUsd = useCurrencyUsd();
@@ -1165,11 +1618,7 @@ function RecommendationRow({
       <TableCell className="overflow-hidden">
         <PriorityBadge priority={row.priority} />
       </TableCell>
-      <ResourceInfoCell
-        row={row}
-        workspaceUrl={workspaceUrl}
-        currentWorkspaceId={currentWorkspaceId}
-      />
+      <ResourceInfoCell row={row} />
       <TableCell className="overflow-hidden">
         <span className="block truncate">{row.serviceName}</span>
       </TableCell>
@@ -1208,13 +1657,9 @@ function RecommendationRow({
 function AllPurposeRecommendationTable({
   rows,
   deltaDisplay,
-  workspaceUrl,
-  currentWorkspaceId,
 }: {
   rows: AllPurposeRecommendationRow[];
   deltaDisplay: DeltaDisplay;
-  workspaceUrl: string | null;
-  currentWorkspaceId: string | null;
 }) {
   const { t } = useI18n();
   const formatUsd = useCurrencyUsd();
@@ -1287,11 +1732,7 @@ function AllPurposeRecommendationTable({
             } = computeServerlessDelta(estimatedServerlessCost, estimatedCurrentTotal);
             return (
               <TableRow key={`${row.rank}-${row.resourceId}`}>
-                <ResourceInfoCell
-                  row={row}
-                  workspaceUrl={workspaceUrl}
-                  currentWorkspaceId={currentWorkspaceId}
-                />
+                <ResourceInfoCell row={row} />
                 <TableCell className="overflow-hidden">
                   <span className="block truncate">{row.serviceName}</span>
                 </TableCell>
@@ -1342,25 +1783,22 @@ function AllPurposeRecommendationTable({
   );
 }
 
-function ResourceInfoCell({
-  row,
-  workspaceUrl,
-  currentWorkspaceId,
-}: {
-  row: DatabricksOptimizationRecommendation;
-  workspaceUrl: string | null;
-  currentWorkspaceId: string | null;
-}) {
+function ResourceInfoCell({ row }: { row: DatabricksOptimizationRecommendation }) {
   const { t } = useI18n();
   const resourceName = row.resourceName || row.resourceId;
-  const resourceUrl = databricksResourceUrl(row, workspaceUrl, currentWorkspaceId);
+  const resourceTarget = databricksResourceTarget(row);
   const resourceWorkspace = `${row.workspaceName || t('dashboard.notAvailable')} | ${
     row.workspaceId || t('dashboard.notAvailable')
   }`;
   return (
     <TableCell className="min-w-0 overflow-hidden">
       <div className="grid min-w-0 gap-0.5">
-        <ResourceNameLink href={resourceUrl} name={resourceName} />
+        <ResourceNameLink
+          target={resourceTarget}
+          name={resourceName}
+          workspaceId={row.workspaceId}
+          workspaceName={row.workspaceName}
+        />
         <span className="text-muted-foreground truncate text-xs">{row.resourceId}</span>
         <span className="text-muted-foreground truncate text-xs">{resourceWorkspace}</span>
       </div>
@@ -1405,31 +1843,156 @@ function InfoTooltip({ label }: { label: string }) {
   );
 }
 
-function ResourceNameLink({ href, name }: { href: string | null; name: string }) {
-  if (!href) {
+function ResourceNameLink({
+  target,
+  name,
+  workspaceId,
+  workspaceName,
+}: {
+  target: DatabricksLinkTarget | null;
+  name: string;
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+}) {
+  const { t } = useI18n();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [domain, setDomain] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const upsertWorkspace = useUpsertWorkspace();
+  if (!target) {
     return <span className="truncate font-medium">{name}</span>;
   }
+
+  const handleClick = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (!workspaceId) return;
+    event.preventDefault();
+    setError(null);
+    const popup = window.open('about:blank', '_blank');
+    if (popup) popup.opener = null;
+    try {
+      const workspace = await apiFetch<WorkspaceMapping>(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+      );
+      const url = databricksUrl(workspace.domain, target);
+      if (popup) {
+        popup.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noreferrer noopener');
+      }
+    } catch (err) {
+      popup?.close();
+      const apiError = err as ApiError;
+      if (apiError.status === 404) {
+        upsertWorkspace.reset();
+        setDomain('');
+        setModalOpen(true);
+        return;
+      }
+      setError(apiError.message ?? t('workspaceMapping.loadFailed'));
+      setModalOpen(true);
+    }
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!workspaceId || !target) return;
+    setError(null);
+    upsertWorkspace.mutate(
+      { id: workspaceId, body: { domain } },
+      {
+        onSuccess: (workspace) => {
+          setModalOpen(false);
+          window.open(databricksUrl(workspace.domain, target), '_blank', 'noreferrer noopener');
+        },
+        onError: (err) => {
+          setError((err as Error).message);
+        },
+      },
+    );
+  };
+
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="text-primary inline-flex max-w-full min-w-0 items-center gap-1 font-medium hover:underline"
-    >
-      <span className="min-w-0 truncate">{name}</span>
-      <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        className="text-primary inline-flex max-w-full min-w-0 items-center gap-1 border-0 bg-transparent p-0 text-left font-medium hover:underline"
+      >
+        <span className="min-w-0 truncate">{name}</span>
+        <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
+      </button>
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={handleSubmit}>
+            <DialogHeader>
+              <DialogTitle>{t('workspaceMapping.title')}</DialogTitle>
+              <DialogDescription>
+                {t('workspaceMapping.desc', {
+                  workspace: workspaceName || workspaceId || t('dashboard.notAvailable'),
+                })}
+              </DialogDescription>
+            </DialogHeader>
+            <FieldGroup className="py-4">
+              <Field>
+                <FieldLabel htmlFor={`workspace-domain-${workspaceId}`}>
+                  {t('workspaceMapping.domain')}
+                </FieldLabel>
+                <Input
+                  id={`workspace-domain-${workspaceId}`}
+                  required
+                  value={domain}
+                  disabled={upsertWorkspace.isPending}
+                  placeholder={t('workspaceMapping.domainPlaceholder')}
+                  onChange={(event) => setDomain(event.target.value)}
+                />
+              </Field>
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setModalOpen(false)}
+                disabled={upsertWorkspace.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={upsertWorkspace.isPending}>
+                {upsertWorkspace.isPending ? (
+                  <>
+                    <Spinner /> {t('common.saving')}
+                  </>
+                ) : (
+                  t('workspaceMapping.saveAndOpen')
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-function databricksResourceUrl(
+function databricksResourceTarget(
   row: DatabricksOptimizationRecommendation,
-  workspaceUrl: string | null,
-  currentWorkspaceId: string | null,
-): string | null {
-  if (!workspaceUrl || !row.workspaceId || row.workspaceId !== currentWorkspaceId) return null;
+): DatabricksLinkTarget | null {
+  if (!row.workspaceId) return null;
   const path = databricksResourcePath(row.serviceName, row.resourceId);
-  return path ? `${workspaceUrl}${path}` : null;
+  return path ? { path } : null;
+}
+
+function databricksQueryTarget(row: DatabricksQueryAttributionRow): DatabricksLinkTarget | null {
+  if (!row.workspaceId || !row.latestStatementId) return null;
+  return {
+    path: `/sql/warehouses/${encodeURIComponent(row.warehouseId)}/monitoring`,
+    params: { queryId: row.latestStatementId },
+  };
 }
 
 function databricksResourcePath(serviceName: string, resourceId: string): string | null {
@@ -1446,6 +2009,16 @@ function databricksResourcePath(serviceName: string, resourceId: string): string
     default:
       return null;
   }
+}
+
+function databricksUrl(domain: string, target: DatabricksLinkTarget): string {
+  const cleanDomain = domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const path = target.path.startsWith('/') ? target.path : `/${target.path}`;
+  const url = new URL(path, `https://${cleanDomain}`);
+  for (const [key, value] of Object.entries(target.params ?? {})) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
 }
 
 function PriorityBadge({
@@ -1536,8 +2109,105 @@ function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function workspaceScopedKey(workspaceId: string | null | undefined, resourceId: string): string {
+  return `${workspaceId ?? ''}:${resourceId}`;
+}
+
+function warehouseKey(row: { workspaceId: string | null | undefined; warehouseId: string }) {
+  return workspaceScopedKey(row.workspaceId, row.warehouseId);
+}
+
+function buildQueryWarehouseOptions(
+  trendRows: Array<DatabricksQueryWarehouseTrendRow & { label: string }>,
+  queryRows: DatabricksQueryAttributionRow[],
+): QueryWarehouseOption[] {
+  const options = new Map<string, QueryWarehouseOption>();
+  for (const row of trendRows) {
+    const key = warehouseKey(row);
+    const current = options.get(key);
+    options.set(key, {
+      key,
+      label: current?.label ?? row.warehouseName ?? row.warehouseId,
+      warehouseId: row.warehouseId,
+      totalCostUsd: (current?.totalCostUsd ?? 0) + row.costUsd,
+    });
+  }
+  for (const row of queryRows) {
+    const key = warehouseKey(row);
+    if (options.has(key)) continue;
+    options.set(key, {
+      key,
+      label: row.warehouseName ?? row.warehouseId,
+      warehouseId: row.warehouseId,
+      totalCostUsd: 0,
+    });
+  }
+  return [...options.values()].sort(
+    (a, b) => b.totalCostUsd - a.totalCostUsd || a.label.localeCompare(b.label),
+  );
+}
+
+function buildWarehouseStackChart(
+  rows: Array<DatabricksQueryWarehouseTrendRow & { label: string }>,
+  otherLabel: string,
+): { data: WarehouseStackDatum[]; series: WarehouseStackSeries[] } {
+  const totals = new Map<string, { label: string; totalCostUsd: number }>();
+  for (const row of rows) {
+    const key = warehouseKey(row);
+    const current = totals.get(key);
+    const label = row.warehouseName || row.warehouseId;
+    totals.set(key, {
+      label: current?.label ?? label,
+      totalCostUsd: (current?.totalCostUsd ?? 0) + row.costUsd,
+    });
+  }
+
+  const topKeys = [...totals.entries()]
+    .sort((a, b) => b[1].totalCostUsd - a[1].totalCostUsd)
+    .slice(0, 8)
+    .map(([key]) => key);
+  const topKeySet = new Set(topKeys);
+  const sourceToSeriesKey = new Map(topKeys.map((key, index) => [key, `warehouse_${index}`]));
+  const hasOther = [...totals.keys()].some((key) => !topKeySet.has(key));
+
+  const series: WarehouseStackSeries[] = topKeys.map((key, index) => ({
+    key: sourceToSeriesKey.get(key)!,
+    label: totals.get(key)?.label ?? key,
+    totalCostUsd: totals.get(key)?.totalCostUsd ?? 0,
+    color: WAREHOUSE_STACK_COLORS[index % WAREHOUSE_STACK_COLORS.length]!,
+  }));
+  if (hasOther) {
+    series.push({
+      key: 'warehouse_other',
+      label: otherLabel,
+      totalCostUsd: [...totals.entries()]
+        .filter(([key]) => !topKeySet.has(key))
+        .reduce((sum, [, value]) => sum + value.totalCostUsd, 0),
+      color: WAREHOUSE_STACK_COLORS[WAREHOUSE_STACK_COLORS.length - 1]!,
+    });
+  }
+
+  const byPeriod = new Map<string, WarehouseStackDatum>();
+  for (const row of rows) {
+    const datum =
+      byPeriod.get(row.period) ??
+      ({
+        period: row.period,
+        label: row.label,
+        totalCostUsd: 0,
+      } as WarehouseStackDatum);
+    const sourceKey = warehouseKey(row);
+    const seriesKey = sourceToSeriesKey.get(sourceKey) ?? 'warehouse_other';
+    datum[seriesKey] = Number(datum[seriesKey] ?? 0) + row.costUsd;
+    datum.totalCostUsd += row.costUsd;
+    byPeriod.set(row.period, datum);
+  }
+
+  return { data: [...byPeriod.values()], series };
+}
+
 function clusterUtilizationKey(workspaceId: string | null | undefined, clusterId: string): string {
-  return `${workspaceId ?? ''}:${clusterId}`;
+  return workspaceScopedKey(workspaceId, clusterId);
 }
 
 function utilizationToneClass(value: number | null | undefined): string {
@@ -1592,6 +2262,41 @@ function compactUsd(value: number): string {
   if (Math.abs(value) >= 1_000_000) return `$${Math.round(value / 1_000_000)}M`;
   if (Math.abs(value) >= 1_000) return `$${Math.round(value / 1_000)}K`;
   return `$${Math.round(value)}`;
+}
+
+function formatDurationMs(ms: number, locale: 'en' | 'ja'): string {
+  if (!Number.isFinite(ms) || ms < 0) return 'N/A';
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return locale === 'ja' ? `${seconds} 秒` : `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  if (minutes < 60) {
+    return locale === 'ja' ? `${minutes} 分 ${restSeconds} 秒` : `${minutes}m ${restSeconds}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return locale === 'ja' ? `${hours} 時間 ${restMinutes} 分` : `${hours}h ${restMinutes}m`;
+}
+
+function formatInteger(value: number, locale: 'en' | 'ja'): string {
+  return new Intl.NumberFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatBytes(value: number, locale: 'en' | 'ja'): string {
+  const safeValue = Number.isFinite(value) && value > 0 ? value : 0;
+  if (safeValue < 1024) return `${Math.round(safeValue)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+  let size = safeValue / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+    maximumFractionDigits: size >= 10 ? 1 : 2,
+  }).format(size)} ${units[unitIndex]}`;
 }
 
 function trendLabel(key: string, grain: 'day' | 'month', locale: string): string {

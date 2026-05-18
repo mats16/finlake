@@ -2,9 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DatabricksClusterUtilizationRowSchema,
+  DatabricksQueryAttributionRowSchema,
+  DatabricksQueryWarehouseTrendRowSchema,
   DatabricksOptimizationResponseSchema,
 } from '@finlake/shared';
 import {
+  buildDatabricksQueryAttributionSql,
+  buildDatabricksQueryAttributionStatement,
+  buildDatabricksQueryWarehouseTrendSql,
+  buildDatabricksQueryWarehouseTrendStatement,
   buildDatabricksClusterUtilizationSql,
   buildDatabricksClusterUtilizationStatement,
   buildDatabricksOptimizeCte,
@@ -107,6 +113,84 @@ test('buildDatabricksClusterUtilizationStatement includes date and workspace par
     '2026-02-01T00:00:00.000Z',
   );
   assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
+});
+
+test('buildDatabricksQueryWarehouseTrendSql groups SQL warehouse cost by period and warehouse', () => {
+  const sql = buildDatabricksQueryWarehouseTrendSql('-- cte --', 'day');
+
+  assert.match(sql, /service_name = 'SQL'/);
+  assert.match(sql, /resource_id AS warehouse_id/);
+  assert.match(sql, /MAX_BY\(resource_name, charge_period_start\) AS warehouse_name/);
+  assert.match(
+    sql,
+    /date_format\(date_trunc\('DAY', charge_period_start\), 'yyyy-MM-dd'\) AS period/,
+  );
+  assert.match(
+    sql,
+    /GROUP BY date_format\(date_trunc\('DAY', charge_period_start\), 'yyyy-MM-dd'\), workspace_id, resource_id/,
+  );
+  assert.match(sql, /ORDER BY period, cost_usd DESC/);
+});
+
+test('buildDatabricksQueryWarehouseTrendStatement includes billing and workspace params', () => {
+  const statement = buildDatabricksQueryWarehouseTrendStatement(
+    sources,
+    {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-02-01T00:00:00.000Z',
+      workspaceId: '123456789',
+    },
+    'month',
+  );
+
+  assert.equal(
+    statement.params.find((p) => p.name === 'start_ts')?.value,
+    '2026-01-01T00:00:00.000Z',
+  );
+  assert.equal(
+    statement.params.find((p) => p.name === 'end_ts')?.value,
+    '2026-02-01T00:00:00.000Z',
+  );
+  assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
+  assert.equal(statement.params.find((p) => p.name === 'billing_account_id_0')?.value, 'abc-123');
+});
+
+test('buildDatabricksQueryAttributionSql allocates warehouse cost by execution time', () => {
+  const sql = buildDatabricksQueryAttributionSql('-- cte --');
+
+  assert.match(sql, /FROM system\.query\.history/);
+  assert.match(sql, /compute\.type = 'WAREHOUSE'/);
+  assert.match(sql, /compute\.warehouse_id AS warehouse_id/);
+  assert.match(sql, /COALESCE\(execution_duration_ms, total_duration_ms, 0\)/);
+  assert.match(sql, /SHA2\(normalized_statement_text, 256\)/);
+  assert.match(sql, /MAX_BY\(statement_id, start_time\) AS latest_statement_id/);
+  assert.match(sql, /warehouse_query_totals AS/);
+  assert.match(sql, /SUM\(execution_ms\).*AS warehouse_query_execution_ms/);
+  assert.match(
+    sql,
+    /wc\.warehouse_cost_usd \* qm\.query_execution_ms \/ wqt\.warehouse_query_execution_ms/,
+  );
+  assert.match(sql, /COUNT_IF\(execution_status = 'FAILED'\)/);
+  assert.match(sql, /LIMIT 100/);
+});
+
+test('buildDatabricksQueryAttributionStatement includes billing and workspace params', () => {
+  const statement = buildDatabricksQueryAttributionStatement(sources, {
+    start: '2026-01-01T00:00:00.000Z',
+    end: '2026-02-01T00:00:00.000Z',
+    workspaceId: '123456789',
+  });
+
+  assert.equal(
+    statement.params.find((p) => p.name === 'start_ts')?.value,
+    '2026-01-01T00:00:00.000Z',
+  );
+  assert.equal(
+    statement.params.find((p) => p.name === 'end_ts')?.value,
+    '2026-02-01T00:00:00.000Z',
+  );
+  assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
+  assert.equal(statement.params.find((p) => p.name === 'billing_account_id_0')?.value, 'abc-123');
 });
 
 test('buildDatabricksSummarySql separates serverless, non-serverless, and unknown cost', () => {
@@ -295,6 +379,58 @@ test('DatabricksOptimizationResponseSchema parses API response shape', () => {
   });
 
   assert.equal(response.recommendations[0]?.resourceId, 'warehouse-1');
+});
+
+test('Databricks query schemas parse API row shapes', () => {
+  assert.deepEqual(
+    DatabricksQueryWarehouseTrendRowSchema.parse({
+      period: '2026-01-01',
+      workspaceId: '123',
+      workspaceName: 'workspace-a',
+      warehouseId: 'abc',
+      warehouseName: 'warehouse-a',
+      costUsd: 12.5,
+    }),
+    {
+      period: '2026-01-01',
+      workspaceId: '123',
+      workspaceName: 'workspace-a',
+      warehouseId: 'abc',
+      warehouseName: 'warehouse-a',
+      costUsd: 12.5,
+    },
+  );
+  assert.equal(
+    DatabricksQueryAttributionRowSchema.parse({
+      workspaceId: '123',
+      workspaceName: 'workspace-a',
+      warehouseId: 'abc',
+      warehouseName: 'warehouse-a',
+      queryHash: 'hash',
+      latestStatementId: 'stmt-1',
+      statementText: 'SELECT 1',
+      statementType: 'SELECT',
+      executedBy: 'user@example.com',
+      clientApplication: 'Databricks SQL',
+      executionStatus: 'FINISHED',
+      executionCount: 4,
+      failedCount: 0,
+      canceledCount: 0,
+      queryExecutionMs: 1200,
+      avgExecutionMs: 300,
+      maxExecutionMs: 500,
+      warehouseQueryExecutionMs: 2400,
+      warehouseCostUsd: 20,
+      allocatedCostUsd: 10,
+      readBytes: 1024,
+      readRows: 10,
+      producedRows: 1,
+      spilledLocalBytes: 0,
+      firstStartTime: '2026-01-01 00:00:00',
+      lastEndTime: '2026-01-01 00:01:00',
+    }).allocatedCostUsd,
+    10,
+  );
 });
 
 test('DatabricksClusterUtilizationRowSchema parses cluster utilization rows', () => {

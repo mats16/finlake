@@ -43,6 +43,14 @@ export const en = {
     settings: 'Settings',
     databricksConsole: 'Databricks Console',
   },
+  workspaceMapping: {
+    title: 'Workspace mapping required',
+    desc: 'Enter the Databricks workspace domain for {workspace}.',
+    domain: 'Workspace domain',
+    domainPlaceholder: 'dbc-1234567890123456.cloud.databricks.com',
+    saveAndOpen: 'Save and open',
+    loadFailed: 'Could not check workspace mapping',
+  },
   theme: {
     switchToDark: 'Switch to dark mode',
     switchToLight: 'Switch to light mode',
@@ -196,8 +204,8 @@ export const en = {
       desc: 'Track serverless adoption and prioritize Databricks workloads to review.',
       failedToLoad: 'Failed to load Databricks optimization signals.',
       tabs: {
-        serverless: 'Serverless adoption',
-        query: 'Query',
+        serverless: 'Serverless',
+        query: 'SQL',
       },
       workspaces: {
         all: 'All workspaces',
@@ -242,6 +250,49 @@ export const en = {
         },
         deltaDisplay: {
           label: 'Delta display',
+        },
+      },
+      query: {
+        failedToLoad: 'Failed to load SQL warehouse query signals.',
+        otherWarehouses: 'Other warehouses',
+        warehouses: {
+          all: 'All warehouses',
+        },
+        kpi: {
+          warehouseCost: 'SQL Warehouse Cost',
+          sqlWarehouses: 'EffectiveCost from SQL warehouse usage',
+          allocatedCost: 'Allocated Query Cost',
+          executionTimeAllocation: 'Warehouse cost allocated by execution time',
+          executionTime: 'Query Execution Time',
+          aggregatedQueryTime: 'Summed across query history',
+          warehouses: 'Warehouses',
+          executions: '{count} executions',
+        },
+        warehouseTrend: {
+          title: 'SQL warehouse cost by warehouse',
+          desc: 'Stacked EffectiveCost from Databricks SQL warehouse usage.',
+        },
+        attribution: {
+          title: 'Query cost attribution',
+          desc: 'Queries are grouped by normalized statement text and allocated warehouse cost in proportion to execution time.',
+        },
+        table: {
+          query: 'Query',
+          warehouse: 'Warehouse',
+          status: 'Status',
+          allocatedCost: 'Allocated cost',
+          executionTime: 'Execution time',
+          executionRatio: 'Ratio',
+          executions: 'Executions',
+          avgDuration: 'Avg duration',
+          user: 'User',
+          read: 'Read',
+        },
+        empty: {
+          noWarehouseCost: 'No SQL warehouse cost',
+          noQueries: 'No query history rows',
+          noQueriesDesc:
+            'Grant access to system.query.history or adjust the period and workspace filter.',
         },
       },
       legend: {

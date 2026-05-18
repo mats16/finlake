@@ -94,6 +94,50 @@ export const DatabricksClusterUtilizationRowSchema = z.object({
 
 export type DatabricksClusterUtilizationRow = z.infer<typeof DatabricksClusterUtilizationRowSchema>;
 
+export const DatabricksQueryWarehouseTrendRowSchema = z.object({
+  period: z.string(),
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string().nullable(),
+  warehouseId: z.string(),
+  warehouseName: z.string().nullable(),
+  costUsd: z.number(),
+});
+
+export type DatabricksQueryWarehouseTrendRow = z.infer<
+  typeof DatabricksQueryWarehouseTrendRowSchema
+>;
+
+export const DatabricksQueryAttributionRowSchema = z.object({
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string().nullable(),
+  warehouseId: z.string(),
+  warehouseName: z.string().nullable(),
+  queryHash: z.string(),
+  latestStatementId: z.string().nullable(),
+  statementText: z.string(),
+  statementType: z.string().nullable(),
+  executedBy: z.string().nullable(),
+  clientApplication: z.string().nullable(),
+  executionStatus: z.string().nullable(),
+  executionCount: z.number(),
+  failedCount: z.number(),
+  canceledCount: z.number(),
+  queryExecutionMs: z.number(),
+  avgExecutionMs: z.number().nullable(),
+  maxExecutionMs: z.number().nullable(),
+  warehouseQueryExecutionMs: z.number().nullable(),
+  warehouseCostUsd: z.number().nullable(),
+  allocatedCostUsd: z.number().nullable(),
+  readBytes: z.number().nullable(),
+  readRows: z.number().nullable(),
+  producedRows: z.number().nullable(),
+  spilledLocalBytes: z.number().nullable(),
+  firstStartTime: z.string().nullable(),
+  lastEndTime: z.string().nullable(),
+});
+
+export type DatabricksQueryAttributionRow = z.infer<typeof DatabricksQueryAttributionRowSchema>;
+
 export const DatabricksOptimizationErrorSchema = z.object({
   tableName: z.string(),
   message: z.string(),

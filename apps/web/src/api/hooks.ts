@@ -48,6 +48,8 @@ import type {
   UsageDailyResponse,
   UsageTopWorkloadRow,
   UpdateBudgetInput,
+  WorkspaceMapping,
+  WorkspaceMappingUpsertBody,
 } from '@finlake/shared';
 import { apiFetch } from './client';
 import { getSqlStatement, submitSqlStatement } from './sql';
@@ -245,6 +247,24 @@ export function useMe() {
     queryKey: ['me'],
     queryFn: () => apiFetch<MeResponse>('/api/me'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function workspaceQueryKey(id: string) {
+  return ['workspaces', id];
+}
+
+export function useUpsertWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: WorkspaceMappingUpsertBody }) =>
+      apiFetch<WorkspaceMapping>(`/api/workspaces/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(workspaceQueryKey(data.id), data);
+    },
   });
 }
 

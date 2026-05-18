@@ -139,6 +139,29 @@ export function buildDatabricksClusterUtilizationStatement(
   };
 }
 
+export function buildDatabricksQueryWarehouseTrendStatement(
+  sources: DatabricksOptimizeSource[],
+  range: DatabricksOptimizationRange,
+  grain: DatabricksTrendGrain,
+): SqlStatementInput {
+  const cte = buildDatabricksOptimizeCte(sources);
+  return {
+    query: buildDatabricksQueryWarehouseTrendSql(cte, grain),
+    params: databricksOptimizeParams(sources, range),
+  };
+}
+
+export function buildDatabricksQueryAttributionStatement(
+  sources: DatabricksOptimizeSource[],
+  range: DatabricksOptimizationRange,
+): SqlStatementInput {
+  const cte = buildDatabricksOptimizeCte(sources);
+  return {
+    query: buildDatabricksQueryAttributionSql(cte),
+    params: databricksOptimizeParams(sources, range),
+  };
+}
+
 export function buildDatabricksOptimizeCte(sources: DatabricksOptimizeSource[]): string {
   const selects = sources
     .map(
@@ -237,6 +260,186 @@ SELECT
     ELSE CAST(NULL AS DOUBLE)
   END AS cpu_utilization_percent
 FROM cluster_metrics
+`;
+}
+
+export function buildDatabricksQueryWarehouseTrendSql(
+  cte: string,
+  grain: DatabricksTrendGrain,
+): string {
+  const unit = grain === 'day' ? 'DAY' : 'MONTH';
+  const format = grain === 'day' ? 'yyyy-MM-dd' : 'yyyy-MM';
+  const periodExpression = `date_format(date_trunc('${unit}', charge_period_start), '${format}')`;
+  return /* sql */ `
+${cte}
+, warehouse_cost AS (
+  SELECT
+    ${periodExpression} AS period,
+    workspace_id,
+    MAX(workspace_name) AS workspace_name,
+    resource_id AS warehouse_id,
+    MAX_BY(resource_name, charge_period_start) AS warehouse_name,
+    CAST(SUM(cost_usd) AS DOUBLE) AS cost_usd
+  FROM filtered
+  WHERE service_name = 'SQL'
+    AND resource_id IS NOT NULL
+    AND TRIM(resource_id) <> ''
+  GROUP BY ${periodExpression}, workspace_id, resource_id
+)
+SELECT
+  period,
+  workspace_id,
+  workspace_name,
+  warehouse_id,
+  warehouse_name,
+  cost_usd
+FROM warehouse_cost
+ORDER BY period, cost_usd DESC
+`;
+}
+
+export function buildDatabricksQueryAttributionSql(cte: string): string {
+  return /* sql */ `
+${cte}
+, warehouse_cost AS (
+  SELECT
+    workspace_id,
+    MAX(workspace_name) AS workspace_name,
+    resource_id AS warehouse_id,
+    MAX_BY(resource_name, charge_period_start) AS warehouse_name,
+    CAST(SUM(cost_usd) AS DOUBLE) AS warehouse_cost_usd
+  FROM filtered
+  WHERE service_name = 'SQL'
+    AND resource_id IS NOT NULL
+    AND TRIM(resource_id) <> ''
+  GROUP BY workspace_id, resource_id
+),
+query_history AS (
+  SELECT
+    CAST(workspace_id AS STRING) AS workspace_id,
+    compute.warehouse_id AS warehouse_id,
+    statement_id,
+    execution_status,
+    CAST(start_time AS TIMESTAMP) AS start_time,
+    CAST(end_time AS TIMESTAMP) AS end_time,
+    CASE
+      WHEN statement_text IS NULL OR TRIM(statement_text) = '' THEN NULL
+      ELSE REGEXP_REPLACE(TRIM(statement_text), '\\\\s+', ' ')
+    END AS normalized_statement_text,
+    NULLIF(TRIM(statement_type), '') AS statement_type,
+    NULLIF(TRIM(executed_by), '') AS executed_by,
+    NULLIF(TRIM(client_application), '') AS client_application,
+    CAST(COALESCE(execution_duration_ms, total_duration_ms, 0) AS DOUBLE) AS execution_ms,
+    CAST(read_bytes AS DOUBLE) AS read_bytes,
+    CAST(read_rows AS DOUBLE) AS read_rows,
+    CAST(produced_rows AS DOUBLE) AS produced_rows,
+    CAST(spilled_local_bytes AS DOUBLE) AS spilled_local_bytes
+  FROM system.query.history
+  WHERE start_time >= :start_ts
+    AND start_time < :end_ts
+    AND compute.type = 'WAREHOUSE'
+    AND compute.warehouse_id IS NOT NULL
+    AND TRIM(compute.warehouse_id) <> ''
+    AND (:workspace_id IS NULL OR CAST(workspace_id AS STRING) = :workspace_id)
+),
+query_rows AS (
+  SELECT
+    workspace_id,
+    warehouse_id,
+    statement_id,
+    execution_status,
+    start_time,
+    end_time,
+    COALESCE(normalized_statement_text, CONCAT('[statement text unavailable] ', statement_id)) AS statement_text,
+    CASE
+      WHEN normalized_statement_text IS NULL THEN CONCAT('statement:', statement_id)
+      ELSE SHA2(normalized_statement_text, 256)
+    END AS query_hash,
+    statement_type,
+    executed_by,
+    client_application,
+    execution_ms,
+    read_bytes,
+    read_rows,
+    produced_rows,
+    spilled_local_bytes
+  FROM query_history
+  WHERE execution_ms > 0
+),
+warehouse_query_totals AS (
+  SELECT
+    workspace_id,
+    warehouse_id,
+    CAST(SUM(execution_ms) AS DOUBLE) AS warehouse_query_execution_ms
+  FROM query_rows
+  GROUP BY workspace_id, warehouse_id
+),
+query_metrics AS (
+  SELECT
+    workspace_id,
+    warehouse_id,
+    query_hash,
+    MAX_BY(statement_id, start_time) AS latest_statement_id,
+    MAX_BY(statement_text, start_time) AS statement_text,
+    MAX_BY(statement_type, start_time) AS statement_type,
+    MAX_BY(executed_by, start_time) AS executed_by,
+    MAX_BY(client_application, start_time) AS client_application,
+    MAX_BY(execution_status, start_time) AS execution_status,
+    CAST(COUNT(*) AS DOUBLE) AS execution_count,
+    CAST(COUNT_IF(execution_status = 'FAILED') AS DOUBLE) AS failed_count,
+    CAST(COUNT_IF(execution_status = 'CANCELED') AS DOUBLE) AS canceled_count,
+    CAST(SUM(execution_ms) AS DOUBLE) AS query_execution_ms,
+    CAST(AVG(execution_ms) AS DOUBLE) AS avg_execution_ms,
+    CAST(MAX(execution_ms) AS DOUBLE) AS max_execution_ms,
+    CAST(SUM(read_bytes) AS DOUBLE) AS read_bytes,
+    CAST(SUM(read_rows) AS DOUBLE) AS read_rows,
+    CAST(SUM(produced_rows) AS DOUBLE) AS produced_rows,
+    CAST(SUM(spilled_local_bytes) AS DOUBLE) AS spilled_local_bytes,
+    CAST(MIN(start_time) AS STRING) AS first_start_time,
+    CAST(MAX(end_time) AS STRING) AS last_end_time
+  FROM query_rows
+  GROUP BY workspace_id, warehouse_id, query_hash
+)
+SELECT
+  qm.workspace_id,
+  wc.workspace_name,
+  qm.warehouse_id,
+  wc.warehouse_name,
+  qm.query_hash,
+  qm.latest_statement_id,
+  SUBSTR(qm.statement_text, 1, 1000) AS statement_text,
+  qm.statement_type,
+  qm.executed_by,
+  qm.client_application,
+  qm.execution_status,
+  qm.execution_count,
+  qm.failed_count,
+  qm.canceled_count,
+  qm.query_execution_ms,
+  qm.avg_execution_ms,
+  qm.max_execution_ms,
+  wqt.warehouse_query_execution_ms,
+  CAST(wc.warehouse_cost_usd AS DOUBLE) AS warehouse_cost_usd,
+  CASE
+    WHEN wqt.warehouse_query_execution_ms > 0 AND wc.warehouse_cost_usd IS NOT NULL
+      THEN CAST(wc.warehouse_cost_usd * qm.query_execution_ms / wqt.warehouse_query_execution_ms AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS allocated_cost_usd,
+  qm.read_bytes,
+  qm.read_rows,
+  qm.produced_rows,
+  qm.spilled_local_bytes,
+  qm.first_start_time,
+  qm.last_end_time
+FROM query_metrics qm
+  INNER JOIN warehouse_query_totals wqt
+    ON qm.workspace_id = wqt.workspace_id
+    AND qm.warehouse_id = wqt.warehouse_id
+  LEFT JOIN warehouse_cost wc
+    ON qm.workspace_id = wc.workspace_id
+    AND qm.warehouse_id = wc.warehouse_id
+ORDER BY allocated_cost_usd DESC NULLS LAST, query_execution_ms DESC
+LIMIT 100
 `;
 }
 

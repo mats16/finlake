@@ -25,6 +25,7 @@ import { adminRouter } from './routes/admin.js';
 import { sqlRouter } from './routes/sql.js';
 import { pricingRouter } from './routes/pricing.js';
 import { jobsRouter } from './routes/jobs.js';
+import { workspacesRouter } from './routes/workspaces.js';
 
 export interface AppDeps {
   env: Env;
@@ -60,6 +61,7 @@ export async function buildApp({ env, db }: AppDeps): Promise<express.Express> {
   app.use('/api/sql', sqlRouter(db, env));
   app.use('/api/pricing', pricingRouter(db, env));
   app.use('/api/jobs', jobsRouter(db, env));
+  app.use('/api/workspaces', workspacesRouter(db));
 
   if (env.NODE_ENV === 'production') {
     const distDir = resolveWebDistDir(env);

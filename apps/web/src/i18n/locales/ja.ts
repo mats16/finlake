@@ -45,6 +45,14 @@ export const ja: Dictionary = {
     settings: '設定',
     databricksConsole: 'Databricks コンソール',
   },
+  workspaceMapping: {
+    title: 'ワークスペースマッピングが必要です',
+    desc: '{workspace} の Databricks ワークスペースドメインを入力してください。',
+    domain: 'ワークスペースドメイン',
+    domainPlaceholder: 'dbc-1234567890123456.cloud.databricks.com',
+    saveAndOpen: '保存して開く',
+    loadFailed: 'ワークスペースマッピングを確認できませんでした',
+  },
   theme: {
     switchToDark: 'ダークモードに切り替え',
     switchToLight: 'ライトモードに切り替え',
@@ -200,8 +208,8 @@ export const ja: Dictionary = {
       desc: 'サーバレス化の進捗を追跡し、優先的に見直す Databricks ワークロードを特定します。',
       failedToLoad: 'Databricks 最適化シグナルの読み込みに失敗しました。',
       tabs: {
-        serverless: 'Serverless adoption',
-        query: 'Query',
+        serverless: 'Serverless',
+        query: 'SQL',
       },
       workspaces: {
         all: 'すべてのワークスペース',
@@ -246,6 +254,49 @@ export const ja: Dictionary = {
         },
         deltaDisplay: {
           label: '差額表示',
+        },
+      },
+      query: {
+        failedToLoad: 'SQL ウェアハウスのクエリシグナルを読み込めませんでした。',
+        otherWarehouses: 'その他の Warehouse',
+        warehouses: {
+          all: 'すべての Warehouse',
+        },
+        kpi: {
+          warehouseCost: 'SQL Warehouse コスト',
+          sqlWarehouses: 'SQL Warehouse 利用の EffectiveCost',
+          allocatedCost: 'クエリ配賦コスト',
+          executionTimeAllocation: '実行時間に比例して Warehouse コストを配賦',
+          executionTime: 'クエリ実行時間',
+          aggregatedQueryTime: 'Query History の合計実行時間',
+          warehouses: 'Warehouses',
+          executions: '実行 {count} 件',
+        },
+        warehouseTrend: {
+          title: 'SQL Warehouse 別コスト',
+          desc: 'Databricks SQL Warehouse 利用の EffectiveCost を積み上げ表示します。',
+        },
+        attribution: {
+          title: 'クエリ別コスト配賦',
+          desc: '正規化した statement text でクエリを集計し、実行時間に比例して Warehouse コストを配賦します。',
+        },
+        table: {
+          query: 'クエリ',
+          warehouse: 'Warehouse',
+          status: 'ステータス',
+          allocatedCost: '配賦コスト',
+          executionTime: '実行時間',
+          executionRatio: '比率',
+          executions: '実行数',
+          avgDuration: '平均時間',
+          user: 'ユーザー',
+          read: 'Read',
+        },
+        empty: {
+          noWarehouseCost: 'SQL Warehouse コストがありません',
+          noQueries: 'Query History の行がありません',
+          noQueriesDesc:
+            'system.query.history への権限を付与するか、期間またはワークスペース条件を変更してください。',
         },
       },
       legend: {

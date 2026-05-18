@@ -6,7 +6,7 @@ import { LakebaseClient } from './LakebaseClient.js';
 import { resolveSqlitePath } from './paths.js';
 
 export type { DatabaseClient } from './DatabaseClient.js';
-export type { Repositories } from './repositories/index.js';
+export type { Repositories, WorkspacesRepo, WorkspaceValue } from './repositories/index.js';
 export { settingsToRecord } from './repositories/index.js';
 export { SqliteClient } from './SqliteClient.js';
 
