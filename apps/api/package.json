@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/sql && cp src/sql/*.sql dist/sql/ && mkdir -p dist/notebooks && cp src/notebooks/*.ipynb dist/notebooks/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/sql && cp src/sql/*.sql dist/sql/ && mkdir -p dist/notebooks && cp src/notebooks/* dist/notebooks/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "tsx --test test/*.test.ts"
@@ -17,7 +17,7 @@
     "@aws-sdk/client-cost-explorer": "3.1035.0",
     "@aws-sdk/client-iam": "3.1035.0",
     "@aws-sdk/client-s3": "3.1035.0",
-    "@databricks/appkit": "^0.28.0",
+    "@databricks/appkit": "^0.35.2",
     "@databricks/sdk-experimental": "^0.16.0",
     "@finlake/db": "*",
     "@finlake/shared": "*",
@@ -29,7 +29,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
-    "tsx": "^4.19.2",
+    "tsx": "4.20.6",
     "typescript": "^5.7.3"
   }
 }

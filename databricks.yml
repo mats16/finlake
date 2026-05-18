@@ -15,10 +15,6 @@ targets:
     # mode: development prefixes resources with [dev <user>] to avoid prod collisions.
     default: true
     mode: development
-    workspace:
-      host: ${DATABRICKS_HOST}
 
   prod:
     mode: production
-    workspace:
-      host: ${DATABRICKS_HOST}

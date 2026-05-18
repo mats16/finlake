@@ -8,13 +8,18 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
+  cn,
 } from '@databricks/appkit-ui/react';
 import { Circle, CircleOff, LoaderCircle } from 'lucide-react';
 import { useSqlWarehouses } from '../api/hooks';
 import { useSelectedSqlWarehouse } from '../contexts/SqlWarehouseContext';
 import { useI18n, type TFunction } from '../i18n';
 
-export function SqlWarehouseSelector() {
+interface SqlWarehouseSelectorProps {
+  triggerClassName?: string;
+}
+
+export function SqlWarehouseSelector({ triggerClassName }: SqlWarehouseSelectorProps = {}) {
   const { t } = useI18n();
   const warehouses = useSqlWarehouses();
   const { selectedWarehouseId, setSelectedWarehouseId } = useSelectedSqlWarehouse();
@@ -49,7 +54,10 @@ export function SqlWarehouseSelector() {
       disabled={disabled}
     >
       <SelectTrigger
-        className="w-[280px] [&_.warehouse-detail-badge]:hidden [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:flex-1"
+        className={cn(
+          triggerClassName ?? 'w-[280px]',
+          '[&_.warehouse-detail-badge]:hidden [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:flex-1',
+        )}
         aria-label={t('sqlWarehouse.label')}
       >
         <SelectValue

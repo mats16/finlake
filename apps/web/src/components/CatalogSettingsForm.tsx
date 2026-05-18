@@ -38,6 +38,7 @@ import {
 } from '@finlake/shared';
 import { useI18n, type TFunction } from '../i18n';
 import { useAppSettings, useUpdateAppSettings, type AppSettingsUpdateResponse } from '../api/hooks';
+import { useSelectedSqlWarehouse } from '../contexts/SqlWarehouseContext';
 import { messageOf } from '../pages/Configure/utils';
 
 type Severity = 'success' | 'warning' | 'error';
@@ -95,6 +96,7 @@ export function CatalogSettingsForm({ variant = 'page', onSaved }: CatalogSettin
   const { t } = useI18n();
   const settings = useAppSettings();
   const updateSettings = useUpdateAppSettings();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
 
   const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
   const remoteCatalogUserGroup = catalogUserGroupFromSettings(settings.data?.settings ?? {});
@@ -155,7 +157,7 @@ export function CatalogSettingsForm({ variant = 'page', onSaved }: CatalogSettin
           [CATALOG_USER_GROUP_SETTING_KEY]: catalogUserGroupPayload,
           ...medallionPayload,
         },
-        provision: { createIfMissing },
+        provision: { createIfMissing, warehouseId: selectedWarehouseId ?? undefined },
       },
       {
         onSuccess: (data) => {

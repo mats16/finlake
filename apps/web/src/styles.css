@@ -302,6 +302,13 @@ a {
   color: var(--primary);
 }
 
+.onboarding-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .onboarding-language {
   display: inline-flex;
   min-height: 36px;
@@ -836,6 +843,14 @@ a {
   .onboarding-topbar {
     height: 54px;
     padding: 0 16px;
+  }
+
+  .onboarding-brand span {
+    display: none;
+  }
+
+  .onboarding-topbar-actions {
+    gap: 8px;
   }
 
   .onboarding-heading {

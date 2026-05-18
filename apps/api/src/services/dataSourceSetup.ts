@@ -32,7 +32,9 @@ import { z } from 'zod';
 import {
   buildAppExecutor,
   buildAppWorkspaceClient,
-  buildUserExecutor,
+  buildUserWorkspaceClient,
+  resolveSqlWarehouseId,
+  StatementExecutor,
 } from './statementExecution.js';
 import {
   startPipelineUpdate,
@@ -354,9 +356,11 @@ async function setupFocusDataSourceLocked(
   }
 
   if (isDatabricksProvider(source.providerName)) {
-    await assertCanReadUsageTable(env, userToken as string);
-    await grantAppSystemTableAccess(env, userToken as string, databricksAccountPricesTable);
-    await assertAppCanReadSystemTables(env, databricksAccountPricesTable);
+    const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
+    const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
+    await assertCanReadUsageTable(userExecutor);
+    await grantAppSystemTableAccess(env, userExecutor, databricksAccountPricesTable);
+    await assertAppCanReadSystemTables(env, warehouseId, databricksAccountPricesTable);
   }
 
   const candidateSource: DataSource = {
@@ -456,23 +460,44 @@ function s3ExportDataPath({
   return `${s3ExportPath(s3Bucket, s3Prefix, exportName)}/data`;
 }
 
-async function assertCanReadUsageTable(env: Env, userToken: string): Promise<void> {
-  if (!env.SQL_WAREHOUSE_ID) {
+async function resolveSetupWarehouseId(
+  env: Env,
+  userToken: string,
+  warehouseId?: string,
+): Promise<string> {
+  const wc = buildUserWorkspaceClient(env, userToken);
+  if (!wc) {
     throw new DataSourceSetupError(
-      [
-        'SQL_WAREHOUSE_ID must be configured to verify system.billing.usage access',
-        'before creating the FOCUS pipeline/job.',
-      ].join(' '),
+      'OBO access token + DATABRICKS_HOST required to list SQL warehouses before creating the FOCUS pipeline/job.',
       400,
     );
   }
-  const executor = buildUserExecutor(env, userToken);
-  if (!executor) {
+  const resolved = await resolveSqlWarehouseId(wc, warehouseId);
+  if (!resolved) {
     throw new DataSourceSetupError(
-      'Failed to build Databricks SQL executor for system.billing.usage access check.',
-      500,
+      'No accessible SQL warehouse found. Select a SQL warehouse before creating the FOCUS pipeline/job.',
+      400,
     );
   }
+  return resolved;
+}
+
+function buildSetupUserExecutor(
+  env: Env,
+  userToken: string,
+  warehouseId: string,
+): StatementExecutor {
+  const wc = buildUserWorkspaceClient(env, userToken);
+  if (!wc) {
+    throw new DataSourceSetupError(
+      'OBO access token + DATABRICKS_HOST required to create the FOCUS pipeline/job.',
+      400,
+    );
+  }
+  return new StatementExecutor({ workspaceClient: wc, warehouseId });
+}
+
+async function assertCanReadUsageTable(executor: StatementExecutor): Promise<void> {
   try {
     await executor.run(
       'SELECT 1 AS ok FROM system.billing.usage LIMIT 1',
@@ -495,29 +520,13 @@ async function assertCanReadUsageTable(env: Env, userToken: string): Promise<voi
 
 async function grantAppSystemTableAccess(
   env: Env,
-  userToken: string,
+  executor: StatementExecutor,
   accountPricesTable: string | null,
 ): Promise<void> {
-  if (!env.SQL_WAREHOUSE_ID) {
-    throw new DataSourceSetupError(
-      [
-        'SQL_WAREHOUSE_ID must be configured to grant app service principal',
-        'system table access before creating the shared FOCUS pipeline/job.',
-      ].join(' '),
-      400,
-    );
-  }
   const sp = (env.DATABRICKS_CLIENT_ID ?? '').trim();
   if (!sp) {
     throw new DataSourceSetupError(
       'DATABRICKS_CLIENT_ID must be configured before granting system table access.',
-      400,
-    );
-  }
-  const executor = buildUserExecutor(env, userToken);
-  if (!executor) {
-    throw new DataSourceSetupError(
-      'OBO access token + DATABRICKS_HOST + SQL_WAREHOUSE_ID required to grant system table access.',
       400,
     );
   }
@@ -541,18 +550,10 @@ async function grantAppSystemTableAccess(
 
 async function assertAppCanReadSystemTables(
   env: Env,
+  warehouseId: string,
   accountPricesTable: string | null,
 ): Promise<void> {
-  if (!env.SQL_WAREHOUSE_ID) {
-    throw new DataSourceSetupError(
-      [
-        'SQL_WAREHOUSE_ID must be configured to verify app service principal',
-        'system table access before creating the shared FOCUS pipeline/job.',
-      ].join(' '),
-      400,
-    );
-  }
-  const executor = buildAppExecutor(env);
+  const executor = buildAppExecutor(env, warehouseId);
   if (!executor) {
     throw new DataSourceSetupError(
       'Failed to build Databricks SQL executor for app service principal system.billing.usage access check.',

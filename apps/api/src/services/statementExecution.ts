@@ -1,7 +1,7 @@
 import { WorkspaceClient as SdkWorkspaceClient } from '@databricks/sdk-experimental';
 import { createHash } from 'node:crypto';
 import type { ZodType } from 'zod';
-import type { Env, SqlParam } from '@finlake/shared';
+import type { Env, SqlParam, SqlWarehouse } from '@finlake/shared';
 import { logger } from '../config/logger.js';
 import { sleep } from '../utils/sleep.js';
 
@@ -39,6 +39,17 @@ const DEFAULT_WAIT_TIMEOUT_SEC = 30;
 const DEFAULT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const POLL_INITIAL_DELAY_MS = 500;
 const POLL_MAX_DELAY_MS = 5_000;
+const SQL_WAREHOUSE_SIZE_RANK: Record<string, number> = {
+  '4X-Large': 9,
+  '3X-Large': 8,
+  '2X-Large': 7,
+  'X-Large': 6,
+  Large: 5,
+  Medium: 4,
+  Small: 3,
+  'X-Small': 2,
+  '2X-Small': 1,
+};
 
 type StatementResponse = Awaited<
   ReturnType<WorkspaceClient['statementExecution']['executeStatement']>
@@ -219,6 +230,71 @@ export function buildUserExecutor(
   return new StatementExecutor({ workspaceClient: wc, warehouseId: resolvedWarehouseId });
 }
 
+export async function buildDefaultUserExecutor(
+  env: Env,
+  token: string | undefined,
+  warehouseId?: string,
+): Promise<StatementExecutor | undefined> {
+  if (!token) return undefined;
+  const wc = buildUserWorkspaceClient(env, token);
+  if (!wc) return undefined;
+  const resolvedWarehouseId = await resolveSqlWarehouseId(wc, warehouseId);
+  if (!resolvedWarehouseId) return undefined;
+  return new StatementExecutor({ workspaceClient: wc, warehouseId: resolvedWarehouseId });
+}
+
+export async function listSqlWarehouses(wc: WorkspaceClient): Promise<SqlWarehouse[]> {
+  const items: SqlWarehouse[] = [];
+  for await (const warehouse of wc.warehouses.list({ page_size: 100 })) {
+    const id = warehouse.id?.trim();
+    if (!id) continue;
+    const name = warehouse.name?.trim() || id;
+    items.push({
+      id,
+      name,
+      state: warehouse.state ?? null,
+      clusterSize: warehouse.cluster_size ?? null,
+      warehouseType: warehouse.warehouse_type ?? null,
+      enableServerlessCompute: warehouse.enable_serverless_compute ?? false,
+      isDefault: false,
+    });
+  }
+  items.sort(compareSqlWarehouses);
+  return items;
+}
+
+export async function resolveSqlWarehouseId(
+  wc: WorkspaceClient,
+  warehouseId?: string,
+): Promise<string | undefined> {
+  const requested = warehouseId?.trim();
+  if (requested) return requested;
+  const items = await listSqlWarehouses(wc);
+  return selectDefaultSqlWarehouseId(items) ?? undefined;
+}
+
+export function selectDefaultSqlWarehouseId(items: SqlWarehouse[]): string | null {
+  return (
+    items.find((item) => item.state === 'RUNNING' && item.enableServerlessCompute)?.id ??
+    items.find((item) => item.state === 'RUNNING')?.id ??
+    items.find((item) => item.enableServerlessCompute)?.id ??
+    items[0]?.id ??
+    null
+  );
+}
+
+function compareSqlWarehouses(a: SqlWarehouse, b: SqlWarehouse): number {
+  const runningDelta = Number(b.state === 'RUNNING') - Number(a.state === 'RUNNING');
+  if (runningDelta !== 0) return runningDelta;
+  const sizeDelta = warehouseSizeRank(b.clusterSize) - warehouseSizeRank(a.clusterSize);
+  if (sizeDelta !== 0) return sizeDelta;
+  return a.name.localeCompare(b.name);
+}
+
+function warehouseSizeRank(size: string | null): number {
+  return size ? (SQL_WAREHOUSE_SIZE_RANK[size] ?? 0) : 0;
+}
+
 export function buildAppWorkspaceClient(env: Env): WorkspaceClient | undefined {
   if (!env.DATABRICKS_HOST || !env.DATABRICKS_CLIENT_ID || !env.DATABRICKS_CLIENT_SECRET) {
     return undefined;
@@ -230,11 +306,12 @@ export function buildAppWorkspaceClient(env: Env): WorkspaceClient | undefined {
   });
 }
 
-export function buildAppExecutor(env: Env): StatementExecutor | undefined {
-  if (!env.SQL_WAREHOUSE_ID) return undefined;
+export function buildAppExecutor(env: Env, warehouseId?: string): StatementExecutor | undefined {
+  const resolvedWarehouseId = warehouseId?.trim();
+  if (!resolvedWarehouseId) return undefined;
   const wc = buildAppWorkspaceClient(env);
   if (!wc) return undefined;
-  return new StatementExecutor({ workspaceClient: wc, warehouseId: env.SQL_WAREHOUSE_ID });
+  return new StatementExecutor({ workspaceClient: wc, warehouseId: resolvedWarehouseId });
 }
 
 function snakeToCamel(s: string): string {

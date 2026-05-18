@@ -9,11 +9,12 @@ import {
   SqlWarehouseListResponseSchema,
   type Env,
   type SqlStatementData,
-  type SqlWarehouse,
 } from '@finlake/shared';
 import {
   buildUserExecutor,
   buildUserWorkspaceClient,
+  listSqlWarehouses,
+  selectDefaultSqlWarehouseId,
   type RawStatementResult,
   type StatementExecutor,
   type WorkspaceClient,
@@ -22,18 +23,6 @@ import {
 const StatementIdSchema = z.string().min(1).max(256);
 const RESULT_CACHE_PREFIX = 'sql-result';
 const STATEMENT_CACHE_PREFIX = 'sql-statement';
-const SQL_WAREHOUSE_SIZE_RANK: Record<string, number> = {
-  '4X-Large': 9,
-  '3X-Large': 8,
-  '2X-Large': 7,
-  'X-Large': 6,
-  Large: 5,
-  Medium: 4,
-  Small: 3,
-  'X-Small': 2,
-  '2X-Small': 1,
-};
-
 const WRITE_KEYWORDS = [
   'ALTER',
   'ANALYZE',
@@ -113,24 +102,8 @@ function listWarehousesHandler(
         return;
       }
 
-      const items: SqlWarehouse[] = [];
-      for await (const warehouse of wc.warehouses.list({ page_size: 100 })) {
-        const id = warehouse.id?.trim();
-        if (!id) continue;
-        const name = warehouse.name?.trim() || id;
-        items.push({
-          id,
-          name,
-          state: warehouse.state ?? null,
-          clusterSize: warehouse.cluster_size ?? null,
-          warehouseType: warehouse.warehouse_type ?? null,
-          enableServerlessCompute: warehouse.enable_serverless_compute ?? false,
-          isDefault: false,
-        });
-      }
-      items.sort(compareWarehouses);
-      const defaultWarehouseId =
-        items.find((item) => item.state === 'RUNNING' && item.enableServerlessCompute)?.id ?? null;
+      const items = await listSqlWarehouses(wc);
+      const defaultWarehouseId = selectDefaultSqlWarehouseId(items);
       for (const item of items) {
         item.isDefault = item.id === defaultWarehouseId;
       }
@@ -139,18 +112,6 @@ function listWarehousesHandler(
       next(err);
     }
   };
-}
-
-function compareWarehouses(a: SqlWarehouse, b: SqlWarehouse): number {
-  const runningDelta = Number(b.state === 'RUNNING') - Number(a.state === 'RUNNING');
-  if (runningDelta !== 0) return runningDelta;
-  const sizeDelta = warehouseSizeRank(b.clusterSize) - warehouseSizeRank(a.clusterSize);
-  if (sizeDelta !== 0) return sizeDelta;
-  return a.name.localeCompare(b.name);
-}
-
-function warehouseSizeRank(size: string | null): number {
-  return size ? (SQL_WAREHOUSE_SIZE_RANK[size] ?? 0) : 0;
 }
 
 function submitSqlHandler(

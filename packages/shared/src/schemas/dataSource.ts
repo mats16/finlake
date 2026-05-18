@@ -237,6 +237,7 @@ export const FOCUS_REFRESH_TIMEZONE_DEFAULT = 'UTC';
 export const DataSourceSetupBodySchema = z.object({
   tableName: DataSourceIdentifierSchema.optional(),
   accountPricesTable: z.string().min(1).max(256).optional(),
+  warehouseId: z.string().min(1).max(256).optional(),
 });
 export type DataSourceSetupBody = z.infer<typeof DataSourceSetupBodySchema>;
 

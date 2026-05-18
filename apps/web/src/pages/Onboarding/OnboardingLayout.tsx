@@ -15,6 +15,7 @@ import {
 import { AlertCircle, ArrowLeft, ArrowRight, Check, Globe, Layers } from 'lucide-react';
 import { CATALOG_SETTING_KEY } from '@finlake/shared';
 import { useAppSettings, useRunSharedTransformationJob } from '../../api/hooks';
+import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
 import { useI18n, type Locale } from '../../i18n';
 import { messageOf } from '../Configure/utils';
 
@@ -95,23 +96,30 @@ export function OnboardingLayout() {
           <Layers className="onboarding-brand-icon" aria-hidden="true" />
           <span>{t('appName')}</span>
         </Link>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" className="onboarding-language" aria-label={t('common.language')}>
-              <Globe className="size-4" aria-hidden="true" />
-              <span>{locale === 'ja' ? t('common.japanese') : t('common.english')}</span>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup
-              value={locale}
-              onValueChange={(value) => setLocale(value as Locale)}
-            >
-              <DropdownMenuRadioItem value="en">{t('common.english')}</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="ja">{t('common.japanese')}</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="onboarding-topbar-actions">
+          <SqlWarehouseSelector triggerClassName="w-[220px] sm:w-[260px]" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="onboarding-language"
+                aria-label={t('common.language')}
+              >
+                <Globe className="size-4" aria-hidden="true" />
+                <span>{locale === 'ja' ? t('common.japanese') : t('common.english')}</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup
+                value={locale}
+                onValueChange={(value) => setLocale(value as Locale)}
+              >
+                <DropdownMenuRadioItem value="en">{t('common.english')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="ja">{t('common.japanese')}</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </header>
 
       <main className="onboarding-main">

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isActivePricingRunStatus, isTerminalSqlStatus } from '@finlake/shared';
+import { useSelectedSqlWarehouse } from '../contexts/SqlWarehouseContext';
 import type {
   Budget,
   AdminCleanupResponse,
@@ -55,7 +56,6 @@ import type {
   WorkspaceMappingListResponse,
   WorkspaceMappingUpsertBody,
 } from '@finlake/shared';
-import { useSelectedSqlWarehouse } from '../contexts/SqlWarehouseContext';
 import { apiFetch } from './client';
 import { getSqlStatement, listSqlWarehouses, submitSqlStatement } from './sql';
 
@@ -338,7 +338,7 @@ export interface AppSettingsUpdateResponse extends AppSettingsResponse {
 
 export interface UpdateAppSettingsArgs {
   settings: Record<string, string>;
-  provision?: { createIfMissing?: boolean };
+  provision?: { createIfMissing?: boolean; warehouseId?: string };
 }
 
 export function useAppSettings() {
@@ -657,13 +657,19 @@ export function useDeleteDataSource() {
 
 export function useSetupDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
-    mutationFn: ({ key, body }: { key: DataSourceKey; body: DataSourceSetupBody }) =>
-      apiFetch<DataSourceSetupResult>(dsConfigPath(key, '/setup'), {
+    mutationFn: ({ key, body }: { key: DataSourceKey; body: DataSourceSetupBody }) => {
+      const effectiveBody =
+        selectedWarehouseId && !body.warehouseId
+          ? { ...body, warehouseId: selectedWarehouseId }
+          : body;
+      return apiFetch<DataSourceSetupResult>(dsConfigPath(key, '/setup'), {
         method: 'POST',
-        body: JSON.stringify(body),
-      }),
+        body: JSON.stringify(effectiveBody),
+      });
+    },
     onSuccess: (data) => {
       if (invalidateOnSuccess) {
         qc.invalidateQueries({ queryKey: dataSourceQueryKey(data.dataSourceKey) });

@@ -46,7 +46,7 @@ function loadDotenvFiles(): void {
   }
 }
 
-function findRepoRoot(start: string): string | undefined {
+export function findRepoRoot(start: string): string | undefined {
   let dir = start;
   for (let i = 0; i < 8; i++) {
     if (fs.existsSync(path.join(dir, 'turbo.json'))) {
