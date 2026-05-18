@@ -44,6 +44,14 @@ export function fileNameFromPath(path: string): string {
   return parts.at(-1) ?? path;
 }
 
+export function storageCredentialUrl(
+  workspaceUrl: string | null,
+  storageCredentialName: string | null,
+): string | null {
+  if (!workspaceUrl || !storageCredentialName) return null;
+  return `${workspaceUrl.replace(/\/$/, '')}/explore/credentials/${encodeURIComponent(storageCredentialName)}`;
+}
+
 export function volumeFileUrl(workspaceUrl: string | null, volumePath: string): string | null {
   if (!workspaceUrl) return null;
   const parts = volumePath.split('/').filter(Boolean);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Alert,
@@ -25,19 +25,26 @@ import {
   KeyRound,
   MoreHorizontal,
   Plug,
-  Settings,
   ShieldCheck,
   X,
 } from 'lucide-react';
 import {
+  CATALOG_SETTING_KEY,
   dataSourceKeyString,
   isAwsProvider,
   isDatabricksProvider,
+  medallionSchemaNamesFromSettings,
   toDataSourceKey,
+  unquotedFqn,
   type DataSource,
   type ServiceCredentialSummary,
 } from '@finlake/shared';
-import { useCreateServiceCredential, useDataSources, useDeleteDataSource } from '../../api/hooks';
+import {
+  useAppSettings,
+  useCreateServiceCredential,
+  useDataSources,
+  useDeleteDataSource,
+} from '../../api/hooks';
 import { useI18n, type Locale } from '../../i18n';
 import { AwsFocusSection, DataSourceConfigurator, FocusViewSection } from './DataSourceDrawer';
 import { VendorLogo } from './VendorLogo';
@@ -95,6 +102,16 @@ function formatUpdatedAt(value: string, locale: Locale): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+const EMPTY_SETTINGS: Record<string, string> = {};
+
+function dataSourceTableDisplayName(row: DataSource, settings: Record<string, string>): string {
+  const catalog = settings[CATALOG_SETTING_KEY]?.trim();
+  const silverSchema = medallionSchemaNamesFromSettings(settings).silver;
+  return catalog
+    ? unquotedFqn(catalog, silverSchema, row.tableName)
+    : `${silverSchema}.${row.tableName}`;
 }
 
 function IntegrationHeader({ templateId }: { templateId: 'aws' | 'databricks_focus13' }) {
@@ -298,20 +315,6 @@ export function AwsIntegrationDetail() {
               if (selectedKey === dataSourceKeyString(row)) setSelectedKey(null);
             }}
           />
-          {selectedRow ? (
-            <section className="border-border grid gap-4 rounded-md border p-4">
-              <h4 className="m-0 text-sm font-semibold">
-                {t('dataSources.detail.selectedSettings', {
-                  account: awsAccountIdFor(selectedRow),
-                })}
-              </h4>
-              <DataSourceConfigurator
-                row={selectedRow}
-                onClose={() => setSelectedKey(null)}
-                showDelete={false}
-              />
-            </section>
-          ) : null}
         </div>
       ) : draft ? (
         <div className="grid gap-5">
@@ -358,7 +361,79 @@ export function AwsIntegrationDetail() {
         artifacts={setupArtifacts}
         onClose={() => setSetupModalCredential(null)}
       />
+      {selectedRow ? (
+        <AwsAccountSettingsSheet row={selectedRow} onClose={() => setSelectedKey(null)} />
+      ) : null}
     </>
+  );
+}
+
+function AwsAccountSettingsSheet({ row, onClose }: { row: DataSource; onClose: () => void }) {
+  const { t } = useI18n();
+  const [shown, setShown] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+
+  const requestClose = useCallback(() => {
+    setShown(false);
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(onClose, 180);
+  }, [onClose]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setShown(true));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') requestClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [requestClose]);
+
+  return (
+    <div
+      className={cn(
+        'fixed inset-0 z-[60] flex items-end justify-center bg-black/50 px-4 pt-12 transition-opacity duration-200',
+        shown ? 'opacity-100' : 'opacity-0',
+      )}
+      role="presentation"
+      onMouseDown={requestClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="aws-account-settings-sheet-title"
+        className={cn(
+          'bg-background border-border max-h-[86vh] w-full max-w-5xl overflow-y-auto rounded-t-xl border px-5 pt-5 pb-6 shadow-xl transition-transform duration-200 ease-out',
+          shown ? 'translate-y-0' : 'translate-y-full',
+        )}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h4 id="aws-account-settings-sheet-title" className="m-0 text-base font-semibold">
+              {t('dataSources.detail.selectedSettings', {
+                account: awsAccountIdFor(row),
+              })}
+            </h4>
+          </div>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/40 grid size-8 place-items-center rounded-md transition-colors"
+            aria-label={t('common.close')}
+            onClick={requestClose}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <DataSourceConfigurator row={row} onClose={requestClose} />
+      </div>
+    </div>
   );
 }
 
@@ -642,6 +717,8 @@ function AwsAccountsTable({
 }) {
   const { t } = useI18n();
   const deleteDs = useDeleteDataSource();
+  const appSettings = useAppSettings();
+  const settings = appSettings.data?.settings ?? EMPTY_SETTINGS;
   const deleteErrorMessage = messageOf(deleteDs.error);
 
   const onRemove = (row: DataSource) => {
@@ -673,8 +750,7 @@ function AwsAccountsTable({
             <TableRow>
               <TableHead>{t('dataSources.detail.columns.account')}</TableHead>
               <TableHead>{t('dataSources.columns.table')}</TableHead>
-              <TableHead>{t('dataSources.detail.columns.costsAggregation')}</TableHead>
-              <TableHead>{t('dataSources.detail.columns.perResourceCosts')}</TableHead>
+              <TableHead>{t('dataSources.detail.columns.storageCredential')}</TableHead>
               <TableHead>{t('dataSources.detail.columns.lastUpdated')}</TableHead>
               <TableHead>{t('dataSources.detail.columns.status')}</TableHead>
               <TableHead className="text-right" aria-label={t('dataSources.columns.actions')} />
@@ -682,19 +758,24 @@ function AwsAccountsTable({
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={dataSourceKeyString(row)}>
+              <TableRow
+                key={dataSourceKeyString(row)}
+                className="cursor-pointer"
+                onClick={() => onConfigure(row)}
+              >
                 <TableCell>
                   <div className="min-w-40 font-medium">{awsAccountIdFor(row)}</div>
                 </TableCell>
                 <TableCell>
-                  <span className="text-muted-foreground font-mono text-xs">{row.tableName}</span>
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {dataSourceTableDisplayName(row, settings)}
+                  </span>
                 </TableCell>
                 <TableCell>
-                  {row.enabled
-                    ? t('dataSources.badges.enabled')
-                    : t('dataSources.badges.setupRequired')}
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {configString(row.config, 'storageCredentialName') || '-'}
+                  </span>
                 </TableCell>
-                <TableCell>-</TableCell>
                 <TableCell>{formatUpdatedAt(row.updatedAt, locale)}</TableCell>
                 <TableCell>
                   {isRegisteredAwsSource(row)
@@ -703,18 +784,6 @@ function AwsAccountsTable({
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="size-8"
-                      aria-label={t('dataSources.detail.configureAccount', {
-                        account: awsAccountIdFor(row),
-                      })}
-                      onClick={() => onConfigure(row)}
-                    >
-                      <Settings className="size-4" aria-hidden="true" />
-                    </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -723,6 +792,7 @@ function AwsAccountsTable({
                           size="icon"
                           className="size-8"
                           aria-label={t('dataSources.detail.moreActions')}
+                          onClick={(event) => event.stopPropagation()}
                         >
                           <MoreHorizontal className="size-4" aria-hidden="true" />
                         </Button>
@@ -739,7 +809,10 @@ function AwsAccountsTable({
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           disabled={deleteDs.isPending}
-                          onClick={() => onRemove(row)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRemove(row);
+                          }}
                         >
                           {t('dataSources.detail.remove')}
                         </DropdownMenuItem>

@@ -987,7 +987,7 @@ export const ja: Dictionary = {
     detail: {
       eyebrow: 'Integrations',
       backToIntegrations: 'Integrations に戻る',
-      docs: 'Docs',
+      docs: 'ドキュメント',
       searchAws: 'アカウント ID、ARN、名前で検索...',
       connected: '接続済み',
       awsEmpty: '表示できる AWS アカウントがありません。',
@@ -1029,11 +1029,10 @@ export const ja: Dictionary = {
         },
       },
       columns: {
-        account: 'Account',
-        costsAggregation: 'Costs Aggregation',
-        perResourceCosts: 'Per-Resource Costs',
-        lastUpdated: 'Last Updated',
-        status: 'Status',
+        account: 'アカウント ID',
+        storageCredential: 'ストレージ資格情報',
+        lastUpdated: '最終更新',
+        status: 'ステータス',
       },
     },
     name: {
@@ -1055,12 +1054,14 @@ export const ja: Dictionary = {
       tier: 'ティア（スキーマ）',
       tableName: 'テーブル名',
       accountPrices: 'アカウント別料金テーブル',
+      accountPricesHelp:
+        '契約割引やプロモーションが反映された、アカウント別の実効単価を参照します。',
       cron: 'Cron スケジュール (Quartz)',
       timezone: 'タイムゾーン',
       focusViewTarget: 'ビューの配置先',
       createView: 'FOCUS ビューを作成',
       setupAndSchedule: 'セットアップ',
-      updateSchedule: '更新',
+      updateSchedule: 'パイプラインを更新',
       runJob: 'パイプラインを実行',
       runOk: 'Pipeline update #{updateId} を開始しました。',
       jobScheduled: 'スケジュール済ジョブ: #{id}',
@@ -1069,6 +1070,7 @@ export const ja: Dictionary = {
       resourcesTitle: 'Databricks リソース',
       jobResource: 'Job',
       pipelineResource: 'Lakeflow Spark 宣言型パイプライン',
+      storageCredentialResource: 'ストレージ資格情報',
       tableResource: 'Table',
       resourceProgress: '作成状況',
       resourceSteps: {
@@ -1082,10 +1084,8 @@ export const ja: Dictionary = {
         skipped: 'スキップ',
         error: '失敗',
       },
-      setupOk:
-        'ジョブ #{jobId} をスケジュールしました。次回実行時に SQL ウェアハウスで {fqn} が作成・更新されます。',
-      updateOk:
-        'ジョブ #{jobId} の設定を更新しました。次回実行時に SQL ウェアハウスで {fqn} が作成・更新されます。',
+      setupOk: 'パイプラインを設定しました。スケジュール実行時に {fqn} が作成・更新されます。',
+      updateOk: 'パイプラインを更新しました。スケジュール実行時に {fqn} が作成・更新されます。',
       saveTarget: '設定を保存',
       catalogMissing: '先に「カタログ」でメインカタログを設定してください。',
     },

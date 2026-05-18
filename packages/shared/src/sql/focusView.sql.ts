@@ -11,7 +11,7 @@
 
 export const FOCUS_VIEW_SCHEMA_DEFAULT = 'focus';
 export const FOCUS_VIEW_TABLE_DEFAULT = 'databricks_usage';
-export const ACCOUNT_PRICES_DEFAULT = 'system.billing.list_prices';
+export const ACCOUNT_PRICES_DEFAULT = 'system.billing.account_prices';
 
 /**
  * Medallion schemas auto-provisioned alongside the catalog. The layer keys stay

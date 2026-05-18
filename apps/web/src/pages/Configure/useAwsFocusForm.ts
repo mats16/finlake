@@ -316,6 +316,7 @@ export function useAwsFocusForm(row: DataSource | null, options: UseAwsFocusForm
   const remoteAwsAccountId = row?.accountId ?? configString(remoteConfig, 'awsAccountId');
   const remoteExternalLocationName = configString(remoteConfig, 'externalLocationName');
   const remoteExternalLocationUrl = configString(remoteConfig, 'externalLocationUrl');
+  const remoteStorageCredentialName = configString(remoteConfig, 'storageCredentialName');
   const remoteExportName = configString(remoteConfig, 'exportName');
   const remoteS3Bucket = configString(remoteConfig, 's3Bucket');
   const remoteS3Prefix = configString(remoteConfig, 's3Prefix');
@@ -1045,6 +1046,7 @@ export function useAwsFocusForm(row: DataSource | null, options: UseAwsFocusForm
 
     // Transformation section state
     remoteCatalog,
+    remoteStorageCredentialName,
     tableName,
     setTableName,
     pipelineId,

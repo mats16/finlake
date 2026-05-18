@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -20,6 +20,9 @@ import {
   SheetHeader,
   SheetTitle,
   Spinner,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
   cn,
 } from '@databricks/appkit-ui/react';
 import { Check, ExternalLink, Info, Pencil, X } from 'lucide-react';
@@ -52,7 +55,7 @@ import { useI18n } from '../../i18n';
 import { displayNameForRow, findTemplateById, findTemplateForRow } from './dataSourceCatalog';
 import type { DatabricksFocusDraft } from './DataSources';
 import { type AwsFocusDraft, type AwsSetupMode, useAwsFocusForm } from './useAwsFocusForm';
-import { catalogTableUrl } from './utils';
+import { catalogTableUrl, configString, storageCredentialUrl } from './utils';
 
 const AWS_BCM_DATA_EXPORTS_URL =
   'https://us-east-1.console.aws.amazon.com/costmanagement/home#/bcm-data-exports';
@@ -159,32 +162,33 @@ export function DataSourceConfigurator({
     onClose();
   };
 
+  const deleteAction = showDelete ? (
+    <Button
+      type="button"
+      className="warning-action-button"
+      disabled={deleteDs.isPending}
+      onClick={onDelete}
+    >
+      {deleteDs.isPending ? <Spinner /> : null}
+      {t('dataSources.delete')}
+    </Button>
+  ) : null;
+
   return (
     <>
       {template?.id === 'databricks_focus13' ? (
-        <FocusViewSection row={row} />
+        <FocusViewSection row={row} actionEnd={deleteAction} />
       ) : template?.id === 'aws' ? (
-        <AwsFocusSection row={row} />
+        <AwsFocusSection row={row} actionEnd={deleteAction} />
       ) : (
-        <Alert>
-          <Info />
-          <AlertDescription>{t('dataSources.drawer.notImplemented')}</AlertDescription>
-        </Alert>
-      )}
-
-      {showDelete ? (
-        <div className="flex justify-end pt-2">
-          <Button
-            type="button"
-            className="warning-action-button"
-            disabled={deleteDs.isPending}
-            onClick={onDelete}
-          >
-            {deleteDs.isPending ? <Spinner /> : null}
-            {t('dataSources.delete')}
-          </Button>
+        <div className="max-w-5xl space-y-4">
+          <Alert>
+            <Info />
+            <AlertDescription>{t('dataSources.drawer.notImplemented')}</AlertDescription>
+          </Alert>
+          {deleteAction ? <div className="flex justify-end">{deleteAction}</div> : null}
         </div>
-      ) : null}
+      )}
     </>
   );
 }
@@ -288,6 +292,7 @@ export function AwsFocusSection({
   hideSetupMode,
   onCreateProgressOpenChange,
   onCreateProgressCompleteChange,
+  actionEnd,
 }: {
   row: DataSource | null;
   draft?: AwsFocusDraft;
@@ -297,6 +302,7 @@ export function AwsFocusSection({
   hideSetupMode?: boolean;
   onCreateProgressOpenChange?: (open: boolean) => void;
   onCreateProgressCompleteChange?: (complete: boolean) => void;
+  actionEnd?: ReactNode;
 }) {
   const form = useAwsFocusForm(row, {
     draft,
@@ -308,8 +314,15 @@ export function AwsFocusSection({
   });
   return (
     <>
-      <AwsSourceForm form={form} hideSetupMode={hideSetupMode} />
-      {form.persisted && form.selectedS3Url ? <AwsTransformationSection form={form} /> : null}
+      {form.persisted && form.selectedS3Url ? (
+        <>
+          <AwsTransformationSection form={form} />
+          <AwsSourceForm form={form} hideSetupMode={hideSetupMode} />
+          <AwsPipelineActions form={form} actionEnd={actionEnd} />
+        </>
+      ) : (
+        <AwsSourceForm form={form} hideSetupMode={hideSetupMode} />
+      )}
     </>
   );
 }
@@ -329,9 +342,10 @@ function AwsSourceForm({
     <>
       <div className={hideSetupMode && form.createProgressComplete ? 'hidden' : undefined}>
         <AwsSourceFormShell
+          flat={form.registered}
           hideSetupMode={hideSetupMode}
           header={
-            <CardHeader>
+            form.registered ? null : (
               <div className="flex items-center gap-2">
                 <CardTitle className="text-sm">{t('dataSources.aws.title')}</CardTitle>
                 <a
@@ -344,7 +358,7 @@ function AwsSourceForm({
                   <ExternalLink className="size-3.5" aria-hidden="true" />
                 </a>
               </div>
-            </CardHeader>
+            )
           }
         >
           <div className="grid gap-3">
@@ -496,7 +510,7 @@ function AwsSourceForm({
                 </div>
 
                 {form.exportDestinationPreview ? (
-                  <div className="text-muted-foreground break-all text-xs">
+                  <div className="text-muted-foreground mt-2 break-all text-xs">
                     {t('dataSources.aws.exportDestination')}:{' '}
                     <span className="text-foreground font-mono">
                       {form.exportDestinationPreview}
@@ -577,19 +591,30 @@ function AwsSourceForm({
 }
 
 function AwsSourceFormShell({
+  flat,
   hideSetupMode,
   header,
   children,
 }: {
+  flat?: boolean;
   hideSetupMode?: boolean;
-  header: React.ReactNode;
+  header: React.ReactNode | null;
   children: React.ReactNode;
 }) {
   if (hideSetupMode) return <>{children}</>;
 
+  if (flat) {
+    return (
+      <section className="space-y-4">
+        {header ? <div>{header}</div> : null}
+        {children}
+      </section>
+    );
+  }
+
   return (
     <Card>
-      {header}
+      {header ? <CardHeader>{header}</CardHeader> : null}
       <CardContent>{children}</CardContent>
     </Card>
   );
@@ -1015,20 +1040,32 @@ function S3PrefixInput({
 }
 
 function AwsTransformationSection({ form }: { form: ReturnType<typeof useAwsFocusForm> }) {
+  return (
+    <section className="py-1">
+      <div className="max-w-5xl pb-3">
+        <DatabricksResourceLinks
+          workspaceUrl={form.workspaceUrl}
+          pipelineId={form.pipelineId}
+          tableFqn={form.sourceSetup && form.remoteCatalog ? form.fqn : null}
+          storageCredentialName={form.remoteStorageCredentialName}
+        />
+      </div>
+    </section>
+  );
+}
+
+function AwsPipelineActions({
+  form,
+  actionEnd,
+}: {
+  form: ReturnType<typeof useAwsFocusForm>;
+  actionEnd?: ReactNode;
+}) {
   const { t } = useI18n();
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">{t('dataSources.systemTables.title')}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="grid gap-1 text-xs sm:col-span-2">
-            <span className="text-muted-foreground">{t('dataSources.systemTables.tableName')}</span>
-            <Input value={form.tableName} disabled />
-          </label>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+    <div className="max-w-5xl space-y-4 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             disabled={form.setupDisabled}
@@ -1055,57 +1092,53 @@ function AwsTransformationSection({ form }: { form: ReturnType<typeof useAwsFocu
             </Button>
           ) : null}
         </div>
-        <DatabricksResourceLinks
-          workspaceUrl={form.workspaceUrl}
-          pipelineId={form.pipelineId}
-          tableFqn={form.sourceSetup && form.remoteCatalog ? form.fqn : null}
-        />
-        {!form.remoteCatalog ? (
-          <Alert className="mt-3">
-            <Info />
-            <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
-          </Alert>
-        ) : null}
-        {form.result ? (
-          <Alert className="mt-3">
-            <Info />
-            <AlertDescription>
-              {t(
-                form.hadScheduleBeforeSetup
-                  ? 'dataSources.systemTables.updateOk'
-                  : 'dataSources.systemTables.setupOk',
-                {
-                  fqn: form.result.fqn,
-                  jobId: String(form.result.jobId),
-                },
-              )}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {form.runJob.data ? (
-          <Alert className="mt-3">
-            <Info />
-            <AlertDescription>
-              {t('dataSources.systemTables.runOk', {
-                updateId: form.runJob.data.updateId,
-              })}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {form.setupDs.error ? (
-          <Alert className="mt-3" variant="destructive">
-            <Info />
-            <AlertDescription>{(form.setupDs.error as Error).message}</AlertDescription>
-          </Alert>
-        ) : null}
-        {form.runJob.error ? (
-          <Alert className="mt-3" variant="destructive">
-            <Info />
-            <AlertDescription>{(form.runJob.error as Error).message}</AlertDescription>
-          </Alert>
-        ) : null}
-      </CardContent>
-    </Card>
+        {actionEnd ? <div className="ml-auto">{actionEnd}</div> : null}
+      </div>
+      {!form.remoteCatalog ? (
+        <Alert className="mt-3">
+          <Info />
+          <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
+        </Alert>
+      ) : null}
+      {form.result ? (
+        <Alert className="mt-3">
+          <Info />
+          <AlertDescription>
+            {t(
+              form.hadScheduleBeforeSetup
+                ? 'dataSources.systemTables.updateOk'
+                : 'dataSources.systemTables.setupOk',
+              {
+                fqn: form.result.fqn,
+                jobId: String(form.result.jobId),
+              },
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {form.runJob.data ? (
+        <Alert className="mt-3">
+          <Info />
+          <AlertDescription>
+            {t('dataSources.systemTables.runOk', {
+              updateId: form.runJob.data.updateId,
+            })}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {form.setupDs.error ? (
+        <Alert className="mt-3" variant="destructive">
+          <Info />
+          <AlertDescription>{(form.setupDs.error as Error).message}</AlertDescription>
+        </Alert>
+      ) : null}
+      {form.runJob.error ? (
+        <Alert className="mt-3" variant="destructive">
+          <Info />
+          <AlertDescription>{(form.runJob.error as Error).message}</AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
   );
 }
 
@@ -1154,10 +1187,12 @@ export function FocusViewSection({
   row,
   draft,
   onCreated,
+  actionEnd,
 }: {
   row: DataSource | null;
   draft?: DatabricksFocusDraft;
   onCreated?: (row: DataSource) => void;
+  actionEnd?: ReactNode;
 }) {
   const { t } = useI18n();
   const qc = useQueryClient();
@@ -1205,6 +1240,7 @@ export function FocusViewSection({
   const fqn = remoteCatalog
     ? unquotedFqn(remoteCatalog, silverSchema, tableName)
     : `${silverSchema}.${tableName}`;
+  const hasResources = Boolean(isSetup && (pipelineId || fqn));
 
   const onSetup = async () => {
     if (setupInFlight || createDs.isPending || setupDs.isPending) return;
@@ -1318,118 +1354,128 @@ export function FocusViewSection({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">{t('dataSources.systemTables.title')}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="grid gap-1 text-xs sm:col-span-2">
-            <span className="text-muted-foreground">{t('dataSources.systemTables.tableName')}</span>
-            <Input value={tableName} onChange={(e) => setTableName(e.target.value)} />
-          </label>
-          <label className="grid gap-1 text-xs sm:col-span-2">
-            <span className="text-muted-foreground">
-              {t('dataSources.systemTables.accountPrices')}
-            </span>
-            <Input
-              value={accountPrices}
-              onChange={(e) => setAccountPrices(e.target.value)}
-              placeholder={ACCOUNT_PRICES_DEFAULT}
-            />
-          </label>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            disabled={setupBusy || !remoteCatalog || tableName.trim() === ''}
-            onClick={onSetup}
-            className={isSetup ? 'success-action-button' : undefined}
-          >
-            {setupBusy ? <Spinner /> : null}
-            {t(
-              isSetup
-                ? 'dataSources.systemTables.updateSchedule'
-                : 'dataSources.systemTables.setupAndSchedule',
-            )}
-          </Button>
-          {row?.enabled && pipelineId ? (
-            <Button
-              type="button"
-              variant="secondary"
-              className="hover:bg-(--secondary-foreground) hover:text-(--secondary)"
-              disabled={runJob.isPending}
-              onClick={onRunJob}
-            >
-              {runJob.isPending ? <Spinner /> : null}
-              {t('dataSources.systemTables.runJob')}
-            </Button>
-          ) : null}
-        </div>
+    <section className="py-1">
+      <div className="max-w-5xl space-y-4">
         <DatabricksResourceLinks
           workspaceUrl={workspaceUrl}
           pipelineId={pipelineId}
           tableFqn={isSetup && remoteCatalog ? fqn : null}
+          storageCredentialName={
+            row ? configString(row.config, 'storageCredentialName') || null : null
+          }
         />
-        <DatabricksSetupProgressModal
-          open={setupProgressModalOpen}
-          steps={setupSteps}
-          error={setupErrorMessage}
-          closeDisabled={setupBusy}
-          onClose={closeSetupProgressModal}
-        />
-        {!remoteCatalog ? (
-          <Alert className="mt-3">
-            <Info />
-            <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
-          </Alert>
-        ) : null}
-        {result ? (
-          <Alert className="mt-3">
-            <Info />
-            <AlertDescription>
-              {t(
-                lastSetupWasUpdate
-                  ? 'dataSources.systemTables.updateOk'
-                  : 'dataSources.systemTables.setupOk',
-                {
-                  fqn: result.fqn,
-                  jobId: String(result.jobId),
-                },
-              )}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {runJob.data ? (
-          <Alert className="mt-3">
-            <Info />
-            <AlertDescription>
-              {t('dataSources.systemTables.runOk', {
-                updateId: runJob.data.updateId,
-              })}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {createDs.error ? (
-          <Alert className="mt-3" variant="destructive">
-            <Info />
-            <AlertDescription>{(createDs.error as Error).message}</AlertDescription>
-          </Alert>
-        ) : null}
-        {setupDs.error ? (
-          <Alert className="mt-3" variant="destructive">
-            <Info />
-            <AlertDescription>{(setupDs.error as Error).message}</AlertDescription>
-          </Alert>
-        ) : null}
-        {runJob.error ? (
-          <Alert className="mt-3" variant="destructive">
-            <Info />
-            <AlertDescription>{(runJob.error as Error).message}</AlertDescription>
-          </Alert>
-        ) : null}
-      </CardContent>
-    </Card>
+        <div className={cn('space-y-4', hasResources && 'pt-3')}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 text-xs sm:col-span-2">
+              <span className="text-muted-foreground inline-flex items-center gap-1.5">
+                {t('dataSources.systemTables.accountPrices')}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info
+                      className="text-muted-foreground size-3.5 cursor-help"
+                      aria-label={t('dataSources.systemTables.accountPricesHelp')}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent>{t('dataSources.systemTables.accountPricesHelp')}</TooltipContent>
+                </Tooltip>
+              </span>
+              <Input
+                value={accountPrices}
+                onChange={(e) => setAccountPrices(e.target.value)}
+                placeholder={ACCOUNT_PRICES_DEFAULT}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                disabled={setupBusy || !remoteCatalog || tableName.trim() === ''}
+                onClick={onSetup}
+                className={isSetup ? 'success-action-button' : undefined}
+              >
+                {setupBusy ? <Spinner /> : null}
+                {t(
+                  isSetup
+                    ? 'dataSources.systemTables.updateSchedule'
+                    : 'dataSources.systemTables.setupAndSchedule',
+                )}
+              </Button>
+              {row?.enabled && pipelineId ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="hover:bg-(--secondary-foreground) hover:text-(--secondary)"
+                  disabled={runJob.isPending}
+                  onClick={onRunJob}
+                >
+                  {runJob.isPending ? <Spinner /> : null}
+                  {t('dataSources.systemTables.runJob')}
+                </Button>
+              ) : null}
+            </div>
+            {actionEnd ? <div className="ml-auto">{actionEnd}</div> : null}
+          </div>
+          <DatabricksSetupProgressModal
+            open={setupProgressModalOpen}
+            steps={setupSteps}
+            error={setupErrorMessage}
+            closeDisabled={setupBusy}
+            onClose={closeSetupProgressModal}
+          />
+          {!remoteCatalog ? (
+            <Alert className="mt-3">
+              <Info />
+              <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
+            </Alert>
+          ) : null}
+          {result ? (
+            <Alert className="mt-3">
+              <Info />
+              <AlertDescription>
+                {t(
+                  lastSetupWasUpdate
+                    ? 'dataSources.systemTables.updateOk'
+                    : 'dataSources.systemTables.setupOk',
+                  {
+                    fqn: result.fqn,
+                    jobId: String(result.jobId),
+                  },
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {runJob.data ? (
+            <Alert className="mt-3">
+              <Info />
+              <AlertDescription>
+                {t('dataSources.systemTables.runOk', {
+                  updateId: runJob.data.updateId,
+                })}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {createDs.error ? (
+            <Alert className="mt-3" variant="destructive">
+              <Info />
+              <AlertDescription>{(createDs.error as Error).message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {setupDs.error ? (
+            <Alert className="mt-3" variant="destructive">
+              <Info />
+              <AlertDescription>{(setupDs.error as Error).message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {runJob.error ? (
+            <Alert className="mt-3" variant="destructive">
+              <Info />
+              <AlertDescription>{(runJob.error as Error).message}</AlertDescription>
+            </Alert>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1467,20 +1513,29 @@ function DatabricksResourceLinks({
   workspaceUrl,
   pipelineId,
   tableFqn,
+  storageCredentialName,
 }: {
   workspaceUrl: string | null;
   pipelineId: string | null;
   tableFqn: string | null;
+  storageCredentialName?: string | null;
 }) {
   const { t } = useI18n();
-  if (!tableFqn && !pipelineId) return null;
+  if (!tableFqn && !pipelineId && !storageCredentialName) return null;
 
   return (
-    <div className="border-border bg-background/35 mt-4 rounded-md border p-3">
+    <div className="border-border bg-muted/20 rounded-md border p-3">
       <div className="text-muted-foreground mb-2 text-xs font-medium">
         {t('dataSources.systemTables.resourcesTitle')}
       </div>
       <div className="grid grid-cols-1 gap-2">
+        {tableFqn ? (
+          <ResourceLink
+            label={t('dataSources.systemTables.tableResource')}
+            id={tableFqn}
+            href={catalogTableUrl(workspaceUrl, tableFqn)}
+          />
+        ) : null}
         {pipelineId ? (
           <ResourceLink
             label={t('dataSources.systemTables.pipelineResource')}
@@ -1488,11 +1543,11 @@ function DatabricksResourceLinks({
             href={databricksPipelineUrl(workspaceUrl, pipelineId)}
           />
         ) : null}
-        {tableFqn ? (
+        {storageCredentialName ? (
           <ResourceLink
-            label={t('dataSources.systemTables.tableResource')}
-            id={tableFqn}
-            href={catalogTableUrl(workspaceUrl, tableFqn)}
+            label={t('dataSources.systemTables.storageCredentialResource')}
+            id={storageCredentialName}
+            href={storageCredentialUrl(workspaceUrl, storageCredentialName)}
           />
         ) : null}
       </div>
@@ -1512,7 +1567,7 @@ function ResourceLink({ href, label, id }: { href: string | null; label: string;
   );
 
   const className =
-    'border-border bg-card/70 hover:border-primary focus-visible:border-primary flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-left transition-colors';
+    'border-border bg-background hover:border-primary focus-visible:border-primary flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-left transition-colors';
 
   if (!href) {
     return <div className={className}>{content}</div>;

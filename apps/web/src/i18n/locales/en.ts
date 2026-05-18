@@ -1019,9 +1019,8 @@ export const en = {
         },
       },
       columns: {
-        account: 'Account',
-        costsAggregation: 'Costs Aggregation',
-        perResourceCosts: 'Per-Resource Costs',
+        account: 'Account ID',
+        storageCredential: 'Storage Credential',
         lastUpdated: 'Last Updated',
         status: 'Status',
       },
@@ -1045,12 +1044,14 @@ export const en = {
       tier: 'Tier (schema)',
       tableName: 'Table name',
       accountPrices: 'Account prices table',
+      accountPricesHelp:
+        'Uses account-specific rates with contracted discounts and promotions reflected.',
       cron: 'Cron schedule (Quartz)',
       timezone: 'Timezone',
       focusViewTarget: 'View target',
       createView: 'Create FOCUS view',
       setupAndSchedule: 'Setup',
-      updateSchedule: 'Update',
+      updateSchedule: 'Update pipeline',
       runJob: 'Run pipeline',
       runOk: 'Pipeline update #{updateId} started.',
       jobScheduled: 'Scheduled job: #{id}',
@@ -1059,6 +1060,7 @@ export const en = {
       resourcesTitle: 'Databricks resources',
       jobResource: 'Job',
       pipelineResource: 'Lakeflow Spark Declarative Pipeline',
+      storageCredentialResource: 'Storage Credential',
       tableResource: 'Table',
       resourceProgress: 'Creation progress',
       resourceSteps: {
@@ -1072,10 +1074,8 @@ export const en = {
         skipped: 'Skipped',
         error: 'Failed',
       },
-      setupOk:
-        'Job #{jobId} scheduled. The next run will create or refresh {fqn} on the SQL warehouse.',
-      updateOk:
-        'Job #{jobId} updated. The next run will create or refresh {fqn} on the SQL warehouse.',
+      setupOk: 'Pipeline configured. Scheduled runs will create or refresh {fqn}.',
+      updateOk: 'Pipeline updated. Scheduled runs will create or refresh {fqn}.',
       saveTarget: 'Save target',
       catalogMissing: 'Set the main catalog in Catalog first.',
     },
