@@ -52,6 +52,7 @@ export const en = {
       desc: 'Connect the cost feeds FinLake will normalize and refresh for analysis.',
       eyebrow: 'Data sources',
       backToCatalog: 'Back to data sources',
+      runningJob: 'Running job',
     },
     pricing: {
       title: 'Connect Pricing Data',

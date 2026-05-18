@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
+  Alert,
+  AlertDescription,
   Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
+  Spinner,
   cn,
 } from '@databricks/appkit-ui/react';
-import { ArrowLeft, ArrowRight, Check, Globe, Layers } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Check, Globe, Layers } from 'lucide-react';
 import { CATALOG_SETTING_KEY } from '@finlake/shared';
-import { useAppSettings } from '../../api/hooks';
+import { useAppSettings, useRunSharedTransformationJob } from '../../api/hooks';
 import { useI18n, type Locale } from '../../i18n';
+import { messageOf } from '../Configure/utils';
 
 const ONBOARDING_STEPS = [
   {
@@ -46,6 +50,7 @@ export function OnboardingLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const appSettings = useAppSettings();
+  const runSharedJob = useRunSharedTransformationJob();
   const catalogConfigured = Boolean(appSettings.data?.settings[CATALOG_SETTING_KEY]?.trim());
   const index = activeStepIndex(location.pathname);
   const step = ONBOARDING_STEPS[index] ?? ONBOARDING_STEPS[0];
@@ -62,9 +67,26 @@ export function OnboardingLayout() {
     return ONBOARDING_STEPS[index + 1]!.path;
   }, [index]);
   const previousPath = previousPathForOnboardingRoute(location.pathname, index);
-  const nextDisabled = index === 0 && !catalogConfigured;
+  const nextDisabled = (index === 0 && !catalogConfigured) || runSharedJob.isPending;
   const nextLabel =
-    index >= ONBOARDING_STEPS.length - 1 ? t('onboarding.finish') : t('onboarding.next');
+    index === 1 && runSharedJob.isPending
+      ? t('onboarding.integration.runningJob')
+      : index >= ONBOARDING_STEPS.length - 1
+        ? t('onboarding.finish')
+        : t('onboarding.next');
+  const runSharedJobError = messageOf(runSharedJob.error);
+
+  const onNext = async () => {
+    if (index === 1) {
+      runSharedJob.reset();
+      try {
+        await runSharedJob.mutateAsync();
+      } catch {
+        return; // error displayed via runSharedJobError alert
+      }
+    }
+    navigate(nextPath);
+  };
 
   return (
     <div className="onboarding-page">
@@ -102,6 +124,13 @@ export function OnboardingLayout() {
         </div>
       </main>
 
+      {runSharedJobError ? (
+        <Alert variant="destructive" className="onboarding-footer-alert">
+          <AlertCircle />
+          <AlertDescription>{runSharedJobError}</AlertDescription>
+        </Alert>
+      ) : null}
+
       <footer className="onboarding-footer">
         <Button
           type="button"
@@ -135,9 +164,11 @@ export function OnboardingLayout() {
           })}
         </div>
 
-        <Button type="button" onClick={() => navigate(nextPath)} disabled={nextDisabled}>
+        <Button type="button" onClick={() => void onNext()} disabled={nextDisabled}>
           {nextLabel}
-          {index >= ONBOARDING_STEPS.length - 1 ? (
+          {runSharedJob.isPending ? (
+            <Spinner className="size-4" aria-hidden="true" />
+          ) : index >= ONBOARDING_STEPS.length - 1 ? (
             <Check className="size-4" aria-hidden="true" />
           ) : (
             <ArrowRight className="size-4" aria-hidden="true" />

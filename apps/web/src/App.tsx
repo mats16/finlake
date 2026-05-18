@@ -50,6 +50,10 @@ export function App() {
           <Route path="/onboarding/catalog" element={<OnboardingCatalog />} />
           <Route path="/onboarding/integration" element={<OnboardingIntegration />} />
           <Route
+            path="/onboarding/integrations"
+            element={<Navigate to="/onboarding/integration" replace />}
+          />
+          <Route
             path="/onboarding/integration/databricks"
             element={<OnboardingDatabricksIntegration />}
           />

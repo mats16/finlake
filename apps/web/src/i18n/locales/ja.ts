@@ -54,6 +54,7 @@ export const ja: Dictionary = {
       desc: 'FinLake が分析用に正規化・更新するコストデータのソースを接続します。',
       eyebrow: 'データソース',
       backToCatalog: 'データソースに戻る',
+      runningJob: 'ジョブを実行中',
     },
     pricing: {
       title: '料金表データを接続',

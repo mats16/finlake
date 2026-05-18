@@ -260,9 +260,8 @@ export function AwsIntegrationDetail(props: IntegrationDetailProps = {}) {
     setConnectAction(action);
   };
 
-  const onCreated = (row: DataSource) => {
+  const onCreated = (_row: DataSource) => {
     setConnectAction(null);
-    setSelectedKey(dataSourceKeyString(row));
   };
   const onServiceAccountIdChange = (value: string) => {
     setServiceAwsAccountId(value);

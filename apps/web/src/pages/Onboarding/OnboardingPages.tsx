@@ -51,9 +51,14 @@ const PRICING_OPTIONS = [
 ] as const;
 
 export function OnboardingCatalog() {
+  const navigate = useNavigate();
+
   return (
     <section className="onboarding-panel onboarding-catalog-panel">
-      <CatalogSettingsForm variant="onboarding" />
+      <CatalogSettingsForm
+        variant="onboarding"
+        onSaved={() => navigate('/onboarding/integration')}
+      />
     </section>
   );
 }

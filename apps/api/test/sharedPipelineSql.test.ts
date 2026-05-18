@@ -140,9 +140,15 @@ test('buildFocusSilverPipelineSql keeps Databricks SkuPriceDetails as a map', ()
   assert.match(sql, /kv -> kv\.value IS NOT NULL/);
   assert.match(sql, /CAST\(u\.product_features\.is_serverless AS BOOLEAN\) AS x_Serverless/);
   assert.match(sql, /CAST\(u\.product_features\.is_photon AS BOOLEAN\) AS x_Photon/);
+  assert.match(sql, /get_json_object\(to_json\(ap\.pricing\), '\$\.effective_list\.default'\)/);
+  assert.match(sql, /get_json_object\(to_json\(ap\.pricing\), '\$\.default'\)/);
+  assert.match(sql, /get_json_object\(to_json\(lp\.pricing\), '\$\.effective_list\.default'\)/);
+  assert.match(sql, /get_json_object\(to_json\(lp\.pricing\), '\$\.default'\)/);
+  assert.doesNotMatch(sql, /ap\.pricing\.effective_list\.default/);
+  assert.doesNotMatch(sql, /lp\.pricing\.effective_list\.default/);
   assert.match(
     sql,
-    /COALESCE\(ap\.pricing\.effective_list\.default, lp\.pricing\.effective_list\.default\)/,
+    /CAST\(get_json_object\(to_json\(lp\.pricing\), '\$\.default'\) AS DECIMAL\(30, 15\)\) AS list_unit_price/,
   );
   assert.doesNotMatch(
     sql,

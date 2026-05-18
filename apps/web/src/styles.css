@@ -503,6 +503,17 @@ a {
   backdrop-filter: blur(10px);
 }
 
+.onboarding-footer-alert {
+  position: fixed;
+  right: 28px;
+  bottom: 84px;
+  left: 28px;
+  z-index: 31;
+  max-width: 720px;
+  margin: 0 auto;
+  box-shadow: 0 8px 24px color-mix(in oklab, black 16%, transparent);
+}
+
 .onboarding-footer > :first-child {
   justify-self: start;
 }
