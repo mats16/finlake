@@ -93,6 +93,7 @@ import {
   WorkspaceDomainSchema,
   type DatabricksClusterUtilizationRow,
   type DatabricksOptimizationRecommendation,
+  type DatabricksOptimizeCostMetric,
   type DatabricksOptimizationServiceRow,
   type DatabricksOptimizationSummary,
   type DatabricksOptimizationWorkspace,
@@ -112,6 +113,7 @@ import { useCurrencyUsd, useI18n } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
 
 const PERIODS = ['last30', 'last90', 'last180', 'last12m'] as const;
+const COST_METRICS = ['ListCost', 'BilledCost'] as const satisfies DatabricksOptimizeCostMetric[];
 const DATABRICKS_OPTIMIZE_TABS = ['serverless', 'query'] as const;
 type Period = (typeof PERIODS)[number];
 type DatabricksOptimizeTab = (typeof DATABRICKS_OPTIMIZE_TABS)[number];
@@ -251,6 +253,7 @@ export function DatabricksOptimize() {
   const { t, locale } = useI18n();
   const formatUsd = useCurrencyUsd();
   const [activeTab, setActiveTab] = useState<DatabricksOptimizeTab>('serverless');
+  const [costMetric, setCostMetric] = useState<DatabricksOptimizeCostMetric>('ListCost');
   const [period, setPeriod] = useState<Period>('last30');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('all');
   const [selectedQueryWarehouseKey, setSelectedQueryWarehouseKey] = useState('all');
@@ -280,12 +283,12 @@ export function DatabricksOptimize() {
   const serverlessSqlEnabled = activeTab === 'serverless' && sourceSqlEnabled;
   const querySqlEnabled = activeTab === 'query' && sourceSqlEnabled;
   const workspaceStatement = useMemo(
-    () => buildDatabricksWorkspacesStatement(sourceTables, baseRange),
-    [baseRange, sourceTables],
+    () => buildDatabricksWorkspacesStatement(sourceTables, baseRange, costMetric),
+    [baseRange, costMetric, sourceTables],
   );
   const workspacesQuery = useSqlStatement<DatabricksOptimizationWorkspace>(workspaceStatement, {
     enabled: sourceSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'workspaces', baseRange, sourceTables],
+    requestKey: ['optimize', 'databricks', 'workspaces', baseRange, sourceTables, costMetric],
   });
   const workspaceOptions = workspacesQuery.rows;
   const workspaceId =
@@ -298,20 +301,20 @@ export function DatabricksOptimize() {
     [baseRange, workspaceId],
   );
   const summaryStatement = useMemo(
-    () => buildDatabricksSummaryStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksSummaryStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const trendStatement = useMemo(
-    () => buildDatabricksTrendStatement(sourceTables, scopedRange, trendGrain),
-    [scopedRange, sourceTables, trendGrain],
+    () => buildDatabricksTrendStatement(sourceTables, scopedRange, trendGrain, costMetric),
+    [costMetric, scopedRange, sourceTables, trendGrain],
   );
   const servicesStatement = useMemo(
-    () => buildDatabricksServicesStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksServicesStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const recommendationsStatement = useMemo(
-    () => buildDatabricksRecommendationsStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksRecommendationsStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const clusterUtilizationStatement = useMemo(
     () => buildDatabricksClusterUtilizationStatement(scopedRange),
@@ -319,21 +322,36 @@ export function DatabricksOptimize() {
   );
   const summaryQuery = useSqlStatement<DatabricksOptimizationSummary>(summaryStatement, {
     enabled: serverlessSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'summary', scopedRange, sourceTables],
+    requestKey: ['optimize', 'databricks', 'summary', scopedRange, sourceTables, costMetric],
   });
   const trendQuery = useSqlStatement<DatabricksOptimizationTrendRow>(trendStatement, {
     enabled: serverlessSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'trend', trendGrain, scopedRange, sourceTables],
+    requestKey: [
+      'optimize',
+      'databricks',
+      'trend',
+      trendGrain,
+      scopedRange,
+      sourceTables,
+      costMetric,
+    ],
   });
   const servicesQuery = useSqlStatement<DatabricksOptimizationServiceRow>(servicesStatement, {
     enabled: serverlessSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'services', scopedRange, sourceTables],
+    requestKey: ['optimize', 'databricks', 'services', scopedRange, sourceTables, costMetric],
   });
   const recommendationsQuery = useSqlStatement<DatabricksOptimizationRecommendation>(
     recommendationsStatement,
     {
       enabled: serverlessSqlEnabled,
-      requestKey: ['optimize', 'databricks', 'recommendations', scopedRange, sourceTables],
+      requestKey: [
+        'optimize',
+        'databricks',
+        'recommendations',
+        scopedRange,
+        sourceTables,
+        costMetric,
+      ],
     },
   );
   const clusterUtilizationQuery = useSqlStatement<DatabricksClusterUtilizationRow>(
@@ -344,12 +362,18 @@ export function DatabricksOptimize() {
     },
   );
   const queryWarehouseTrendStatement = useMemo(
-    () => buildDatabricksQueryWarehouseTrendStatement(sourceTables, scopedRange, trendGrain),
-    [scopedRange, sourceTables, trendGrain],
+    () =>
+      buildDatabricksQueryWarehouseTrendStatement(
+        sourceTables,
+        scopedRange,
+        trendGrain,
+        costMetric,
+      ),
+    [costMetric, scopedRange, sourceTables, trendGrain],
   );
   const queryAttributionStatement = useMemo(
-    () => buildDatabricksQueryAttributionStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksQueryAttributionStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const queryWarehouseTrendQuery = useSqlStatement<DatabricksQueryWarehouseTrendRow>(
     queryWarehouseTrendStatement,
@@ -362,6 +386,7 @@ export function DatabricksOptimize() {
         trendGrain,
         scopedRange,
         sourceTables,
+        costMetric,
       ],
     },
   );
@@ -369,7 +394,14 @@ export function DatabricksOptimize() {
     queryAttributionStatement,
     {
       enabled: querySqlEnabled,
-      requestKey: ['optimize', 'databricks', 'query-attribution', scopedRange, sourceTables],
+      requestKey: [
+        'optimize',
+        'databricks',
+        'query-attribution',
+        scopedRange,
+        sourceTables,
+        costMetric,
+      ],
     },
   );
   const summary = summaryQuery.rows[0]
@@ -658,6 +690,24 @@ export function DatabricksOptimize() {
                 {PERIODS.map((option) => (
                   <SelectItem key={option} value={option}>
                     {t(`optimize.databricks.period.${option}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={costMetric}
+              onValueChange={(value) => setCostMetric(value as DatabricksOptimizeCostMetric)}
+            >
+              <SelectTrigger
+                className="w-40"
+                aria-label={t('optimize.databricks.costMetric.label')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {COST_METRICS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {t(`optimize.databricks.costMetric.${option}`)}
                   </SelectItem>
                 ))}
               </SelectContent>

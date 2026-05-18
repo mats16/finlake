@@ -8,6 +8,7 @@ import {
   EmptyHeader,
   EmptyTitle,
   Skeleton,
+  Spinner,
   Table,
   TableBody,
   TableCell,
@@ -21,20 +22,23 @@ import {
   CheckCircle2,
   CircleSlash,
   ExternalLink,
+  LoaderCircle,
   Play,
   RefreshCcw,
   XCircle,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useTransformationPipelines } from '../../api/hooks';
+import { useRunTransformationResource, useTransformationPipelines } from '../../api/hooks';
 import { useI18n } from '../../i18n';
 import { messageOf } from './utils';
 
 export function Transformations() {
   const { t, locale } = useI18n();
   const pipelines = useTransformationPipelines();
+  const runResource = useRunTransformationResource();
   const resources = pipelines.data?.resources ?? [];
   const error = messageOf(pipelines.error);
+  const runError = messageOf(runResource.error);
 
   return (
     <>
@@ -57,6 +61,14 @@ export function Transformations() {
           <AlertCircle />
           <AlertTitle>{t('transformations.loadFailed')}</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {runError ? (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle />
+          <AlertTitle>{t('transformations.runFailed')}</AlertTitle>
+          <AlertDescription>{runError}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -89,6 +101,9 @@ export function Transformations() {
                   <TableHead className="text-right">
                     {t('transformations.columns.status')}
                   </TableHead>
+                  <TableHead className="text-right">
+                    {t('transformations.columns.action')}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -97,6 +112,18 @@ export function Transformations() {
                     key={`${resource.resourceType}:${resource.resourceId}`}
                     resource={resource}
                     locale={locale}
+                    onRun={() =>
+                      runResource.mutate({
+                        resourceType: resource.resourceType,
+                        resourceId: resource.resourceId,
+                      })
+                    }
+                    runPending={
+                      runResource.isPending &&
+                      runResource.variables?.resourceType === resource.resourceType &&
+                      runResource.variables?.resourceId === resource.resourceId
+                    }
+                    runDisabled={runResource.isPending}
                   />
                 ))}
               </TableBody>
@@ -111,9 +138,15 @@ export function Transformations() {
 function ResourceRow({
   resource,
   locale,
+  onRun,
+  runPending,
+  runDisabled,
 }: {
   resource: TransformationResource;
   locale: 'en' | 'ja';
+  onRun: () => void;
+  runPending: boolean;
+  runDisabled: boolean;
 }) {
   const { t } = useI18n();
   const lastUpdateTime = resource.periodEndTime ?? resource.periodStartTime ?? resource.changeTime;
@@ -164,6 +197,12 @@ function ResourceRow({
       </TableCell>
       <TableCell className="text-right">
         <StatusDays days={resource.statusDays} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Button type="button" size="sm" variant="secondary" onClick={onRun} disabled={runDisabled}>
+          {runPending ? <Spinner /> : <Play />}
+          {runPending ? t('transformations.running') : t('transformations.run')}
+        </Button>
       </TableCell>
     </TableRow>
   );
@@ -225,8 +264,8 @@ function statusForDay(day: TransformationPipelineStatusDay) {
     };
   }
   return {
-    icon: Play,
-    className: 'text-(--warning)',
+    icon: LoaderCircle,
+    className: 'text-muted-foreground animate-spin',
     titleKey: 'transformations.statusDay.running',
   };
 }

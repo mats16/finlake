@@ -39,6 +39,30 @@ export const ja: Dictionary = {
     english: 'English',
     japanese: '日本語',
   },
+  onboarding: {
+    back: '戻る',
+    next: '次へ',
+    finish: '完了',
+    steps: 'オンボーディングのステップ',
+    stepLabel: 'ステップ {step}: {title}',
+    catalog: {
+      title: 'カタログをセットアップ',
+      desc: 'FinLake がメダリオンスキーマ、料金表、共有リソースを作成する場所を設定します。',
+    },
+    integration: {
+      title: 'データソースを接続',
+      desc: 'FinLake が分析用に正規化・更新するコストデータのソースを接続します。',
+      eyebrow: 'データソース',
+      backToCatalog: 'データソースに戻る',
+    },
+    pricing: {
+      title: '料金表データを接続',
+      desc: '正確な単価で推奨を計算できるよう、プロバイダーの料金表データを登録します。',
+      eyebrow: '料金表データ',
+      backToCatalog: '料金表データに戻る',
+      skip: 'あとで設定',
+    },
+  },
   account: {
     openMenu: 'アカウントメニューを開く',
     localUser: 'ローカルユーザー',
@@ -250,9 +274,14 @@ export const ja: Dictionary = {
         last180: '直近180日',
         last12m: '直近12か月',
       },
+      costMetric: {
+        label: 'コスト指標',
+        ListCost: 'ListCost',
+        BilledCost: 'BilledCost',
+      },
       kpi: {
         totalCost: 'Databricks コスト',
-        effectiveCost: '選択期間の EffectiveCost',
+        effectiveCost: '選択期間の選択コスト指標',
         serverlessRatio: 'サーバレス比率',
         knownSpendOnly: '分類済みのサーバレス/非サーバレス支出のみ',
         nonServerlessSpend: '非サーバレス支出',
@@ -294,7 +323,7 @@ export const ja: Dictionary = {
         },
         kpi: {
           warehouseCost: 'SQL Warehouse コスト',
-          sqlWarehouses: 'SQL Warehouse 利用の EffectiveCost',
+          sqlWarehouses: 'SQL Warehouse 利用の選択コスト指標',
           allocatedCost: 'クエリ配賦コスト',
           executionTimeAllocation: '実行時間に比例して Warehouse コストを配賦',
           executionTime: 'クエリ実行時間',
@@ -304,7 +333,7 @@ export const ja: Dictionary = {
         },
         warehouseTrend: {
           title: 'SQL Warehouse 別コスト',
-          desc: 'Databricks SQL Warehouse 利用の EffectiveCost を積み上げ表示します。',
+          desc: 'Databricks SQL Warehouse 利用の選択コスト指標を積み上げ表示します。',
         },
         attribution: {
           title: 'クエリ別コスト配賦',
@@ -837,6 +866,12 @@ export const ja: Dictionary = {
     emptyTitle: '変換パイプラインがありません',
     emptyDesc: 'データソースを追加してセットアップすると Lakeflow パイプラインが作成されます。',
     configureSources: 'データソースを構成',
+    run: '実行',
+    running: '実行中...',
+    runStarted: '実行を開始しました',
+    runFailed: '実行を開始できませんでした',
+    jobRunStarted: 'Job #{jobId} の Run #{runId} を開始しました。',
+    pipelineRunStarted: 'Pipeline #{pipelineId} の Update #{updateId} を開始しました。',
     pipeline: 'Pipeline',
     scheduled: 'Scheduled',
     unknown: '不明',
@@ -861,6 +896,7 @@ export const ja: Dictionary = {
       trigger: 'トリガー',
       lastUpdate: '最終更新',
       status: '状態',
+      action: '実行',
     },
     status: {
       completed: '完了',

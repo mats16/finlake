@@ -37,6 +37,30 @@ export const en = {
     english: 'English',
     japanese: '日本語',
   },
+  onboarding: {
+    back: 'Back',
+    next: 'Next',
+    finish: 'Finish',
+    steps: 'Onboarding steps',
+    stepLabel: 'Step {step}: {title}',
+    catalog: {
+      title: 'Set Up Your Catalog',
+      desc: 'Choose where FinLake creates the medallion schemas, pricing tables, and shared resources.',
+    },
+    integration: {
+      title: 'Connect Data Sources',
+      desc: 'Connect the cost feeds FinLake will normalize and refresh for analysis.',
+      eyebrow: 'Data sources',
+      backToCatalog: 'Back to data sources',
+    },
+    pricing: {
+      title: 'Connect Pricing Data',
+      desc: 'Register provider pricing tables so recommendations can use accurate unit prices.',
+      eyebrow: 'Pricing data',
+      backToCatalog: 'Back to pricing data',
+      skip: 'Skip for now',
+    },
+  },
   account: {
     openMenu: 'Open account menu',
     localUser: 'Local user',
@@ -245,9 +269,14 @@ export const en = {
         last180: 'Last 180 days',
         last12m: 'Last 12 months',
       },
+      costMetric: {
+        label: 'Cost metric',
+        ListCost: 'ListCost',
+        BilledCost: 'BilledCost',
+      },
       kpi: {
         totalCost: 'Databricks Cost',
-        effectiveCost: 'EffectiveCost in selected period',
+        effectiveCost: 'Selected cost metric in period',
         serverlessRatio: 'Serverless Ratio',
         knownSpendOnly: 'Known serverless/non-serverless spend only',
         nonServerlessSpend: 'Non-Serverless Spend',
@@ -289,7 +318,7 @@ export const en = {
         },
         kpi: {
           warehouseCost: 'SQL Warehouse Cost',
-          sqlWarehouses: 'EffectiveCost from SQL warehouse usage',
+          sqlWarehouses: 'Selected cost metric from SQL warehouse usage',
           allocatedCost: 'Allocated Query Cost',
           executionTimeAllocation: 'Warehouse cost allocated by execution time',
           executionTime: 'Query Execution Time',
@@ -299,7 +328,7 @@ export const en = {
         },
         warehouseTrend: {
           title: 'SQL warehouse cost by warehouse',
-          desc: 'Stacked EffectiveCost from Databricks SQL warehouse usage.',
+          desc: 'Stacked selected cost metric from Databricks SQL warehouse usage.',
         },
         attribution: {
           title: 'Query cost attribution',
@@ -827,6 +856,12 @@ export const en = {
     emptyTitle: 'No transformation pipelines',
     emptyDesc: 'Add and set up a data source to create a Lakeflow pipeline.',
     configureSources: 'Configure data sources',
+    run: 'Run',
+    running: 'Running...',
+    runStarted: 'Run started',
+    runFailed: 'Failed to start run',
+    jobRunStarted: 'Run #{runId} started for job #{jobId}.',
+    pipelineRunStarted: 'Update #{updateId} started for pipeline #{pipelineId}.',
     pipeline: 'Pipeline',
     scheduled: 'Scheduled',
     unknown: 'Unknown',
@@ -851,6 +886,7 @@ export const en = {
       trigger: 'Trigger',
       lastUpdate: 'Last update',
       status: 'Status',
+      action: 'Run',
     },
     status: {
       completed: 'Completed',

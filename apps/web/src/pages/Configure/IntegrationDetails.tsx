@@ -114,7 +114,24 @@ function dataSourceTableDisplayName(row: DataSource, settings: Record<string, st
     : `${silverSchema}.${row.tableName}`;
 }
 
-function IntegrationHeader({ templateId }: { templateId: 'aws' | 'databricks_focus13' }) {
+interface IntegrationDetailProps {
+  backTo?: string;
+  eyebrowKey?: string;
+  backLabelKey?: string;
+  modalLayout?: 'default' | 'onboarding';
+}
+
+function IntegrationHeader({
+  templateId,
+  backTo = '/integrations',
+  eyebrowKey = 'dataSources.detail.eyebrow',
+  backLabelKey = 'dataSources.detail.backToIntegrations',
+}: {
+  templateId: 'aws' | 'databricks_focus13';
+  backTo?: string;
+  eyebrowKey?: string;
+  backLabelKey?: string;
+}) {
   const { t } = useI18n();
   const template = findTemplateById(templateId);
   const registryEntry = template ? getTemplateRegistryEntry(template) : undefined;
@@ -126,17 +143,17 @@ function IntegrationHeader({ templateId }: { templateId: 'aws' | 'databricks_foc
         <VendorLogo source={template} logo={registryEntry?.logo} size={44} />
         <div>
           <Link
-            to="/integrations"
-            aria-label={t('dataSources.detail.backToIntegrations')}
+            to={backTo}
+            aria-label={t(backLabelKey)}
             className="text-muted-foreground hover:text-foreground text-sm transition-colors"
           >
-            {t('dataSources.detail.eyebrow')}
+            {t(eyebrowKey)}
           </Link>
           <h3 className="m-0 text-xl font-semibold">{template.name}</h3>
         </div>
       </div>
       {templateId === 'aws' ? (
-        <Button type="button" variant="outline" className="gap-2" asChild>
+        <Button type="button" variant="outline" className="integration-docs-action gap-2" asChild>
           <a
             href="https://docs.aws.amazon.com/cur/latest/userguide/what-is-data-exports.html"
             target="_blank"
@@ -151,7 +168,7 @@ function IntegrationHeader({ templateId }: { templateId: 'aws' | 'databricks_foc
   );
 }
 
-export function DatabricksIntegrationDetail() {
+export function DatabricksIntegrationDetail(props: IntegrationDetailProps = {}) {
   const dataSources = useDataSources();
   const [createdRow, setCreatedRow] = useState<DataSource | null>(null);
   const rows = dataSources.data?.items ?? [];
@@ -171,7 +188,7 @@ export function DatabricksIntegrationDetail() {
 
   return (
     <>
-      <IntegrationHeader templateId="databricks_focus13" />
+      <IntegrationHeader templateId="databricks_focus13" {...props} />
       {row ? (
         <DataSourceConfigurator row={row} onClose={() => setCreatedRow(null)} />
       ) : draft ? (
@@ -181,7 +198,7 @@ export function DatabricksIntegrationDetail() {
   );
 }
 
-export function AwsIntegrationDetail() {
+export function AwsIntegrationDetail(props: IntegrationDetailProps = {}) {
   const { locale, t } = useI18n();
   const dataSources = useDataSources();
   const createCredential = useCreateServiceCredential();
@@ -288,7 +305,7 @@ export function AwsIntegrationDetail() {
 
   return (
     <>
-      <IntegrationHeader templateId="aws" />
+      <IntegrationHeader templateId="aws" {...props} />
       {hasExistingAwsSources ? (
         <div className="grid gap-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -359,6 +376,7 @@ export function AwsIntegrationDetail() {
       <AwsSetupModal
         credential={setupModalCredential}
         artifacts={setupArtifacts}
+        layout={props.modalLayout}
         onClose={() => setSetupModalCredential(null)}
       />
       {selectedRow ? (

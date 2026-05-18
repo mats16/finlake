@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, useLocation } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,9 +30,9 @@ import {
   type LucideIcon,
   Wallet,
 } from 'lucide-react';
+import { CATALOG_SETTING_KEY } from '@finlake/shared';
 import { useI18n, type Locale } from '../../i18n';
 import { useAppSettings, useMe } from '../../api/hooks';
-import { CatalogSetupModal } from '../CatalogSetupModal';
 
 interface NavItem {
   to: string;
@@ -126,7 +126,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const me = useMe();
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const appSettings = useAppSettings();
-  const catalogName = appSettings.data?.settings.catalog_name?.trim() || null;
+  const catalogName = appSettings.data?.settings[CATALOG_SETTING_KEY]?.trim() || null;
+  const isOnboardingRoute = matchesPathPrefix(location.pathname, '/onboarding');
   const databricksItems = buildDatabricksItems(catalogName);
   const onConfigureRoute = CONFIGURE.items.some((item) => isNavItemActive(location.pathname, item));
   const onOptimizeRoute = OPTIMIZE.items.some((item) => isNavItemActive(location.pathname, item));
@@ -151,6 +152,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       // ignore
     }
   }, [theme]);
+
+  if (appSettings.isSuccess && !catalogName && location.pathname !== '/onboarding/catalog') {
+    return <Navigate to="/onboarding/catalog" replace />;
+  }
+
+  if (isOnboardingRoute) {
+    return <>{children}</>;
+  }
 
   return (
     <div className="app-shell">
@@ -287,7 +296,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <main className="main">{children}</main>
-      {appSettings.isSuccess && !catalogName ? <CatalogSetupModal /> : null}
     </div>
   );
 }

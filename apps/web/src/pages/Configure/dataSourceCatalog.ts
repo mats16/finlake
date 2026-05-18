@@ -1,7 +1,11 @@
 import {
   DATA_SOURCE_TEMPLATES,
+  isAwsProvider,
+  isDatabricksProvider,
   tableLeafName,
+  type DataSource,
   type DataSourceTemplate,
+  type PricingNotebookState,
   type SetupStepId,
 } from '@finlake/shared';
 
@@ -148,4 +152,21 @@ export const PRICING_DATABRICKS_TEMPLATE: DataSourceTemplate = {
 export function displayNameForRow(row: { name: string }, template: DataSourceTemplate): string {
   const defaultNames = [template.name, ...(LEGACY_TEMPLATE_NAMES[template.id] ?? [])];
   return defaultNames.includes(row.name) ? template.name : row.name;
+}
+
+export function rowMatchesTemplate(row: DataSource, template: DataSourceTemplate): boolean {
+  if (template.id === 'aws') return isAwsProvider(row.providerName);
+  if (template.id === 'databricks_focus13') return isDatabricksProvider(row.providerName);
+  return findTemplateForRow(row)?.id === template.id;
+}
+
+export function isRegisteredPricing(row: PricingNotebookState): boolean {
+  return Boolean(
+    row.table ||
+    row.rawDataTable ||
+    row.rawDataPath ||
+    row.notebookWorkspacePath ||
+    row.runId ||
+    row.runStatus !== 'not_started',
+  );
 }

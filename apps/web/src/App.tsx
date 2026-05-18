@@ -18,6 +18,16 @@ import { CostExplore } from './pages/Explore/CostExplore';
 import { Genie } from './pages/Explore/Genie';
 import { DatabricksOptimize } from './pages/Optimize/DatabricksOptimize';
 import { OptimizeStub } from './pages/Optimize/OptimizeStub';
+import { OnboardingLayout } from './pages/Onboarding/OnboardingLayout';
+import {
+  OnboardingAwsIntegration,
+  OnboardingAwsPricing,
+  OnboardingCatalog,
+  OnboardingDatabricksIntegration,
+  OnboardingDatabricksPricing,
+  OnboardingIntegration,
+  OnboardingPricing,
+} from './pages/Onboarding/OnboardingPages';
 
 export function App() {
   return (
@@ -34,6 +44,20 @@ export function App() {
           path="/optimize/aws"
           element={<OptimizeStub titleKey="optimize.aws.title" descKey="optimize.aws.desc" />}
         />
+
+        <Route element={<OnboardingLayout />}>
+          <Route path="/onboarding" element={<Navigate to="/onboarding/catalog" replace />} />
+          <Route path="/onboarding/catalog" element={<OnboardingCatalog />} />
+          <Route path="/onboarding/integration" element={<OnboardingIntegration />} />
+          <Route
+            path="/onboarding/integration/databricks"
+            element={<OnboardingDatabricksIntegration />}
+          />
+          <Route path="/onboarding/integration/aws" element={<OnboardingAwsIntegration />} />
+          <Route path="/onboarding/pricing" element={<OnboardingPricing />} />
+          <Route path="/onboarding/pricing/aws" element={<OnboardingAwsPricing />} />
+          <Route path="/onboarding/pricing/databricks" element={<OnboardingDatabricksPricing />} />
+        </Route>
 
         <Route element={<ConfigureLayout />}>
           <Route path="/integrations" element={<DataSources />} />

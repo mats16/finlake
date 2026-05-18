@@ -42,6 +42,8 @@ import type {
   StorageCredentialCreateBody,
   StorageCredentialCreateResponse,
   StorageCredentialListResponse,
+  TransformationResourceRunBody,
+  TransformationResourceRunResult,
   TransformationPipelinesResponse,
   TransformationSharedRunResult,
   UsageBySkuRow,
@@ -677,6 +679,20 @@ export function useRunSharedTransformationJob() {
       apiFetch<TransformationSharedRunResult>('/api/transformations/shared-run', {
         method: 'POST',
         body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transformations'] });
+    },
+  });
+}
+
+export function useRunTransformationResource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TransformationResourceRunBody) =>
+      apiFetch<TransformationResourceRunResult>('/api/transformations/run', {
+        method: 'POST',
+        body: JSON.stringify(body),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transformations'] });

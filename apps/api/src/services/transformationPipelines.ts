@@ -2,6 +2,8 @@ import { settingsToRecord, type DatabaseClient } from '@finlake/db';
 import {
   type Env,
   type DataSource,
+  type TransformationResourceRunBody,
+  type TransformationResourceRunResult,
   type TransformationResource,
   type TransformationPipelinesResponse,
 } from '@finlake/shared';
@@ -16,6 +18,7 @@ import {
   LEGACY_SHARED_PIPELINE_SETTING_KEYS,
   SHARED_PIPELINE_SETTING_KEYS,
 } from './dataSourceSetup.js';
+import { startPipelineUpdate } from './databricksJobs.js';
 
 interface SharedPipelineIds {
   jobId: number | null;
@@ -23,6 +26,7 @@ interface SharedPipelineIds {
 }
 
 export class TransformationPipelineAuthError extends WorkspaceServiceError {}
+export class TransformationPipelineRunError extends WorkspaceServiceError {}
 
 const LOOKBACK_DAYS = 7;
 const MAX_HISTORY_ITEMS = 100;
@@ -54,6 +58,69 @@ export async function listTransformationPipelines(
   };
 }
 
+export async function runTransformationResource(
+  db: DatabaseClient,
+  env: Env,
+  body: TransformationResourceRunBody,
+): Promise<TransformationResourceRunResult> {
+  if (!env.DATABRICKS_HOST) {
+    throw new TransformationPipelineRunError('DATABRICKS_HOST must be configured.', 400);
+  }
+  const wc = buildAppWorkspaceClient(env);
+  if (!wc) {
+    throw new TransformationPipelineRunError(
+      'Failed to build Databricks app service principal workspace client.',
+      500,
+    );
+  }
+
+  const rawSettings = await db.repos.appSettings.list();
+  const dataSources = await db.repos.dataSources.list();
+  const appSettings = settingsToRecord(rawSettings);
+  const shared = sharedPipelineIds(appSettings);
+
+  if (body.resourceType === 'job') {
+    const jobId = Number(body.resourceId);
+    if (!Number.isSafeInteger(jobId) || jobId <= 0 || shared.jobId !== jobId) {
+      throw new TransformationPipelineRunError('Transformation job not found.', 404);
+    }
+    try {
+      const run = await wc.jobs.runNow({ job_id: jobId });
+      if (typeof run.run_id !== 'number') {
+        throw new Error('Databricks Jobs API returned no run_id.');
+      }
+      return {
+        resourceType: 'job',
+        resourceId: String(jobId),
+        jobId,
+        runId: run.run_id,
+      };
+    } catch (err) {
+      throw new TransformationPipelineRunError(
+        `Failed to run job #${jobId}: ${(err as Error).message}`,
+        500,
+      );
+    }
+  }
+
+  const pipelineIds = knownPipelineIds(shared, dataSources);
+  if (!pipelineIds.has(body.resourceId)) {
+    throw new TransformationPipelineRunError('Transformation pipeline not found.', 404);
+  }
+  try {
+    const run = await startPipelineUpdate(wc, body.resourceId);
+    return {
+      resourceType: 'pipeline',
+      resourceId: run.pipelineId,
+      pipelineId: run.pipelineId,
+      updateId: run.updateId,
+      requestId: run.requestId,
+    };
+  } catch (err) {
+    throw new TransformationPipelineRunError((err as Error).message, 500);
+  }
+}
+
 async function listTransformationResources(
   env: Env,
   userToken: string | undefined,
@@ -66,15 +133,20 @@ async function listTransformationResources(
   if (shared.jobId !== null) {
     resources.push(jobResource(env, userToken, shared, consoleHost, days));
   }
+  const pipelineIds = knownPipelineIds(shared, dataSources);
+  for (const pipelineId of pipelineIds) {
+    resources.push(pipelineResource(env, userToken, pipelineId, consoleHost, days));
+  }
+  return Promise.all(resources);
+}
+
+function knownPipelineIds(shared: SharedPipelineIds, dataSources: DataSource[]): Set<string> {
   const pipelineIds = new Set<string>();
   if (shared.pipelineId) pipelineIds.add(shared.pipelineId);
   for (const source of dataSources) {
     if (source.pipelineId) pipelineIds.add(source.pipelineId);
   }
-  for (const pipelineId of pipelineIds) {
-    resources.push(pipelineResource(env, userToken, pipelineId, consoleHost, days));
-  }
-  return Promise.all(resources);
+  return pipelineIds;
 }
 
 async function workspaceClient(env: Env, userToken: string | undefined): Promise<WorkspaceClient> {

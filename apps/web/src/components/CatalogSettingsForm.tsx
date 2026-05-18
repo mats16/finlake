@@ -87,7 +87,7 @@ const SEVERITY_TITLE_KEY: Record<Severity, string> = {
 const DEFAULT_CATALOG_NAME = 'finops';
 
 export interface CatalogSettingsFormProps {
-  variant?: 'page' | 'modal';
+  variant?: 'page' | 'modal' | 'onboarding';
   onSaved?: (data: AppSettingsUpdateResponse, hadPreviousCatalog: boolean) => void;
 }
 
@@ -310,8 +310,15 @@ export function CatalogSettingsForm({ variant = 'page', onSaved }: CatalogSettin
     </FieldGroup>
   );
 
-  if (variant === 'modal') {
-    return <form onSubmit={onSubmit}>{formBody}</form>;
+  if (variant === 'modal' || variant === 'onboarding') {
+    return (
+      <form
+        onSubmit={onSubmit}
+        className={variant === 'onboarding' ? 'onboarding-catalog-form' : undefined}
+      >
+        {formBody}
+      </form>
+    );
   }
 
   return (

@@ -33,7 +33,7 @@ const sources: DatabricksOptimizeSource[] = [
   },
 ];
 
-test('buildDatabricksOptimizeCte reads x_Serverless and EffectiveCost from quoted source table', () => {
+test('buildDatabricksOptimizeCte defaults to ListCost from quoted source table', () => {
   const sql = buildDatabricksOptimizeCte(sources);
 
   assert.match(sql, /FROM `finops`\.`focus`\.`databricks_usage`/);
@@ -43,7 +43,7 @@ test('buildDatabricksOptimizeCte reads x_Serverless and EffectiveCost from quote
   assert.match(sql, /CAST\(ListCost AS DOUBLE\) AS list_cost_usd/);
   assert.match(sql, /CAST\(ListUnitPrice AS DOUBLE\) AS list_unit_price_usd/);
   assert.match(sql, /NULLIF\(TRIM\(PricingUnit\), ''\) AS pricing_unit/);
-  assert.match(sql, /CAST\(COALESCE\(EffectiveCost, 0\) AS DOUBLE\) AS cost_usd/);
+  assert.match(sql, /CAST\(COALESCE\(ListCost, 0\) AS DOUBLE\) AS cost_usd/);
   assert.match(sql, /CAST\(`x_Serverless` AS BOOLEAN\) AS x_serverless/);
   assert.match(sql, /CAST\(`x_Photon` AS BOOLEAN\) AS x_photon/);
   assert.match(sql, /NULLIF\(TRIM\(SkuPriceDetails\['InstanceType'\]\), ''\) AS instance_type/);
@@ -54,6 +54,13 @@ test('buildDatabricksOptimizeCte reads x_Serverless and EffectiveCost from quote
   assert.match(sql, /charge_period_start < :end_ts/);
   assert.doesNotMatch(sql, /x_BillingMonth/);
   assert.doesNotMatch(sql, /finops\.focus\.databricks_usage/);
+});
+
+test('buildDatabricksOptimizeCte can use BilledCost as the selected cost metric', () => {
+  const sql = buildDatabricksOptimizeCte(sources, 'BilledCost');
+
+  assert.match(sql, /CAST\(COALESCE\(BilledCost, 0\) AS DOUBLE\) AS cost_usd/);
+  assert.doesNotMatch(sql, /CAST\(COALESCE\(EffectiveCost, 0\) AS DOUBLE\) AS cost_usd/);
 });
 
 test('resolveDatabricksOptimizeSources follows overview catalog defaults', () => {
@@ -69,6 +76,68 @@ test('resolveDatabricksOptimizeSources follows overview catalog defaults', () =>
     withCatalog?.databricksListPricesTableSql,
     '`finops`.`pricing`.`databricks_list_prices`',
   );
+});
+
+test('resolveDatabricksOptimizeSources uses the data source target schema when present', () => {
+  const [source] = resolveDatabricksOptimizeSources(
+    [
+      {
+        name: 'Databricks',
+        providerName: 'databricks',
+        accountId: 'default',
+        tableName: 'databricks_usage',
+        focusVersion: '1.3',
+        pipelineId: null,
+        enabled: true,
+        config: { targetSchema: 'custom_focus' },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    { catalog_name: 'finops', silver_schema_name: 'focus' },
+  );
+
+  assert.equal(source?.tableDisplay, 'finops.custom_focus.databricks_usage');
+  assert.equal(source?.tableSql, '`finops`.`custom_focus`.`databricks_usage`');
+});
+
+test('resolveDatabricksOptimizeSources does not prefix already-qualified table names', () => {
+  const [schemaQualified] = resolveDatabricksOptimizeSources(
+    [
+      {
+        name: 'Databricks',
+        providerName: 'databricks',
+        accountId: 'default',
+        tableName: 'legacy_focus.databricks_usage',
+        focusVersion: '1.3',
+        pipelineId: null,
+        enabled: true,
+        config: { targetSchema: 'custom_focus' },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    { catalog_name: 'finops', silver_schema_name: 'focus' },
+  );
+  assert.equal(schemaQualified?.tableDisplay, 'finops.legacy_focus.databricks_usage');
+  assert.equal(schemaQualified?.tableSql, '`finops`.`legacy_focus`.`databricks_usage`');
+
+  const [catalogQualified] = resolveDatabricksOptimizeSources(
+    [
+      {
+        name: 'Databricks',
+        providerName: 'databricks',
+        accountId: 'default',
+        tableName: 'prod_catalog.legacy_focus.databricks_usage',
+        focusVersion: '1.3',
+        pipelineId: null,
+        enabled: true,
+        config: { targetSchema: 'custom_focus' },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    { catalog_name: 'finops', silver_schema_name: 'focus' },
+  );
+  assert.equal(catalogQualified?.tableDisplay, 'prod_catalog.legacy_focus.databricks_usage');
+  assert.equal(catalogQualified?.tableSql, '`prod_catalog`.`legacy_focus`.`databricks_usage`');
 });
 
 test('databricks optimization params include date, workspace, and billing account filters', () => {

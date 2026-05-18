@@ -35,6 +35,8 @@ import {
   findTemplateForRow,
   getTemplateInputConfig,
   getTemplateRegistryEntry,
+  isRegisteredPricing,
+  rowMatchesTemplate,
   type DataSourceTemplate,
 } from './dataSourceCatalog';
 import { useI18n } from '../../i18n';
@@ -78,21 +80,6 @@ const PRICING_PROVIDER_CONFIGS = [
 
 function templateForRow(row: DataSource): DataSourceTemplate {
   return findTemplateForRow(row) ?? FALLBACK_TEMPLATE;
-}
-
-function isRegisteredPricing(row: PricingNotebookState): boolean {
-  return Boolean(
-    row.table ||
-    row.rawDataTable ||
-    row.rawDataPath ||
-    row.notebookWorkspacePath ||
-    row.runId ||
-    row.runStatus !== 'not_started',
-  );
-}
-
-function rowMatchesTemplate(row: DataSource, template: DataSourceTemplate): boolean {
-  return findTemplateForRow(row)?.id === template.id;
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {

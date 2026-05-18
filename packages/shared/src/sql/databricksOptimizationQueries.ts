@@ -29,6 +29,7 @@ const DEFAULT_DATABRICKS_LIST_PRICES_TABLE_SQL = [
   .join('.');
 
 export type DatabricksTrendGrain = 'day' | 'month';
+export type DatabricksOptimizeCostMetric = 'ListCost' | 'BilledCost';
 
 export interface DatabricksOptimizeSource {
   tableDisplay: string;
@@ -54,6 +55,7 @@ export function resolveDatabricksOptimizeSources(
           tableName: DEFAULT_DATABRICKS_TABLE,
           providerName: PROVIDER_DATABRICKS,
           accountId: DEFAULT_DATABRICKS_ACCOUNT_ID,
+          config: {},
         }),
       ];
 }
@@ -77,8 +79,9 @@ export function databricksOptimizeParams(
 export function buildDatabricksSummaryStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   return {
     query: buildDatabricksSummarySql(cte),
     params: databricksOptimizeParams(sources, range),
@@ -88,8 +91,9 @@ export function buildDatabricksSummaryStatement(
 export function buildDatabricksWorkspacesStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   return {
     query: buildDatabricksWorkspacesSql(cte),
     params: databricksOptimizeParams(sources, range),
@@ -100,8 +104,9 @@ export function buildDatabricksTrendStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
   grain: DatabricksTrendGrain,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   return {
     query: buildDatabricksTrendSql(cte, grain),
     params: databricksOptimizeParams(sources, range),
@@ -111,8 +116,9 @@ export function buildDatabricksTrendStatement(
 export function buildDatabricksServicesStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   return {
     query: buildDatabricksServicesSql(cte),
     params: databricksOptimizeParams(sources, range),
@@ -122,8 +128,9 @@ export function buildDatabricksServicesStatement(
 export function buildDatabricksRecommendationsStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   const pricingTableSql =
     sources[0]?.databricksListPricesTableSql ?? DEFAULT_DATABRICKS_LIST_PRICES_TABLE_SQL;
   return {
@@ -145,8 +152,9 @@ export function buildDatabricksQueryWarehouseTrendStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
   grain: DatabricksTrendGrain,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   return {
     query: buildDatabricksQueryWarehouseTrendSql(cte, grain),
     params: databricksOptimizeParams(sources, range),
@@ -156,15 +164,20 @@ export function buildDatabricksQueryWarehouseTrendStatement(
 export function buildDatabricksQueryAttributionStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): SqlStatementInput {
-  const cte = buildDatabricksOptimizeCte(sources);
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
   return {
     query: buildDatabricksQueryAttributionSql(cte),
     params: databricksOptimizeParams(sources, range),
   };
 }
 
-export function buildDatabricksOptimizeCte(sources: DatabricksOptimizeSource[]): string {
+export function buildDatabricksOptimizeCte(
+  sources: DatabricksOptimizeSource[],
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
+): string {
+  const costColumnSql = costMetric;
   const selects = sources
     .map(
       (source, index) => /* sql */ `
@@ -186,7 +199,7 @@ export function buildDatabricksOptimizeCte(sources: DatabricksOptimizeSource[]):
     CAST(ListCost AS DOUBLE) AS list_cost_usd,
     CAST(ListUnitPrice AS DOUBLE) AS list_unit_price_usd,
     NULLIF(TRIM(PricingUnit), '') AS pricing_unit,
-    CAST(COALESCE(EffectiveCost, 0) AS DOUBLE) AS cost_usd,
+    CAST(COALESCE(${costColumnSql}, 0) AS DOUBLE) AS cost_usd,
     CAST(${quoteIdent('x_Serverless')} AS BOOLEAN) AS x_serverless,
     CAST(${quoteIdent('x_Photon')} AS BOOLEAN) AS x_photon
   FROM ${source.tableSql}
@@ -777,11 +790,9 @@ ORDER BY recommendation_rank
 function databricksOptimizeSource(
   catalog: string,
   silverSchema: string,
-  source: Pick<DataSource, 'providerName' | 'tableName' | 'accountId'>,
+  source: Pick<DataSource, 'providerName' | 'tableName' | 'accountId' | 'config'>,
 ): DatabricksOptimizeSource {
-  const parts = catalog
-    ? [catalog, silverSchema, source.tableName]
-    : [silverSchema, source.tableName];
+  const parts = databricksOptimizeTableParts(catalog, silverSchema, source);
   const databricksListPricesTableParts = catalog
     ? [catalog, PRICING_SCHEMA_DEFAULT, DATABRICKS_LIST_PRICES_TABLE_DEFAULT]
     : [PRICING_SCHEMA_DEFAULT, DATABRICKS_LIST_PRICES_TABLE_DEFAULT];
@@ -794,4 +805,18 @@ function databricksOptimizeSource(
       .join('.'),
     billingAccountId: isDatabricksDefaultAccount(source) ? null : source.accountId,
   };
+}
+
+function databricksOptimizeTableParts(
+  catalog: string,
+  defaultSilverSchema: string,
+  source: Pick<DataSource, 'tableName' | 'config'>,
+): string[] {
+  const tableParts = source.tableName.split('.').map((part) => part.trim());
+  if (tableParts.length === 3) return tableParts;
+  if (tableParts.length === 2) return catalog ? [catalog, ...tableParts] : tableParts;
+
+  const raw = source.config?.targetSchema;
+  const targetSchema = typeof raw === 'string' && raw.trim() ? raw.trim() : defaultSilverSchema;
+  return catalog ? [catalog, targetSchema, source.tableName] : [targetSchema, source.tableName];
 }
