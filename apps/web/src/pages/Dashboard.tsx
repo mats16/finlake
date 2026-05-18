@@ -50,7 +50,6 @@ import {
   ChevronRight,
   Database,
   DollarSign,
-  RefreshCcw,
   Sparkles,
   Tags,
   TrendingUp,
@@ -68,7 +67,7 @@ import {
   type FocusOverviewServiceRow,
   type FocusOverviewSkuRow,
 } from '@finlake/shared';
-import { PageHeader } from '../components/PageHeader';
+import { SqlWarehouseSelector } from '../components/SqlWarehouseSelector';
 import { useAppSettings, useBudgets, useDataSources, useSqlStatement } from '../api/hooks';
 import { useCurrencyUsd, useI18n, type TFunction } from '../i18n';
 import { stableTomorrow } from '../lib/dateRanges';
@@ -375,35 +374,36 @@ export function Dashboard() {
     coveragePage * coveragePageSize,
     coveragePage * coveragePageSize + coveragePageSize,
   );
-  const refresh = () => {
-    historyDaily.refetch();
-    currentServices.refetch();
-    currentSkus.refetch();
-    coverage.refetch();
-  };
 
   return (
     <>
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <PageHeader title={t('nav.overview')} subtitle={t('dashboard.subtitle')} />
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={period} onValueChange={(value) => setPeriod(value as typeof period)}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {periodOptions.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {t(`dashboard.period.${option}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" onClick={refresh}>
-            <RefreshCcw /> {t('dashboard.refresh')}
-          </Button>
+      <header className="mb-5">
+        <div className="mb-3 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="m-0 text-2xl font-semibold">{t('nav.overview')}</h2>
+          </div>
+          <div className="shrink-0">
+            <SqlWarehouseSelector />
+          </div>
         </div>
-      </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="m-0 text-sm text-muted-foreground">{t('dashboard.subtitle')}</p>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Select value={period} onValueChange={(value) => setPeriod(value as typeof period)}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {periodOptions.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {t(`dashboard.period.${option}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </header>
 
       {dataSources.isSuccess && sources.length === 0 ? (
         <Alert className="mb-4">

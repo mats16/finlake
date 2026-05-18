@@ -5,8 +5,6 @@ include:
   - resources/*.yml
 
 variables:
-  sql_warehouse_id:
-    description: ID of the Serverless SQL warehouse the app should use
   lakebase_instance_name:
     description: Optional Lakebase database instance name (leave empty to use SQLite)
     default: ''

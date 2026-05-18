@@ -36,6 +36,7 @@ import type {
   ServiceCredentialCreateBody,
   ServiceCredentialCreateResponse,
   ServiceCredentialListResponse,
+  SqlWarehouseListResponse,
   SqlStatementColumn,
   SqlStatementResultResponse,
   SqlStatementSubmitRequest,
@@ -54,8 +55,9 @@ import type {
   WorkspaceMappingListResponse,
   WorkspaceMappingUpsertBody,
 } from '@finlake/shared';
+import { useSelectedSqlWarehouse } from '../contexts/SqlWarehouseContext';
 import { apiFetch } from './client';
-import { getSqlStatement, submitSqlStatement } from './sql';
+import { getSqlStatement, listSqlWarehouses, submitSqlStatement } from './sql';
 
 interface RangeParams {
   start: string;
@@ -117,13 +119,28 @@ export function useSqlStatement<T = Record<string, unknown>>(
     requestKey,
     staleTimeMs = 60_000,
   } = options;
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   const [refreshIndex, setRefreshIndex] = useState(0);
-  const statementKey = requestKey ?? input ?? null;
-  const canSubmit = enabled && input !== null && input !== undefined;
+  const effectiveWarehouseId = input?.warehouse_id ?? selectedWarehouseId;
+  const effectiveInput = useMemo(() => {
+    if (!input || !effectiveWarehouseId) return input;
+    if (input.warehouse_id === effectiveWarehouseId) return input;
+    return { ...input, warehouse_id: effectiveWarehouseId };
+  }, [effectiveWarehouseId, input]);
+  const selectedWarehouseKey = effectiveInput?.warehouse_id ?? null;
+  const statementKey =
+    requestKey !== undefined
+      ? ['request', requestKey, 'warehouse', selectedWarehouseKey]
+      : (effectiveInput ?? null);
+  const canSubmit =
+    enabled &&
+    effectiveInput !== null &&
+    effectiveInput !== undefined &&
+    Boolean(effectiveInput.warehouse_id);
 
   const submitQuery = useQuery({
     queryKey: ['sql', 'submit', statementKey, refreshIndex],
-    queryFn: () => submitSqlStatement(input!),
+    queryFn: () => submitSqlStatement(effectiveInput!),
     enabled: canSubmit,
     retry: false,
     staleTime: staleTimeMs,
@@ -180,6 +197,15 @@ export function useSqlStatement<T = Record<string, unknown>>(
         : resultQuery.dataUpdatedAt,
     refetch,
   };
+}
+
+export function useSqlWarehouses() {
+  return useQuery({
+    queryKey: ['sql', 'warehouses'],
+    queryFn: (): Promise<SqlWarehouseListResponse> => listSqlWarehouses(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
 }
 
 export function useBudgets(workspaceId?: string) {

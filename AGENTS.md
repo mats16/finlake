@@ -92,7 +92,7 @@ When adding a new data source: add an entry to `dataSourceCatalog.ts`, add a ste
 
 ### Deployment shape
 
-- `app.yaml` — Databricks Apps runtime manifest. The `valueFrom: warehouse` pattern binds resources declared in `resources/app.yml` to env vars.
+- `app.yaml` — Databricks Apps runtime manifest. SQL warehouses are selected at runtime through `/api/sql/warehouses` and `warehouse_id` request bodies, not bound through env vars.
 - `databricks.yml` + `resources/app.yml` — Databricks Asset Bundle. `databricks bundle deploy` uploads source and creates the app + its bound resources.
 - The `app_name` and Lakebase resource are decoupled from the app via the `DB_BACKEND` env flag — leaving Lakebase out of `resources/app.yml` is intentionally supported (SQLite fallback).
 

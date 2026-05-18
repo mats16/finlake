@@ -1,4 +1,5 @@
 import type {
+  SqlWarehouseListResponse,
   SqlStatementResultResponse,
   SqlStatementSubmitRequest,
   SqlStatementSubmitResponse,
@@ -20,4 +21,8 @@ export function getSqlStatement(statement_id: string): Promise<SqlStatementResul
   return apiFetch<SqlStatementResultResponse>(
     `/api/sql/statements/${encodeURIComponent(statement_id)}`,
   );
+}
+
+export function listSqlWarehouses(): Promise<SqlWarehouseListResponse> {
+  return apiFetch<SqlWarehouseListResponse>('/api/sql/warehouses');
 }

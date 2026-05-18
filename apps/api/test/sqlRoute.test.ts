@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
 import { SqliteClient } from '@finlake/db';
-import type { Env } from '@finlake/shared';
+import type { Env, SqlWarehouseListResponse } from '@finlake/shared';
 import { sqlRouter, validateReadOnlySql } from '../src/routes/sql.js';
 import {
   StatementExecutor,
@@ -14,12 +14,20 @@ import type { WorkspaceClient } from '../src/services/statementExecution.js';
 
 async function startServer(
   executor: Partial<StatementExecutor>,
-  options: { env?: Partial<Env> } = {},
+  options: {
+    env?: Partial<Env>;
+    workspaceClientFactory?: (env: Env, token: string) => WorkspaceClient | undefined;
+  } = {},
 ) {
   const db = await SqliteClient.create({ sqlitePath: ':memory:' });
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
+    if (req.header('x-test-no-token') === 'true') {
+      req.user = {};
+      next();
+      return;
+    }
     const userId = req.header('x-test-user') ?? 'user-1';
     const accessToken = req.header('x-test-token') ?? `obo-token-${userId}`;
     req.user = { accessToken, userId, email: `${userId}@example.com` };
@@ -27,7 +35,6 @@ async function startServer(
   });
   const routeEnv = {
     DATABRICKS_HOST: 'https://example.cloud.databricks.com',
-    SQL_WAREHOUSE_ID: 'warehouse-1',
     SQL_API_CACHE_TTL_SEC: 300,
     SQL_API_STATEMENT_TTL_SEC: 900,
     SQL_API_SUBMIT_RATE_LIMIT_PER_MINUTE: 60,
@@ -35,7 +42,7 @@ async function startServer(
   } as Env;
   app.use(
     '/api/sql',
-    sqlRouter(db, routeEnv, () => executor as StatementExecutor),
+    sqlRouter(db, routeEnv, () => executor as StatementExecutor, options.workspaceClientFactory),
   );
   const server: Server = app.listen(0);
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
@@ -103,7 +110,7 @@ test('POST /api/sql/statements submits one read-only statement and returns state
   }
 });
 
-test('POST /api/sql/statements falls back to env SQL_WAREHOUSE_ID when no override is supplied', async () => {
+test('POST /api/sql/statements requires warehouse_id', async () => {
   const calls: Array<{ query: string; params: unknown[]; warehouseId?: string }> = [];
   const env = await startServer({
     submitRaw: async (query, params, warehouseId) => {
@@ -117,11 +124,101 @@ test('POST /api/sql/statements falls back to env SQL_WAREHOUSE_ID when no overri
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: 'SELECT 1', params: [] }),
     });
-    assert.equal(res.status, 200);
-    assert.equal(calls[0]?.query, 'SELECT 1');
-    assert.equal(calls[0]?.warehouseId, undefined);
+    assert.equal(res.status, 400);
+    assert.deepEqual(calls, []);
   } finally {
     await env.close();
+  }
+});
+
+test('GET /api/sql/warehouses returns accessible warehouses for the OBO user', async () => {
+  const seen: Array<{ host: string | undefined; token: string }> = [];
+  const workspaceClient = {
+    warehouses: {
+      list: async function* () {
+        yield {
+          id: 'warehouse-b',
+          name: 'Beta Warehouse',
+          state: 'STOPPED',
+          cluster_size: '4X-Large',
+          warehouse_type: 'PRO',
+          enable_serverless_compute: true,
+        };
+        yield {
+          id: 'warehouse-small',
+          name: 'Alpha Warehouse',
+          state: 'RUNNING',
+          cluster_size: 'X-Small',
+          warehouse_type: 'CLASSIC',
+          enable_serverless_compute: false,
+        };
+        yield {
+          id: 'warehouse-serverless-medium',
+          name: 'Medium Serverless Warehouse',
+          state: 'RUNNING',
+          cluster_size: 'Medium',
+          warehouse_type: 'PRO',
+          enable_serverless_compute: true,
+        };
+        yield {
+          id: 'warehouse-large',
+          name: 'Large Running Warehouse',
+          state: 'RUNNING',
+          cluster_size: 'Large',
+          warehouse_type: 'PRO',
+          enable_serverless_compute: false,
+        };
+        yield { name: 'No ID' };
+      },
+    },
+  } as unknown as WorkspaceClient;
+  const env = await startServer(
+    {},
+    {
+      workspaceClientFactory: (routeEnv, token) => {
+        seen.push({ host: routeEnv.DATABRICKS_HOST, token });
+        return workspaceClient;
+      },
+    },
+  );
+  try {
+    const res = await fetch(`${env.base}/api/sql/warehouses`, {
+      headers: { 'x-test-token': 'obo-custom' },
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as SqlWarehouseListResponse;
+    assert.equal(body.defaultWarehouseId, 'warehouse-serverless-medium');
+    assert.deepEqual(
+      body.items.map((item) => item.id),
+      ['warehouse-large', 'warehouse-serverless-medium', 'warehouse-small', 'warehouse-b'],
+    );
+    assert.equal(body.items[0]?.name, 'Large Running Warehouse');
+    assert.equal(body.items[0]?.isDefault, false);
+    assert.equal(body.items[1]?.isDefault, true);
+    assert.equal(body.items[3]?.enableServerlessCompute, true);
+    assert.deepEqual(seen, [{ host: 'https://example.cloud.databricks.com', token: 'obo-custom' }]);
+  } finally {
+    await env.close();
+  }
+});
+
+test('GET /api/sql/warehouses requires OBO token and Databricks host', async () => {
+  const noToken = await startServer({});
+  try {
+    const res = await fetch(`${noToken.base}/api/sql/warehouses`, {
+      headers: { 'x-test-no-token': 'true' },
+    });
+    assert.equal(res.status, 401);
+  } finally {
+    await noToken.close();
+  }
+
+  const noHost = await startServer({}, { env: { DATABRICKS_HOST: undefined } });
+  try {
+    const res = await fetch(`${noHost.base}/api/sql/warehouses`);
+    assert.equal(res.status, 500);
+  } finally {
+    await noHost.close();
   }
 });
 
@@ -139,7 +236,7 @@ test('GET /api/sql/statements/:statement_id returns succeeded rows', async () =>
     await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'SELECT 1', params: [] }),
+      body: JSON.stringify({ query: 'SELECT 1', warehouse_id: 'warehouse-1', params: [] }),
     });
     const res = await fetch(`${env.base}/api/sql/statements/stmt-123`);
     assert.equal(res.status, 200);
@@ -156,12 +253,12 @@ test('GET /api/sql/statements/:statement_id returns succeeded rows', async () =>
   }
 });
 
-test('POST /api/sql/statements reuses cached succeeded results across warehouse_id overrides', async () => {
+test('POST /api/sql/statements separates cached succeeded results by warehouse_id', async () => {
   let submitCount = 0;
   const env = await startServer({
     submitRaw: async () => {
       submitCount += 1;
-      return { statement_id: 'stmt-cache', status: 'PENDING' };
+      return { statement_id: `stmt-cache-${submitCount}`, status: 'PENDING' };
     },
     getRaw: async (statementId) => ({
       statement_id: statementId,
@@ -181,7 +278,7 @@ test('POST /api/sql/statements reuses cached succeeded results across warehouse_
       }),
     });
     assert.equal(first.status, 200);
-    await fetch(`${env.base}/api/sql/statements/stmt-cache`);
+    await fetch(`${env.base}/api/sql/statements/stmt-cache-1`);
 
     const second = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
@@ -196,12 +293,12 @@ test('POST /api/sql/statements reuses cached succeeded results across warehouse_
     const submitted = (await second.json()) as {
       statement_id?: string;
       status: string;
-      result: { rows: Array<{ sampleValue: string }> };
+      result?: { rows: Array<{ sampleValue: string }> };
     };
-    assert.equal(submitted.status, 'SUCCEEDED');
-    assert.equal(submitted.statement_id, undefined);
-    assert.equal(submitted.result.rows[0]?.sampleValue, 'ok');
-    assert.equal(submitCount, 1);
+    assert.equal(submitted.status, 'PENDING');
+    assert.equal(submitted.statement_id, 'stmt-cache-2');
+    assert.equal(submitted.result, undefined);
+    assert.equal(submitCount, 2);
   } finally {
     await env.close();
   }
@@ -224,7 +321,7 @@ test('POST /api/sql/statements does not cache non-succeeded statement results', 
     const first = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'noncache-user' },
-      body: JSON.stringify({ query: 'SELECT 1', params: [] }),
+      body: JSON.stringify({ query: 'SELECT 1', warehouse_id: 'warehouse-1', params: [] }),
     });
     const firstBody = (await first.json()) as { statement_id: string };
     const failed = await fetch(`${env.base}/api/sql/statements/${firstBody.statement_id}`, {
@@ -244,7 +341,7 @@ test('POST /api/sql/statements does not cache non-succeeded statement results', 
     const second = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'noncache-user' },
-      body: JSON.stringify({ query: 'SELECT 1', params: [] }),
+      body: JSON.stringify({ query: 'SELECT 1', warehouse_id: 'warehouse-1', params: [] }),
     });
     assert.equal(second.status, 200);
     assert.equal(submitCount, 2);
@@ -264,14 +361,14 @@ test('POST /api/sql/statements rate limits uncached submissions per user', async
     const first = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'rate-user' },
-      body: JSON.stringify({ query: 'SELECT 1', params: [] }),
+      body: JSON.stringify({ query: 'SELECT 1', warehouse_id: 'warehouse-1', params: [] }),
     });
     assert.equal(first.status, 200);
 
     const second = await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'rate-user' },
-      body: JSON.stringify({ query: 'SELECT 2', params: [] }),
+      body: JSON.stringify({ query: 'SELECT 2', warehouse_id: 'warehouse-1', params: [] }),
     });
     assert.equal(second.status, 429);
   } finally {
@@ -291,7 +388,7 @@ test('GET /api/sql/statements/:statement_id rejects unknown statements and owner
     await fetch(`${env.base}/api/sql/statements`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test-user': 'alice' },
-      body: JSON.stringify({ query: 'SELECT 1', params: [] }),
+      body: JSON.stringify({ query: 'SELECT 1', warehouse_id: 'warehouse-1', params: [] }),
     });
     const mismatch = await fetch(`${env.base}/api/sql/statements/stmt-owned`, {
       headers: { 'x-test-user': 'bob' },

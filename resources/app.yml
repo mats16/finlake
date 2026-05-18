@@ -5,10 +5,6 @@ resources:
       description: Databricks Apps FinOps dashboard (DBU + cloud cost visibility)
       source_code_path: ../
       resources:
-        - name: warehouse
-          sql_warehouse:
-            id: ${var.sql_warehouse_id}
-            permission: CAN_USE
         # Uncomment to bind Lakebase. Leave commented when Lakebase isn't available.
         # - name: lakebase
         #   database:

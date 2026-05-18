@@ -77,7 +77,6 @@ import {
   Gauge,
   Info,
   ListChecks,
-  RefreshCcw,
   Server,
 } from 'lucide-react';
 import {
@@ -102,6 +101,7 @@ import {
   type DatabricksTrendGrain,
 } from '@finlake/shared';
 import type { ApiError } from '../../api/client';
+import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
 import {
   useAppSettings,
   useDataSources,
@@ -629,17 +629,6 @@ export function DatabricksOptimize() {
     window.addEventListener('pointerup', stopResize, { once: true });
   };
 
-  const refresh = () => {
-    summaryQuery.refetch();
-    workspacesQuery.refetch();
-    trendQuery.refetch();
-    servicesQuery.refetch();
-    recommendationsQuery.refetch();
-    clusterUtilizationQuery.refetch();
-    queryWarehouseTrendQuery.refetch();
-    queryAttributionQuery.refetch();
-  };
-
   const header = (
     <header className="page-header optimize-page-header">
       <div className="optimize-page-header-row">
@@ -647,79 +636,7 @@ export function DatabricksOptimize() {
           <h2>{t('optimize.databricks.title')}</h2>
         </div>
         <div className="page-header-actions">
-          <div className="flex flex-wrap justify-end gap-2">
-            {activeTab === 'query' ? (
-              <Select value={queryWarehouseFilterKey} onValueChange={setSelectedQueryWarehouseKey}>
-                <SelectTrigger className="w-64">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    {t('optimize.databricks.query.warehouses.all')}
-                  </SelectItem>
-                  {queryWarehouseOptions.map((warehouse) => (
-                    <SelectItem key={warehouse.key} value={warehouse.key}>
-                      {warehouse.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-            <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
-                {workspaceOptions.map((workspace) => {
-                  const value = workspace.workspaceId ?? '';
-                  if (!value) return null;
-                  return (
-                    <SelectItem key={value} value={value}>
-                      {workspace.workspaceName || value}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERIODS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {t(`optimize.databricks.period.${option}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={costMetric}
-              onValueChange={(value) => setCostMetric(value as DatabricksOptimizeCostMetric)}
-            >
-              <SelectTrigger
-                className="w-40"
-                aria-label={t('optimize.databricks.costMetric.label')}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {COST_METRICS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {t(`optimize.databricks.costMetric.${option}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              onClick={refresh}
-              disabled={activeTab === 'query' ? queryLoading : loading}
-            >
-              <RefreshCcw /> {t('dashboard.refresh')}
-            </Button>
-          </div>
+          <SqlWarehouseSelector />
         </div>
       </div>
       <nav className="upper-tabs" role="tablist" aria-label={t('optimize.databricks.title')}>
@@ -736,6 +653,71 @@ export function DatabricksOptimize() {
           </button>
         ))}
       </nav>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
+              {workspaceOptions.map((workspace) => {
+                const value = workspace.workspaceId ?? '';
+                if (!value) return null;
+                return (
+                  <SelectItem key={value} value={value}>
+                    {workspace.workspaceName || value}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          {activeTab === 'query' ? (
+            <Select value={queryWarehouseFilterKey} onValueChange={setSelectedQueryWarehouseKey}>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('optimize.databricks.query.warehouses.all')}</SelectItem>
+                {queryWarehouseOptions.map((warehouse) => (
+                  <SelectItem key={warehouse.key} value={warehouse.key}>
+                    {warehouse.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Select
+            value={costMetric}
+            onValueChange={(value) => setCostMetric(value as DatabricksOptimizeCostMetric)}
+          >
+            <SelectTrigger className="w-40" aria-label={t('optimize.databricks.costMetric.label')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COST_METRICS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`optimize.databricks.costMetric.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIODS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`optimize.databricks.period.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
     </header>
   );
 

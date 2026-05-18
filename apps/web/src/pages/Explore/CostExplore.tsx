@@ -66,6 +66,7 @@ import {
   type CostExploreGroupKey,
 } from '@finlake/shared';
 import { PageHeader } from '../../components/PageHeader';
+import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
 import { useAppSettings, useDataSources, useSqlStatement } from '../../api/hooks';
 import { useCurrencyUsd, useI18n, type TFunction } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
@@ -278,9 +279,7 @@ export function CostExplore() {
 
   return (
     <>
-      <div className="flex flex-col gap-4">
-        <PageHeader title={t('explore.costExplore.title')} />
-      </div>
+      <PageHeader title={t('explore.costExplore.title')} actions={<SqlWarehouseSelector />} />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
