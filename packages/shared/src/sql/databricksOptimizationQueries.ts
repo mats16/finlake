@@ -177,6 +177,13 @@ export function buildDatabricksOptimizeCte(
   sources: DatabricksOptimizeSource[],
   costMetric: DatabricksOptimizeCostMetric = 'ListCost',
 ): string {
+  const VALID_COST_METRICS: Record<DatabricksOptimizeCostMetric, true> = {
+    ListCost: true,
+    BilledCost: true,
+  };
+  if (!VALID_COST_METRICS[costMetric]) {
+    throw new Error(`Invalid cost metric: ${String(costMetric)}`);
+  }
   const costColumnSql = costMetric;
   const selects = sources
     .map(

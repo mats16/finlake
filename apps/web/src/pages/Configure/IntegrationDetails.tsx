@@ -404,13 +404,44 @@ function AwsAccountSettingsSheet({ row, onClose }: { row: DataSource; onClose: (
     };
   }, []);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') requestClose();
+      if (event.key === 'Escape') {
+        requestClose();
+        return;
+      }
+      if (event.key === 'Tab') {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const focusable = dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input:not([disabled]), select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [requestClose]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const first = dialog.querySelector<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    first?.focus();
+  }, []);
 
   return (
     <div
@@ -422,6 +453,7 @@ function AwsAccountSettingsSheet({ row, onClose }: { row: DataSource; onClose: (
       onMouseDown={requestClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="aws-account-settings-sheet-title"

@@ -799,21 +799,19 @@ async function syncSharedFocusPipelineLocked(
   if (!goldPipelineId) {
     throw new DataSourceSetupError('Gold pipeline task was not created.', 500, 'lakeflowJob');
   }
-  const sourcePipelineIds = Object.fromEntries(
-    sourceFiles.map((file) => [
-      dataSourceKeyString(file.source),
-      pipelineIdsByTask[sourcePipelineTaskKey(file.source)],
-    ]),
-  ) as Record<string, string | undefined>;
-  const missingSource = Object.entries(sourcePipelineIds).find(([, pipelineId]) => !pipelineId);
-  if (missingSource) {
-    throw new DataSourceSetupError(
-      `Silver pipeline task was not created for ${missingSource[0]}.`,
-      500,
-      'lakeflowJob',
-    );
+  const resolvedSourcePipelineIds: Record<string, string> = {};
+  for (const file of sourceFiles) {
+    const key = dataSourceKeyString(file.source);
+    const pipelineId = pipelineIdsByTask[sourcePipelineTaskKey(file.source)];
+    if (!pipelineId) {
+      throw new DataSourceSetupError(
+        `Silver pipeline task was not created for ${key}.`,
+        500,
+        'lakeflowJob',
+      );
+    }
+    resolvedSourcePipelineIds[key] = pipelineId;
   }
-  const resolvedSourcePipelineIds = sourcePipelineIds as Record<string, string>;
 
   await Promise.all([
     db.repos.appSettings.upsert(SHARED_PIPELINE_SETTING_KEYS.jobId, String(result.jobId)),

@@ -153,6 +153,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
+  if (!isOnboardingRoute && appSettings.isPending) {
+    return null;
+  }
+
   if (appSettings.isSuccess && !catalogName && location.pathname !== '/onboarding/catalog') {
     return <Navigate to="/onboarding/catalog" replace />;
   }
