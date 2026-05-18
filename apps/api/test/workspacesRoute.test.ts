@@ -32,10 +32,18 @@ class MemoryWorkspacesRepo implements WorkspacesRepo {
     return this.rows.get(id) ?? null;
   }
 
+  async list(): Promise<WorkspaceValue[]> {
+    return Array.from(this.rows.values()).sort((a, b) => a.id.localeCompare(b.id));
+  }
+
   async upsert(id: string, domain: string): Promise<WorkspaceValue> {
     const row = { id, domain, updatedAt: new Date().toISOString() };
     this.rows.set(id, row);
     return row;
+  }
+
+  async delete(id: string): Promise<void> {
+    this.rows.delete(id);
   }
 
   async clear(): Promise<number> {
@@ -95,6 +103,54 @@ test('GET /api/workspaces/:id returns 404 when workspace mapping is missing', as
   try {
     const res = await fetch(`${server.base}/api/workspaces/123`);
     assert.equal(res.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test('GET /api/workspaces lists stored workspace mappings', async () => {
+  const server = await startServer();
+  try {
+    await fetch(`${server.base}/api/workspaces/456`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'b.cloud.databricks.com' }),
+    });
+    await fetch(`${server.base}/api/workspaces/123`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'a.cloud.databricks.com' }),
+    });
+
+    const res = await fetch(`${server.base}/api/workspaces`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { workspaces: WorkspaceValue[] };
+    assert.deepEqual(
+      body.workspaces.map((row) => [row.id, row.domain]),
+      [
+        ['123', 'a.cloud.databricks.com'],
+        ['456', 'b.cloud.databricks.com'],
+      ],
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test('DELETE /api/workspaces/:id removes a workspace mapping', async () => {
+  const server = await startServer();
+  try {
+    await fetch(`${server.base}/api/workspaces/123`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'target.cloud.databricks.com' }),
+    });
+
+    const deleted = await fetch(`${server.base}/api/workspaces/123`, { method: 'DELETE' });
+    assert.equal(deleted.status, 204);
+
+    const loaded = await fetch(`${server.base}/api/workspaces/123`);
+    assert.equal(loaded.status, 404);
   } finally {
     await server.close();
   }

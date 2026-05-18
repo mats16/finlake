@@ -594,6 +594,11 @@ class SqliteWorkspacesRepo implements WorkspacesRepo {
     return row ? toWorkspace(row) : null;
   }
 
+  async list(): Promise<WorkspaceValue[]> {
+    const rows = await this.db.select().from(s.workspaces).orderBy(s.workspaces.id);
+    return rows.map(toWorkspace);
+  }
+
   async upsert(id: string, domain: string): Promise<WorkspaceValue> {
     const updatedAt = new Date().toISOString();
     const row = { id, domain, updatedAt };
@@ -602,6 +607,10 @@ class SqliteWorkspacesRepo implements WorkspacesRepo {
       set: { domain, updatedAt },
     });
     return row;
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.delete(s.workspaces).where(eq(s.workspaces.id, id));
   }
 
   async clear(): Promise<number> {

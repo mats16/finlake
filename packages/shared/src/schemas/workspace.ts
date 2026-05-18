@@ -18,6 +18,12 @@ export const WorkspaceMappingSchema = z.object({
 
 export type WorkspaceMapping = z.infer<typeof WorkspaceMappingSchema>;
 
+export const WorkspaceMappingListResponseSchema = z.object({
+  workspaces: z.array(WorkspaceMappingSchema),
+});
+
+export type WorkspaceMappingListResponse = z.infer<typeof WorkspaceMappingListResponseSchema>;
+
 export const WorkspaceMappingUpsertBodySchema = z.object({
   domain: WorkspaceDomainSchema,
 });

@@ -615,6 +615,26 @@ export function DatabricksOptimize() {
         {activeTab === 'serverless' || activeTab === 'query' ? (
           <div className="page-header-actions">
             <div className="flex flex-wrap justify-end gap-2">
+              {activeTab === 'query' ? (
+                <Select
+                  value={queryWarehouseFilterKey}
+                  onValueChange={setSelectedQueryWarehouseKey}
+                >
+                  <SelectTrigger className="w-64">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      {t('optimize.databricks.query.warehouses.all')}
+                    </SelectItem>
+                    {queryWarehouseOptions.map((warehouse) => (
+                      <SelectItem key={warehouse.key} value={warehouse.key}>
+                        {warehouse.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
               <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
                 <SelectTrigger className="w-56">
                   <SelectValue />
@@ -644,26 +664,6 @@ export function DatabricksOptimize() {
                   ))}
                 </SelectContent>
               </Select>
-              {activeTab === 'query' ? (
-                <Select
-                  value={queryWarehouseFilterKey}
-                  onValueChange={setSelectedQueryWarehouseKey}
-                >
-                  <SelectTrigger className="w-64">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">
-                      {t('optimize.databricks.query.warehouses.all')}
-                    </SelectItem>
-                    {queryWarehouseOptions.map((warehouse) => (
-                      <SelectItem key={warehouse.key} value={warehouse.key}>
-                        {warehouse.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
               <Button
                 variant="outline"
                 onClick={refresh}

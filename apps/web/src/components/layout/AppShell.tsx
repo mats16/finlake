@@ -65,6 +65,7 @@ export const CONFIGURE: NavGroup = {
     { to: '/transformations', labelKey: 'nav.transformations' },
     { to: '/tags', labelKey: 'nav.tags' },
     { to: '/credentials', labelKey: 'nav.credentials' },
+    { to: '/workspaces', labelKey: 'nav.workspaces' },
     { to: '/admin', labelKey: 'nav.configureCatalog' },
   ],
 };

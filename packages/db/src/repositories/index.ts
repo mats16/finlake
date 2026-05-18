@@ -128,7 +128,9 @@ export interface WorkspaceValue {
 
 export interface WorkspacesRepo {
   get(id: string): Promise<WorkspaceValue | null>;
+  list(): Promise<WorkspaceValue[]>;
   upsert(id: string, domain: string): Promise<WorkspaceValue>;
+  delete(id: string): Promise<void>;
   clear(): Promise<number>;
 }
 

@@ -49,6 +49,7 @@ import type {
   UsageTopWorkloadRow,
   UpdateBudgetInput,
   WorkspaceMapping,
+  WorkspaceMappingListResponse,
   WorkspaceMappingUpsertBody,
 } from '@finlake/shared';
 import { apiFetch } from './client';
@@ -254,6 +255,13 @@ export function workspaceQueryKey(id: string) {
   return ['workspaces', id];
 }
 
+export function useWorkspaces() {
+  return useQuery({
+    queryKey: ['workspaces'],
+    queryFn: () => apiFetch<WorkspaceMappingListResponse>('/api/workspaces'),
+  });
+}
+
 export function useUpsertWorkspace() {
   const qc = useQueryClient();
   return useMutation({
@@ -264,6 +272,19 @@ export function useUpsertWorkspace() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(workspaceQueryKey(data.id), data);
+      qc.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: workspaceQueryKey(id) });
+      qc.invalidateQueries({ queryKey: ['workspaces'] });
     },
   });
 }
