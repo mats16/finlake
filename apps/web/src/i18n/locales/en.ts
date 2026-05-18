@@ -51,6 +51,8 @@ export const en = {
     domainPlaceholder: 'dbc-1234567890123456.cloud.databricks.com',
     saveAndOpen: 'Save and open',
     loadFailed: 'Could not check workspace mapping',
+    invalidDomain:
+      'Enter a Databricks workspace domain ending in .databricks.com or .azuredatabricks.net.',
   },
   workspaces: {
     title: 'Workspace domains',

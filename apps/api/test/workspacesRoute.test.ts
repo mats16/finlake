@@ -98,6 +98,38 @@ test('PUT /api/workspaces/:id stores only the domain from pasted workspace URLs'
   }
 });
 
+test('PUT /api/workspaces/:id stores Azure Databricks workspace domains', async () => {
+  const server = await startServer();
+  try {
+    const saved = await fetch(`${server.base}/api/workspaces/123`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'adb-5555555555555555.19.azuredatabricks.net' }),
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(
+      ((await saved.json()) as { domain: string }).domain,
+      'adb-5555555555555555.19.azuredatabricks.net',
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test('PUT /api/workspaces/:id rejects non-Databricks lookalike domains', async () => {
+  const server = await startServer();
+  try {
+    const saved = await fetch(`${server.base}/api/workspaces/123`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'evil-databricks.com' }),
+    });
+    assert.equal(saved.status, 400);
+  } finally {
+    await server.close();
+  }
+});
+
 test('GET /api/workspaces/:id returns 404 when workspace mapping is missing', async () => {
   const server = await startServer();
   try {

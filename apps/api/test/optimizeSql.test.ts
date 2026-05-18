@@ -290,8 +290,12 @@ test('buildDatabricksRecommendationsSql excludes blank resources and uses eligib
   assert.match(sql, /target\.serverless_sku_name_base = price\.serverless_sku_name_base/);
   assert.match(sql, /target\.region_id = price\.region_id/);
   assert.match(sql, /target\.pricing_unit = price\.pricing_unit/);
-  assert.doesNotMatch(sql, /price\.EffectiveDate/);
-  assert.doesNotMatch(sql, /price\.x_PriceEndTime/);
+  assert.match(
+    sql,
+    /MAX_BY\(CAST\(COALESCE\(EffectiveListUnitPrice, ListUnitPrice\) AS DOUBLE\), EffectiveDate\)/,
+  );
+  assert.match(sql, /x_PriceEndTime IS NULL/);
+  assert.doesNotMatch(sql, /MIN\(CAST\(COALESCE\(EffectiveListUnitPrice, ListUnitPrice\)/);
   assert.match(sql, /COALESCE\(EffectiveListUnitPrice, ListUnitPrice\)/);
   assert.match(sql, /target\.base_dbu \* price\.serverless_unit_price_usd/);
   assert.match(sql, /AS serverless_sku_name_base/);

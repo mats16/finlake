@@ -255,6 +255,16 @@ export function workspaceQueryKey(id: string) {
   return ['workspaces', id];
 }
 
+export const WORKSPACE_MAPPING_STALE_MS = 5 * 60 * 1000;
+
+export function workspaceQueryOptions(id: string) {
+  return {
+    queryKey: workspaceQueryKey(id),
+    queryFn: () => apiFetch<WorkspaceMapping>(`/api/workspaces/${encodeURIComponent(id)}`),
+    staleTime: WORKSPACE_MAPPING_STALE_MS,
+  };
+}
+
 export function useWorkspaces() {
   return useQuery({
     queryKey: ['workspaces'],

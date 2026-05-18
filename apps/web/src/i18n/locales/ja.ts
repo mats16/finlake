@@ -53,6 +53,8 @@ export const ja: Dictionary = {
     domainPlaceholder: 'dbc-1234567890123456.cloud.databricks.com',
     saveAndOpen: '保存して開く',
     loadFailed: 'ワークスペースマッピングを確認できませんでした',
+    invalidDomain:
+      '.databricks.com または .azuredatabricks.net で終わる Databricks ワークスペースドメインを入力してください。',
   },
   workspaces: {
     title: 'ワークスペースドメイン',

@@ -19,6 +19,8 @@ const DEFAULT_DATABRICKS_TABLE = 'databricks_usage';
 const KNOWN_COST_DENOMINATOR = '(serverless_cost_usd + non_serverless_cost_usd)';
 const AWS_EC2_PRICING_TABLE_SQL = '`finops`.`pricing`.`aws_ec2`';
 const EC2_REFERENCE_INSTANCE_TYPE = 'r6i.xlarge';
+// TODO: replace this MVP cap with API pagination or a Load more flow.
+const DATABRICKS_QUERY_ATTRIBUTION_LIMIT = 100;
 const DEFAULT_DATABRICKS_LIST_PRICES_TABLE_SQL = [
   PRICING_SCHEMA_DEFAULT,
   DATABRICKS_LIST_PRICES_TABLE_DEFAULT,
@@ -439,7 +441,7 @@ FROM query_metrics qm
     ON qm.workspace_id = wc.workspace_id
     AND qm.warehouse_id = wc.warehouse_id
 ORDER BY allocated_cost_usd DESC NULLS LAST, query_execution_ms DESC
-LIMIT 100
+LIMIT ${DATABRICKS_QUERY_ATTRIBUTION_LIMIT}
 `;
 }
 
@@ -615,9 +617,10 @@ databricks_serverless_prices AS (
     x_SkuNameBase AS serverless_sku_name_base,
     RegionId AS region_id,
     PricingUnit AS pricing_unit,
-    CAST(MIN(CAST(COALESCE(EffectiveListUnitPrice, ListUnitPrice) AS DOUBLE)) AS DOUBLE) AS serverless_unit_price_usd
+    CAST(MAX_BY(CAST(COALESCE(EffectiveListUnitPrice, ListUnitPrice) AS DOUBLE), EffectiveDate) AS DOUBLE) AS serverless_unit_price_usd
   FROM ${databricksListPricesTableSql}
   WHERE COALESCE(EffectiveListUnitPrice, ListUnitPrice) IS NOT NULL
+    AND x_PriceEndTime IS NULL
   GROUP BY x_SkuNameBase, RegionId, PricingUnit
 ),
 filtered_with_dbu AS (

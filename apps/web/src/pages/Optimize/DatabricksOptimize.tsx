@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Bar,
   CartesianGrid,
@@ -89,6 +90,7 @@ import {
   buildDatabricksTrendStatement,
   buildDatabricksWorkspacesStatement,
   resolveDatabricksOptimizeSources,
+  WorkspaceDomainSchema,
   type DatabricksClusterUtilizationRow,
   type DatabricksOptimizationRecommendation,
   type DatabricksOptimizationServiceRow,
@@ -97,14 +99,14 @@ import {
   type DatabricksQueryAttributionRow,
   type DatabricksQueryWarehouseTrendRow,
   type DatabricksTrendGrain,
-  type WorkspaceMapping,
 } from '@finlake/shared';
-import { apiFetch, type ApiError } from '../../api/client';
+import type { ApiError } from '../../api/client';
 import {
   useAppSettings,
   useDataSources,
   useSqlStatement,
   useUpsertWorkspace,
+  workspaceQueryOptions,
 } from '../../api/hooks';
 import { useCurrencyUsd, useI18n } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
@@ -612,68 +614,63 @@ export function DatabricksOptimize() {
         <div className="page-header-content">
           <h2>{t('optimize.databricks.title')}</h2>
         </div>
-        {activeTab === 'serverless' || activeTab === 'query' ? (
-          <div className="page-header-actions">
-            <div className="flex flex-wrap justify-end gap-2">
-              {activeTab === 'query' ? (
-                <Select
-                  value={queryWarehouseFilterKey}
-                  onValueChange={setSelectedQueryWarehouseKey}
-                >
-                  <SelectTrigger className="w-64">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">
-                      {t('optimize.databricks.query.warehouses.all')}
-                    </SelectItem>
-                    {queryWarehouseOptions.map((warehouse) => (
-                      <SelectItem key={warehouse.key} value={warehouse.key}>
-                        {warehouse.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-              <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
-                <SelectTrigger className="w-56">
+        <div className="page-header-actions">
+          <div className="flex flex-wrap justify-end gap-2">
+            {activeTab === 'query' ? (
+              <Select value={queryWarehouseFilterKey} onValueChange={setSelectedQueryWarehouseKey}>
+                <SelectTrigger className="w-64">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
-                  {workspaceOptions.map((workspace) => {
-                    const value = workspace.workspaceId ?? '';
-                    if (!value) return null;
-                    return (
-                      <SelectItem key={value} value={value}>
-                        {workspace.workspaceName || value}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-              <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PERIODS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {t(`optimize.databricks.period.${option}`)}
+                  <SelectItem value="all">
+                    {t('optimize.databricks.query.warehouses.all')}
+                  </SelectItem>
+                  {queryWarehouseOptions.map((warehouse) => (
+                    <SelectItem key={warehouse.key} value={warehouse.key}>
+                      {warehouse.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                variant="outline"
-                onClick={refresh}
-                disabled={activeTab === 'query' ? queryLoading : loading}
-              >
-                <RefreshCcw /> {t('dashboard.refresh')}
-              </Button>
-            </div>
+            ) : null}
+            <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
+                {workspaceOptions.map((workspace) => {
+                  const value = workspace.workspaceId ?? '';
+                  if (!value) return null;
+                  return (
+                    <SelectItem key={value} value={value}>
+                      {workspace.workspaceName || value}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PERIODS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {t(`optimize.databricks.period.${option}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={refresh}
+              disabled={activeTab === 'query' ? queryLoading : loading}
+            >
+              <RefreshCcw /> {t('dashboard.refresh')}
+            </Button>
           </div>
-        ) : null}
+        </div>
       </div>
       <nav className="upper-tabs" role="tablist" aria-label={t('optimize.databricks.title')}>
         {DATABRICKS_OPTIMIZE_TABS.map((tab) => (
@@ -1858,6 +1855,7 @@ function ResourceNameLink({
   const [modalOpen, setModalOpen] = useState(false);
   const [domain, setDomain] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const upsertWorkspace = useUpsertWorkspace();
   if (!target) {
     return <span className="truncate font-medium">{name}</span>;
@@ -1868,11 +1866,10 @@ function ResourceNameLink({
     event.preventDefault();
     setError(null);
     const popup = window.open('about:blank', '_blank');
+    // Do not pass noopener here; we need to redirect this pre-opened popup after the async lookup.
     if (popup) popup.opener = null;
     try {
-      const workspace = await apiFetch<WorkspaceMapping>(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}`,
-      );
+      const workspace = await queryClient.fetchQuery(workspaceQueryOptions(workspaceId));
       const url = databricksUrl(workspace.domain, target);
       if (popup) {
         popup.location.href = url;
@@ -1897,8 +1894,13 @@ function ResourceNameLink({
     event.preventDefault();
     if (!workspaceId || !target) return;
     setError(null);
+    const parsedDomain = WorkspaceDomainSchema.safeParse(domain);
+    if (!parsedDomain.success) {
+      setError(t('workspaceMapping.invalidDomain'));
+      return;
+    }
     upsertWorkspace.mutate(
-      { id: workspaceId, body: { domain } },
+      { id: workspaceId, body: { domain: parsedDomain.data } },
       {
         onSuccess: (workspace) => {
           setModalOpen(false);
@@ -2012,7 +2014,11 @@ function databricksResourcePath(serviceName: string, resourceId: string): string
 }
 
 function databricksUrl(domain: string, target: DatabricksLinkTarget): string {
-  const cleanDomain = domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const parsedDomain = WorkspaceDomainSchema.safeParse(domain);
+  if (!parsedDomain.success) {
+    throw new Error(parsedDomain.error.issues[0]?.message ?? 'invalid Databricks workspace domain');
+  }
+  const cleanDomain = parsedDomain.data;
   const path = target.path.startsWith('/') ? target.path : `/${target.path}`;
   const url = new URL(path, `https://${cleanDomain}`);
   for (const [key, value] of Object.entries(target.params ?? {})) {
