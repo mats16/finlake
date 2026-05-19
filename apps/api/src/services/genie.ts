@@ -92,7 +92,7 @@ interface ResolvedGenieContext {
   host: string;
   token: string;
   spaceId: string;
-  authMode: 'obo' | 'service_principal';
+  authMode: 'obo';
 }
 
 const GENIE_PURPOSE_CONFIG: Record<GenieSpacePurpose, GeniePurposeConfig> = {
@@ -452,11 +452,14 @@ async function resolveGenieContext(
     throw new GenieServiceError('DATABRICKS_HOST is required.', 500);
   }
   const userToken = userAccessToken?.trim();
+  if (!userToken) {
+    throw new GenieServiceError('Genie requires an OBO access token.', 401);
+  }
   return {
     host,
     spaceId,
-    token: userToken || (await fetchServicePrincipalToken(host, env, GenieServiceError)),
-    authMode: userToken ? 'obo' : 'service_principal',
+    token: userToken,
+    authMode: 'obo',
   };
 }
 

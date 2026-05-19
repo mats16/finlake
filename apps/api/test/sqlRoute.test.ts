@@ -440,10 +440,13 @@ test('StatementExecutor.getRaw converts snake_case result columns to camelCase r
             columns: [
               { name: 'sample_value', type_name: 'STRING' },
               { name: 'cost_usd', type_name: 'DOUBLE' },
+              { name: 'is_deleted', type_name: 'BOOLEAN' },
+              { name: 'is_active', type_name: 'BOOLEAN' },
+              { name: 'invalid_flag', type_name: 'BOOLEAN' },
             ],
           },
         },
-        result: { data_array: [['ok', '12.5']] },
+        result: { data_array: [['ok', '12.5', 'false', '1', 'not-a-boolean']] },
       }),
     },
   } as unknown as WorkspaceClient;
@@ -453,7 +456,15 @@ test('StatementExecutor.getRaw converts snake_case result columns to camelCase r
   } as StatementExecutorOpts);
 
   const result = await executor.getRaw('stmt-123');
-  assert.deepEqual(result.rows, [{ sampleValue: 'ok', costUsd: 12.5 }]);
+  assert.deepEqual(result.rows, [
+    {
+      sampleValue: 'ok',
+      costUsd: 12.5,
+      isDeleted: false,
+      isActive: true,
+      invalidFlag: null,
+    },
+  ]);
 });
 
 test('StatementExecutor.submitRaw can override the default warehouse_id', async () => {

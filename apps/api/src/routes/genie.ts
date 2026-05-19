@@ -59,6 +59,7 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
           .json({ error: { message: parsed.error.issues[0]?.message ?? 'Invalid request' } });
         return;
       }
+      if (!requireOboAccessToken(req.user?.accessToken, res)) return;
       const result = await askFinLakeGenie(env, db, {
         ...parsed.data,
         purpose: DEFAULT_GENIE_SPACE_PURPOSE,
@@ -118,6 +119,7 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
           .json({ error: { message: parsed.error.issues[0]?.message ?? 'Invalid request' } });
         return;
       }
+      if (!requireOboAccessToken(req.user?.accessToken, res)) return;
       prepareSse(res);
       await streamFinLakeGenieMessage(env, db, {
         ...parsed.data,
@@ -135,6 +137,7 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
     try {
       const purpose = geniePurposeOr404(req.params.alias, res);
       if (!purpose) return;
+      if (!requireOboAccessToken(req.user?.accessToken, res)) return;
       prepareSse(res);
       await streamFinLakeGenieConversation(env, db, {
         purpose,
@@ -156,6 +159,7 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
       try {
         const purpose = geniePurposeOr404(req.params.alias, res);
         if (!purpose) return;
+        if (!requireOboAccessToken(req.user?.accessToken, res)) return;
         prepareSse(res);
         await streamFinLakeGenieExistingMessage(env, db, {
           purpose,
@@ -181,6 +185,12 @@ function geniePurposeOr404(alias: string | undefined, res: Response) {
     return null;
   }
   return purpose;
+}
+
+function requireOboAccessToken(accessToken: string | undefined, res: Response): boolean {
+  if (accessToken?.trim()) return true;
+  res.status(401).json({ error: { message: 'Genie requires an OBO access token.' } });
+  return false;
 }
 
 function prepareSse(res: Response): void {

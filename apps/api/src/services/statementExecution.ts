@@ -349,6 +349,17 @@ function statementRows(response: StatementResponse): Record<string, unknown>[] {
 
 function coerce(v: string | number | null | undefined, typeName: string | undefined): unknown {
   if (v === null || v === undefined) return null;
+  if (typeName === 'BOOLEAN') {
+    if (typeof v === 'number') {
+      if (v === 1) return true;
+      if (v === 0) return false;
+      return null;
+    }
+    const normalized = v.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+    return null;
+  }
   if (
     typeName === 'INT' ||
     typeName === 'BIGINT' ||

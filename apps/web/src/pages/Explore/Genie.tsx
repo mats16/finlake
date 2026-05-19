@@ -87,6 +87,12 @@ export function Genie() {
             </div>
           </CardContent>
         </Card>
+      ) : genieSpace.error instanceof Error ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>{t('genie.loadFailed')}</AlertTitle>
+          <AlertDescription>{genieSpace.error.message}</AlertDescription>
+        </Alert>
       ) : genieSpaceId ? (
         <GenieApiChatSurface
           alias={purpose}

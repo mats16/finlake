@@ -390,7 +390,7 @@ export const en = {
         },
         resources: {
           title: 'Cluster resources',
-          desc: 'Classic compute clusters joined with FOCUS cost and system.compute utilization metrics.',
+          desc: 'Classic compute clusters joined with FOCUS cost and system.compute utilization metrics. Owner and configuration columns use the latest cluster record.',
         },
         trend: {
           title: 'Cluster trend',
@@ -483,6 +483,7 @@ export const en = {
     catalogMissingDesc: 'Set the main catalog in Configure before creating a Genie Space.',
     setupFailed: 'Genie setup failed',
     deleteFailed: 'Genie Space delete failed',
+    loadFailed: 'Genie Space load failed',
     configuredTitle: 'Genie Space configured',
     configuredDesc: 'FinLake has a saved Genie Space ID in app settings.',
     spaceReady: 'Ready',

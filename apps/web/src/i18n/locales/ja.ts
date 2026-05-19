@@ -395,7 +395,7 @@ export const ja: Dictionary = {
         },
         resources: {
           title: 'Cluster リソース',
-          desc: 'Classic compute clusters を FOCUS コストと system.compute 利用率メトリクスに結合して表示します。',
+          desc: 'Classic compute clusters を FOCUS コストと system.compute 利用率メトリクスに結合して表示します。所有者と構成列は最新の cluster record を使用します。',
         },
         trend: {
           title: 'Cluster トレンド',
@@ -488,6 +488,7 @@ export const ja: Dictionary = {
     catalogMissingDesc: 'Genie Space を作成する前に、構成でメインカタログを設定してください。',
     setupFailed: 'Genie のセットアップに失敗しました',
     deleteFailed: 'Genie Space の削除に失敗しました',
+    loadFailed: 'Genie Space を読み込めませんでした',
     configuredTitle: 'Genie Space は設定済みです',
     configuredDesc: 'app settings に Genie Space ID が保存されています。',
     spaceReady: '準備完了',

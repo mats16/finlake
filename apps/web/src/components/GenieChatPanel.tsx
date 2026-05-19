@@ -31,12 +31,20 @@ export function GenieChatPanel({
 }) {
   const sentInitialPromptRef = useRef<string | null>(null);
   const lastResetSignalRef = useRef(resetSignal ?? 0);
+  const lastAliasRef = useRef(alias);
   const { messages, status, error, sendMessage, reset, hasPreviousPage, fetchPreviousPage } =
     useGenieChat({
       alias,
       basePath: '/api/genie',
       persistInUrl: false,
     });
+
+  useEffect(() => {
+    if (alias === lastAliasRef.current) return;
+    lastAliasRef.current = alias;
+    sentInitialPromptRef.current = null;
+    reset();
+  }, [alias, reset]);
 
   useEffect(() => {
     const prompt = initialPrompt?.trim();
