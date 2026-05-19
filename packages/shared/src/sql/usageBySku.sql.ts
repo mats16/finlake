@@ -1,7 +1,15 @@
 export const usageBySkuSql = /* sql */ `
 SELECT
   u.sku_name                                                AS sku_name,
-  SUM(u.usage_quantity * lp.pricing.effective_list.default) AS cost_usd
+  SUM(
+    u.usage_quantity *
+    CAST(
+      COALESCE(
+        get_json_object(to_json(lp.pricing), '$.effective_list.default'),
+        get_json_object(to_json(lp.pricing), '$.default')
+      ) AS DOUBLE
+    )
+  ) AS cost_usd
 FROM system.billing.usage u
 LEFT JOIN system.billing.list_prices lp
   ON  u.cloud    = lp.cloud

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isActivePricingRunStatus, isTerminalSqlStatus } from '@finlake/shared';
+import { useSelectedSqlWarehouse } from '../contexts/SqlWarehouseContext';
 import type {
   Budget,
   AdminCleanupResponse,
@@ -21,6 +22,8 @@ import type {
   ExternalLocationListResponse,
   GenieChatRequest,
   GenieChatResponse,
+  GenieSpacePurpose,
+  GenieSpaceResponse,
   GenieSetupResponse,
   GovernedTagsResponse,
   GovernedTagSyncBody,
@@ -36,12 +39,15 @@ import type {
   ServiceCredentialCreateBody,
   ServiceCredentialCreateResponse,
   ServiceCredentialListResponse,
+  SqlWarehouseListResponse,
   SqlStatementColumn,
   SqlStatementResultResponse,
   SqlStatementSubmitRequest,
   StorageCredentialCreateBody,
   StorageCredentialCreateResponse,
   StorageCredentialListResponse,
+  TransformationResourceRunBody,
+  TransformationResourceRunResult,
   TransformationPipelinesResponse,
   TransformationSharedRunResult,
   UsageBySkuRow,
@@ -53,42 +59,60 @@ import type {
   WorkspaceMappingUpsertBody,
 } from '@finlake/shared';
 import { apiFetch } from './client';
-import { getSqlStatement, submitSqlStatement } from './sql';
+import { getSqlStatement, listSqlWarehouses, submitSqlStatement } from './sql';
 
 interface RangeParams {
   start: string;
   end: string;
   workspaceId?: string;
+  warehouseId?: string;
+}
+
+function withWarehouseId<T extends object>(
+  obj: T,
+  warehouseId: string | null,
+): T & { warehouseId?: string } {
+  return warehouseId ? { ...obj, warehouseId } : obj;
 }
 
 function rangeQuery(range: RangeParams): string {
   const sp = new URLSearchParams({ start: range.start, end: range.end });
   if (range.workspaceId) sp.set('workspaceId', range.workspaceId);
+  if (range.warehouseId) sp.set('warehouseId', range.warehouseId);
   return sp.toString();
 }
 
 export function useUsageDaily(range: RangeParams, enabled = true) {
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
+  const effectiveRange = withWarehouseId(range, selectedWarehouseId);
   return useQuery({
-    queryKey: ['usage', 'daily', range],
-    queryFn: () => apiFetch<UsageDailyResponse>(`/api/usage/daily?${rangeQuery(range)}`),
-    enabled,
+    queryKey: ['usage', 'daily', effectiveRange],
+    queryFn: () => apiFetch<UsageDailyResponse>(`/api/usage/daily?${rangeQuery(effectiveRange)}`),
+    enabled: enabled && Boolean(effectiveRange.warehouseId),
   });
 }
 
 export function useUsageBySku(range: RangeParams, enabled = true) {
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
+  const effectiveRange = withWarehouseId(range, selectedWarehouseId);
   return useQuery({
-    queryKey: ['usage', 'bySku', range],
-    queryFn: () => apiFetch<{ rows: UsageBySkuRow[] }>(`/api/usage/by-sku?${rangeQuery(range)}`),
-    enabled,
+    queryKey: ['usage', 'bySku', effectiveRange],
+    queryFn: () =>
+      apiFetch<{ rows: UsageBySkuRow[] }>(`/api/usage/by-sku?${rangeQuery(effectiveRange)}`),
+    enabled: enabled && Boolean(effectiveRange.warehouseId),
   });
 }
 
 export function useUsageTopWorkloads(range: RangeParams, enabled = true) {
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
+  const effectiveRange = withWarehouseId(range, selectedWarehouseId);
   return useQuery({
-    queryKey: ['usage', 'top', range],
+    queryKey: ['usage', 'top', effectiveRange],
     queryFn: () =>
-      apiFetch<{ rows: UsageTopWorkloadRow[] }>(`/api/usage/top-workloads?${rangeQuery(range)}`),
-    enabled,
+      apiFetch<{ rows: UsageTopWorkloadRow[] }>(
+        `/api/usage/top-workloads?${rangeQuery(effectiveRange)}`,
+      ),
+    enabled: enabled && Boolean(effectiveRange.warehouseId),
   });
 }
 
@@ -115,13 +139,28 @@ export function useSqlStatement<T = Record<string, unknown>>(
     requestKey,
     staleTimeMs = 60_000,
   } = options;
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   const [refreshIndex, setRefreshIndex] = useState(0);
-  const statementKey = requestKey ?? input ?? null;
-  const canSubmit = enabled && input !== null && input !== undefined;
+  const effectiveWarehouseId = input?.warehouse_id ?? selectedWarehouseId;
+  const effectiveInput = useMemo(() => {
+    if (!input || !effectiveWarehouseId) return input;
+    if (input.warehouse_id === effectiveWarehouseId) return input;
+    return { ...input, warehouse_id: effectiveWarehouseId };
+  }, [effectiveWarehouseId, input]);
+  const selectedWarehouseKey = effectiveInput?.warehouse_id ?? null;
+  const statementKey =
+    requestKey !== undefined
+      ? ['request', requestKey, 'warehouse', selectedWarehouseKey]
+      : (effectiveInput ?? null);
+  const canSubmit =
+    enabled &&
+    effectiveInput !== null &&
+    effectiveInput !== undefined &&
+    Boolean(effectiveInput.warehouse_id);
 
   const submitQuery = useQuery({
     queryKey: ['sql', 'submit', statementKey, refreshIndex],
-    queryFn: () => submitSqlStatement(input!),
+    queryFn: () => submitSqlStatement(effectiveInput!),
     enabled: canSubmit,
     retry: false,
     staleTime: staleTimeMs,
@@ -178,6 +217,15 @@ export function useSqlStatement<T = Record<string, unknown>>(
         : resultQuery.dataUpdatedAt,
     refetch,
   };
+}
+
+export function useSqlWarehouses() {
+  return useQuery({
+    queryKey: ['sql', 'warehouses'],
+    queryFn: (): Promise<SqlWarehouseListResponse> => listSqlWarehouses(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
 }
 
 export function useBudgets(workspaceId?: string) {
@@ -310,7 +358,7 @@ export interface AppSettingsUpdateResponse extends AppSettingsResponse {
 
 export interface UpdateAppSettingsArgs {
   settings: Record<string, string>;
-  provision?: { createIfMissing?: boolean };
+  provision?: { createIfMissing?: boolean; warehouseId?: string };
 }
 
 export function useAppSettings() {
@@ -344,11 +392,12 @@ export function useUpdateAppSettings() {
 
 export function useAdminCleanup() {
   const qc = useQueryClient();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   return useMutation({
     mutationFn: (body: { deleteCatalog?: boolean } = {}) =>
       apiFetch<AdminCleanupResponse>('/api/admin/cleanup', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(withWarehouseId(body, selectedWarehouseId)),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appSettings'] });
@@ -361,29 +410,41 @@ export function useAdminCleanup() {
   });
 }
 
-export function useSetupGenieSpace() {
+export function useGenieSpace(purpose: GenieSpacePurpose = 'finops') {
+  return useQuery({
+    queryKey: ['genieSpace', purpose],
+    queryFn: () => apiFetch<GenieSpaceResponse>(`/api/genie/${encodeURIComponent(purpose)}/space`),
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
+export function useSetupGenieSpace(purpose: GenieSpacePurpose = 'finops') {
   const qc = useQueryClient();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   return useMutation({
     mutationFn: () =>
-      apiFetch<GenieSetupResponse>('/api/genie/setup', {
+      apiFetch<GenieSetupResponse>(`/api/genie/${encodeURIComponent(purpose)}/setup`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify(withWarehouseId({}, selectedWarehouseId)),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['genieSpace', purpose] });
     },
   });
 }
 
-export function useDeleteGenieSpace() {
+export function useDeleteGenieSpace(purpose: GenieSpacePurpose = 'finops') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      apiFetch<void>('/api/genie/space', {
+      apiFetch<void>(`/api/genie/${encodeURIComponent(purpose)}/space`, {
         method: 'DELETE',
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['genieSpace', purpose] });
     },
   });
 }
@@ -578,8 +639,9 @@ export function useDataSource(key: DataSourceKey | undefined) {
   });
 }
 
-export function useCreateDataSource() {
+export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
     mutationFn: (body: DataSourceCreateBody) =>
       apiFetch<DataSource>('/api/integrations/configurations', {
@@ -588,7 +650,9 @@ export function useCreateDataSource() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(dataSourceQueryKey(data), data);
-      qc.invalidateQueries({ queryKey: ['dataSources'] });
+      if (invalidateOnSuccess) {
+        qc.invalidateQueries({ queryKey: ['dataSources'] });
+      }
     },
   });
 }
@@ -624,30 +688,38 @@ export function useDeleteDataSource() {
   });
 }
 
-export function useSetupDataSource() {
+export function useSetupDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
+  const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
     mutationFn: ({ key, body }: { key: DataSourceKey; body: DataSourceSetupBody }) =>
       apiFetch<DataSourceSetupResult>(dsConfigPath(key, '/setup'), {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(body.warehouseId ? body : withWarehouseId(body, selectedWarehouseId)),
       }),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: dataSourceQueryKey(data.dataSourceKey) });
-      qc.invalidateQueries({ queryKey: ['dataSources'] });
-      qc.invalidateQueries({ queryKey: ['appSettings'] });
-      qc.invalidateQueries({ queryKey: ['transformations'] });
+      if (invalidateOnSuccess) {
+        qc.invalidateQueries({ queryKey: dataSourceQueryKey(data.dataSourceKey) });
+        qc.invalidateQueries({ queryKey: ['dataSources'] });
+        qc.invalidateQueries({ queryKey: ['appSettings'] });
+        qc.invalidateQueries({ queryKey: ['transformations'] });
+      }
     },
   });
 }
 
 export function useRunDataSourceJob() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (key: DataSourceKey) =>
       apiFetch<DataSourceRunResult>(dsConfigPath(key, '/run'), {
         method: 'POST',
         body: JSON.stringify({}),
       }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transformations'] });
+    },
   });
 }
 
@@ -667,6 +739,20 @@ export function useRunSharedTransformationJob() {
       apiFetch<TransformationSharedRunResult>('/api/transformations/shared-run', {
         method: 'POST',
         body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transformations'] });
+    },
+  });
+}
+
+export function useRunTransformationResource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TransformationResourceRunBody) =>
+      apiFetch<TransformationResourceRunResult>('/api/transformations/run', {
+        method: 'POST',
+        body: JSON.stringify(body),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transformations'] });
@@ -703,10 +789,12 @@ export function useRunNotebook() {
 
 export function useDeletePricingNotebook() {
   const qc = useQueryClient();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<PricingNotebookDeleteResult>(`/api/pricing/${encodeURIComponent(id)}`, {
         method: 'DELETE',
+        body: JSON.stringify(withWarehouseId({}, selectedWarehouseId)),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pricing'] });
@@ -725,11 +813,14 @@ export function useGetJobRunLink() {
 
 export function useRunSetupCheck() {
   const qc = useQueryClient();
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
   return useMutation({
     mutationFn: ({ step, body }: { step: SetupStepId; body?: Record<string, unknown> }) =>
       apiFetch<SetupCheckResult>(`/api/setup/check/${step}`, {
         method: 'POST',
-        body: JSON.stringify(body ?? {}),
+        body: JSON.stringify(
+          body?.warehouseId ? (body ?? {}) : withWarehouseId(body ?? {}, selectedWarehouseId),
+        ),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['setup'] }),
   });

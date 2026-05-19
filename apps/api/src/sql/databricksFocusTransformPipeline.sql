@@ -56,8 +56,16 @@ SELECT
   wh.warehouse_name,
   lp.currency_code,
   lp.price_start_time,
-  CAST(lp.pricing.default AS DECIMAL(30, 15)) AS list_unit_price,
-  CAST(ap.pricing.default AS DECIMAL(30, 15)) AS account_unit_price
+  CAST(get_json_object(to_json(lp.pricing), '$.default') AS DECIMAL(30, 15)) AS list_unit_price,
+  CAST(
+    COALESCE(
+      get_json_object(to_json(ap.pricing), '$.effective_list.default'),
+      get_json_object(to_json(ap.pricing), '$.default'),
+      get_json_object(to_json(lp.pricing), '$.effective_list.default'),
+      get_json_object(to_json(lp.pricing), '$.default')
+    )
+    AS DECIMAL(30, 15)
+  ) AS account_unit_price
 FROM system.billing.usage u
   LEFT JOIN list_prices lp
     ON u.sku_name = lp.sku_name

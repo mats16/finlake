@@ -56,7 +56,19 @@ import {
 
 type PricingProviderFilter = 'aws' | 'databricks';
 
-export function Pricing({ provider }: { provider: PricingProviderFilter }) {
+interface PricingProps {
+  provider: PricingProviderFilter;
+  backTo?: string;
+  eyebrowKey?: string;
+  backLabelKey?: string;
+}
+
+export function Pricing({
+  provider,
+  backTo = '/integrations',
+  eyebrowKey = 'dataSources.detail.eyebrow',
+  backLabelKey = 'dataSources.detail.backToIntegrations',
+}: PricingProps) {
   const { t } = useI18n();
   const me = useMe();
   const appSettings = useAppSettings();
@@ -103,7 +115,12 @@ export function Pricing({ provider }: { provider: PricingProviderFilter }) {
 
   return (
     <>
-      <PricingHeader provider={provider} />
+      <PricingHeader
+        provider={provider}
+        backTo={backTo}
+        eyebrowKey={eyebrowKey}
+        backLabelKey={backLabelKey}
+      />
 
       <div className="mb-4">
         <p className="text-muted-foreground m-0 text-sm">{t('pricing.desc')}</p>
@@ -178,7 +195,17 @@ export function Pricing({ provider }: { provider: PricingProviderFilter }) {
   );
 }
 
-function PricingHeader({ provider }: { provider: PricingProviderFilter }) {
+function PricingHeader({
+  provider,
+  backTo,
+  eyebrowKey,
+  backLabelKey,
+}: {
+  provider: PricingProviderFilter;
+  backTo: string;
+  eyebrowKey: string;
+  backLabelKey: string;
+}) {
   const { t } = useI18n();
   const template = pricingTemplateForProvider(provider);
   const logo =
@@ -190,11 +217,11 @@ function PricingHeader({ provider }: { provider: PricingProviderFilter }) {
         <VendorLogo source={template} logo={logo} size={44} />
         <div>
           <Link
-            to="/integrations"
-            aria-label={t('dataSources.detail.backToIntegrations')}
+            to={backTo}
+            aria-label={t(backLabelKey)}
             className="text-muted-foreground hover:text-foreground text-sm transition-colors"
           >
-            {t('dataSources.detail.eyebrow')}
+            {t(eyebrowKey)}
           </Link>
           <h3 className="m-0 text-xl font-semibold">{template.name}</h3>
         </div>

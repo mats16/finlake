@@ -1,10 +1,17 @@
-import { Router, type Response } from 'express';
+import { Router, type NextFunction, type Response } from 'express';
 import type { DatabaseClient } from '@finlake/db';
-import { GenieChatRequestSchema, type Env } from '@finlake/shared';
+import {
+  DEFAULT_GENIE_SPACE_PURPOSE,
+  GenieChatRequestSchema,
+  GenieSetupRequestSchema,
+  type Env,
+} from '@finlake/shared';
 import {
   GenieServiceError,
   askFinLakeGenie,
   deleteFinLakeGenieSpace,
+  getGenieSpaceStatus,
+  normalizeGeniePurpose,
   setupFinLakeGenieSpace,
   streamFinLakeGenieConversation,
   streamFinLakeGenieExistingMessage,
@@ -17,14 +24,20 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
 
   router.post('/setup', async (req, res, next) => {
     try {
-      const result = await setupFinLakeGenieSpace(env, db);
-      res.json(result);
-    } catch (err) {
-      if (err instanceof GenieServiceError) {
-        res.status(err.statusCode).json({ error: { message: err.message } });
+      const parsed = GenieSetupRequestSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: { message: 'Invalid input', issues: parsed.error.issues } });
         return;
       }
-      next(err);
+      const result = await setupFinLakeGenieSpace(
+        env,
+        db,
+        parsed.data.warehouseId,
+        DEFAULT_GENIE_SPACE_PURPOSE,
+      );
+      res.json(result);
+    } catch (err) {
+      handleJsonError(err, res, next);
     }
   });
 
@@ -33,11 +46,7 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
       await deleteFinLakeGenieSpace(env, db);
       res.status(204).end();
     } catch (err) {
-      if (err instanceof GenieServiceError) {
-        res.status(err.statusCode).json({ error: { message: err.message } });
-        return;
-      }
-      next(err);
+      handleJsonError(err, res, next);
     }
   });
 
@@ -50,28 +59,59 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
           .json({ error: { message: parsed.error.issues[0]?.message ?? 'Invalid request' } });
         return;
       }
+      if (!requireOboAccessToken(req.user?.accessToken, res)) return;
       const result = await askFinLakeGenie(env, db, {
         ...parsed.data,
+        purpose: DEFAULT_GENIE_SPACE_PURPOSE,
         userAccessToken: req.user?.accessToken,
       });
       res.json(result);
     } catch (err) {
-      if (err instanceof GenieServiceError) {
-        res.status(err.statusCode).json({ error: { message: err.message } });
+      handleJsonError(err, res, next);
+    }
+  });
+
+  router.get('/:alias/space', async (req, res, next) => {
+    try {
+      const purpose = geniePurposeOr404(req.params.alias, res);
+      if (!purpose) return;
+      res.json(await getGenieSpaceStatus(db, purpose));
+    } catch (err) {
+      handleJsonError(err, res, next);
+    }
+  });
+
+  router.post('/:alias/setup', async (req, res, next) => {
+    try {
+      const purpose = geniePurposeOr404(req.params.alias, res);
+      if (!purpose) return;
+      const parsed = GenieSetupRequestSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: { message: 'Invalid input', issues: parsed.error.issues } });
         return;
       }
-      next(err);
+      const result = await setupFinLakeGenieSpace(env, db, parsed.data.warehouseId, purpose);
+      res.json(result);
+    } catch (err) {
+      handleJsonError(err, res, next);
+    }
+  });
+
+  router.delete('/:alias/space', async (req, res, next) => {
+    try {
+      const purpose = geniePurposeOr404(req.params.alias, res);
+      if (!purpose) return;
+      await deleteFinLakeGenieSpace(env, db, purpose);
+      res.status(204).end();
+    } catch (err) {
+      handleJsonError(err, res, next);
     }
   });
 
   router.post('/:alias/messages', async (req, res, next) => {
     try {
-      if (!isFinLakeAlias(req.params.alias)) {
-        res
-          .status(404)
-          .json({ error: { message: `Unknown Genie space alias: ${req.params.alias}` } });
-        return;
-      }
+      const purpose = geniePurposeOr404(req.params.alias, res);
+      if (!purpose) return;
       const parsed = GenieChatRequestSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         res
@@ -79,9 +119,11 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
           .json({ error: { message: parsed.error.issues[0]?.message ?? 'Invalid request' } });
         return;
       }
+      if (!requireOboAccessToken(req.user?.accessToken, res)) return;
       prepareSse(res);
       await streamFinLakeGenieMessage(env, db, {
         ...parsed.data,
+        purpose,
         userAccessToken: req.user?.accessToken,
         emit: (event) => writeSse(res, event),
       });
@@ -93,14 +135,12 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
 
   router.get('/:alias/conversations/:conversationId', async (req, res, next) => {
     try {
-      if (!isFinLakeAlias(req.params.alias)) {
-        res
-          .status(404)
-          .json({ error: { message: `Unknown Genie space alias: ${req.params.alias}` } });
-        return;
-      }
+      const purpose = geniePurposeOr404(req.params.alias, res);
+      if (!purpose) return;
+      if (!requireOboAccessToken(req.user?.accessToken, res)) return;
       prepareSse(res);
       await streamFinLakeGenieConversation(env, db, {
+        purpose,
         conversationId: req.params.conversationId,
         pageToken: typeof req.query.pageToken === 'string' ? req.query.pageToken : undefined,
         includeQueryResults: req.query.includeQueryResults !== 'false',
@@ -117,14 +157,12 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
     '/:alias/conversations/:conversationId/messages/:messageId',
     async (req, res, next) => {
       try {
-        if (!isFinLakeAlias(req.params.alias)) {
-          res
-            .status(404)
-            .json({ error: { message: `Unknown Genie space alias: ${req.params.alias}` } });
-          return;
-        }
+        const purpose = geniePurposeOr404(req.params.alias, res);
+        if (!purpose) return;
+        if (!requireOboAccessToken(req.user?.accessToken, res)) return;
         prepareSse(res);
         await streamFinLakeGenieExistingMessage(env, db, {
+          purpose,
           conversationId: req.params.conversationId,
           messageId: req.params.messageId,
           userAccessToken: req.user?.accessToken,
@@ -140,8 +178,19 @@ export function genieRouter(db: DatabaseClient, env: Env): Router {
   return router;
 }
 
-function isFinLakeAlias(alias: string | undefined): boolean {
-  return alias === 'finlake' || alias === 'default';
+function geniePurposeOr404(alias: string | undefined, res: Response) {
+  const purpose = normalizeGeniePurpose(alias);
+  if (!purpose) {
+    res.status(404).json({ error: { message: `Unknown Genie space alias: ${alias}` } });
+    return null;
+  }
+  return purpose;
+}
+
+function requireOboAccessToken(accessToken: string | undefined, res: Response): boolean {
+  if (accessToken?.trim()) return true;
+  res.status(401).json({ error: { message: 'Genie requires an OBO access token.' } });
+  return false;
 }
 
 function prepareSse(res: Response): void {
@@ -155,7 +204,15 @@ function writeSse(res: Response, event: GenieStreamEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
-function handleSseError(err: unknown, res: Response, next: (err: unknown) => void): void {
+function handleJsonError(err: unknown, res: Response, next: NextFunction): void {
+  if (err instanceof GenieServiceError) {
+    res.status(err.statusCode).json({ error: { message: err.message } });
+    return;
+  }
+  next(err);
+}
+
+function handleSseError(err: unknown, res: Response, next: NextFunction): void {
   if (res.headersSent) {
     writeSse(res, {
       type: 'error',

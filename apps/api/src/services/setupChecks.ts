@@ -12,9 +12,14 @@ export async function runSetupCheck(
 
   switch (step) {
     case 'systemTables':
-      return await checkSystemTables(env, checkedAt, userToken);
+      return await checkSystemTables(
+        env,
+        checkedAt,
+        userToken,
+        selectedWarehouseIdFromInput(input),
+      );
     case 'permissions':
-      return await checkPermissions(env, checkedAt, userToken);
+      return await checkPermissions(env, checkedAt, userToken, selectedWarehouseIdFromInput(input));
     case 'awsCur':
       return checkAwsCur(input, checkedAt);
     case 'azureExport':
@@ -35,8 +40,9 @@ async function checkSystemTables(
   env: Env,
   checkedAt: string,
   userToken?: string,
+  warehouseId?: string,
 ): Promise<SetupCheckResult> {
-  const executor = buildUserExecutor(env, userToken);
+  const executor = buildUserExecutor(env, userToken, warehouseId);
   if (!executor) {
     return notConfigured('systemTables', checkedAt, userToken);
   }
@@ -87,8 +93,9 @@ async function checkPermissions(
   env: Env,
   checkedAt: string,
   userToken?: string,
+  selectedWarehouseId?: string,
 ): Promise<SetupCheckResult> {
-  const executor = buildUserExecutor(env, userToken);
+  const executor = buildUserExecutor(env, userToken, selectedWarehouseId);
   if (!executor) {
     return notConfigured('permissions', checkedAt, userToken);
   }
@@ -99,7 +106,7 @@ async function checkPermissions(
     'GRANT SELECT      ON TABLE   system.billing.usage        TO `<your-user-or-group>`;',
     'GRANT SELECT      ON TABLE   system.billing.list_prices  TO `<your-user-or-group>`;',
   ].join('\n');
-  const warehouseId = env.SQL_WAREHOUSE_ID ?? '<warehouse-id>';
+  const warehouseId = selectedWarehouseId ?? '<warehouse-id>';
   const warehouseGrantCli = `# Workspace-level: SQL Warehouse "Can use" permission
 databricks permissions set sql/warehouses ${warehouseId} \\
   --json '{"access_control_list":[{"user_name":"<your-user-or-group>","permission_level":"CAN_USE"}]}'`;
@@ -140,6 +147,10 @@ databricks permissions set sql/warehouses ${warehouseId} \\
       checkedAt,
     };
   }
+}
+
+function selectedWarehouseIdFromInput(input: Record<string, unknown>): string | undefined {
+  return typeof input.warehouseId === 'string' ? input.warehouseId.trim() || undefined : undefined;
 }
 
 function checkAwsCur(input: Record<string, unknown>, checkedAt: string): SetupCheckResult {
@@ -236,5 +247,5 @@ function notConfiguredMessage(userToken: string | undefined): string {
   if (!userToken) {
     return 'Missing OBO access token. Run behind a proxy that forwards the `x-forwarded-access-token` header (Databricks Apps, or `databricks apps run-local`).';
   }
-  return 'Databricks workspace credentials not configured (DATABRICKS_HOST, SQL_WAREHOUSE_ID).';
+  return 'Databricks workspace credentials not configured (DATABRICKS_HOST and selected SQL warehouse).';
 }

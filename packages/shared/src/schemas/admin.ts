@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const AdminCleanupRequestSchema = z.object({
   deleteCatalog: z.boolean().optional().default(false),
+  warehouseId: z.string().min(1).max(256).optional(),
 });
 export type AdminCleanupRequest = z.infer<typeof AdminCleanupRequestSchema>;
 

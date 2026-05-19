@@ -55,6 +55,13 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const genieSpaces = sqliteTable('genie_spaces', {
+  purpose: text('purpose').primaryKey(),
+  spaceId: text('space_id').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   domain: text('domain').notNull(),
@@ -69,6 +76,7 @@ export const dataSources = sqliteTable(
     accountId: text('account_id').notNull(),
     tableName: text('table_name').notNull(),
     focusVersion: text('focus_version'),
+    pipelineId: text('pipeline_id'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     configJson: text('config_json').notNull().default('{}'),
     updatedAt: text('updated_at').notNull(),

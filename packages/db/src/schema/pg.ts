@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   integer,
+  bigint,
   doublePrecision,
   boolean,
   jsonb,
@@ -65,6 +66,13 @@ export const appSettings = pgTable('app_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const genieSpaces = pgTable('genie_spaces', {
+  purpose: text('purpose').primaryKey(),
+  spaceId: text('space_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const workspaces = pgTable('workspaces', {
   id: text('id').primaryKey(),
   domain: text('domain').notNull(),
@@ -79,6 +87,7 @@ export const dataSources = pgTable(
     accountId: text('account_id').notNull(),
     tableName: text('table_name').notNull(),
     focusVersion: text('focus_version'),
+    pipelineId: text('pipeline_id'),
     enabled: boolean('enabled').notNull().default(true),
     config: jsonb('config').notNull().default({}),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -100,12 +109,12 @@ export const pricingData = pgTable(
     notebookPath: text('notebook_path'),
     notebookId: text('notebook_id'),
     metadata: jsonb('metadata').notNull().default({}),
-    runId: integer('run_id'),
+    runId: bigint('run_id', { mode: 'number' }),
     runStatus: text('run_status').notNull().default('not_started'),
     runUrl: text('run_url'),
-    runStartedAt: timestamp('run_started_at', { withTimezone: true }),
-    runFinishedAt: timestamp('run_finished_at', { withTimezone: true }),
-    runCheckedAt: timestamp('run_checked_at', { withTimezone: true }),
+    runStartedAt: timestamp('run_started_at', { withTimezone: true, mode: 'string' }),
+    runFinishedAt: timestamp('run_finished_at', { withTimezone: true, mode: 'string' }),
+    runCheckedAt: timestamp('run_checked_at', { withTimezone: true, mode: 'string' }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

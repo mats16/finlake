@@ -15,6 +15,7 @@ function fakeSource(overrides: Partial<DataSource> = {}): DataSource {
     accountId,
     tableName: 'usage',
     focusVersion: null,
+    pipelineId: null,
     enabled: true,
     config: {},
     updatedAt: new Date().toISOString(),

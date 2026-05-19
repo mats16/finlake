@@ -78,7 +78,8 @@ function buildUserContext(req: Request, env: Env): UserContext | undefined {
   const token = req.user?.accessToken;
   const userId = req.user?.userId ?? req.user?.email;
   if (!token || !userId) return undefined;
-  const executor = buildUserExecutor(env, token);
+  const warehouseId = typeof req.query.warehouseId === 'string' ? req.query.warehouseId : undefined;
+  const executor = buildUserExecutor(env, token, warehouseId);
   if (!executor) return undefined;
   return { userId, queries: new UsageQueries(executor) };
 }

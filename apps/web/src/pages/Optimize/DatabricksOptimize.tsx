@@ -3,6 +3,7 @@ import {
   useMemo,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -77,10 +78,12 @@ import {
   Gauge,
   Info,
   ListChecks,
-  RefreshCcw,
   Server,
+  Sparkles,
 } from 'lucide-react';
 import {
+  buildDatabricksClusterResourcesStatement,
+  buildDatabricksClusterTimeSeriesStatement,
   buildDatabricksClusterUtilizationStatement,
   buildDatabricksQueryAttributionStatement,
   buildDatabricksQueryWarehouseTrendStatement,
@@ -89,10 +92,14 @@ import {
   buildDatabricksSummaryStatement,
   buildDatabricksTrendStatement,
   buildDatabricksWorkspacesStatement,
+  PERF_GENIE_SPACE_PURPOSE,
   resolveDatabricksOptimizeSources,
   WorkspaceDomainSchema,
   type DatabricksClusterUtilizationRow,
+  type DatabricksClusterResourceRow,
+  type DatabricksClusterTimeSeriesRow,
   type DatabricksOptimizationRecommendation,
+  type DatabricksOptimizeCostMetric,
   type DatabricksOptimizationServiceRow,
   type DatabricksOptimizationSummary,
   type DatabricksOptimizationWorkspace,
@@ -101,9 +108,13 @@ import {
   type DatabricksTrendGrain,
 } from '@finlake/shared';
 import type { ApiError } from '../../api/client';
+import { GeniePopupChat } from '../../components/GenieChatPanel';
+import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
 import {
   useAppSettings,
   useDataSources,
+  useGenieSpace,
+  useSetupGenieSpace,
   useSqlStatement,
   useUpsertWorkspace,
   workspaceQueryOptions,
@@ -112,7 +123,8 @@ import { useCurrencyUsd, useI18n } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
 
 const PERIODS = ['last30', 'last90', 'last180', 'last12m'] as const;
-const DATABRICKS_OPTIMIZE_TABS = ['serverless', 'query'] as const;
+const COST_METRICS = ['ListCost', 'BilledCost'] as const satisfies DatabricksOptimizeCostMetric[];
+const DATABRICKS_OPTIMIZE_TABS = ['serverless', 'query', 'cluster'] as const;
 type Period = (typeof PERIODS)[number];
 type DatabricksOptimizeTab = (typeof DATABRICKS_OPTIMIZE_TABS)[number];
 type DeltaDisplay = 'currency' | 'percent';
@@ -127,6 +139,9 @@ const SERVERLESS_COLOR = '#49A078';
 const NON_SERVERLESS_COLOR = '#E4572E';
 const UNKNOWN_COLOR = '#718096';
 const RATIO_COLOR = '#3B82F6';
+const CLUSTER_COST_COLOR = '#2563EB';
+const CLUSTER_CPU_COLOR = '#DC2626';
+const CLUSTER_MEMORY_COLOR = '#16A34A';
 const WAREHOUSE_STACK_COLORS = [
   '#2563EB',
   '#16A34A',
@@ -215,7 +230,12 @@ interface WarehouseStackSeries {
 interface QueryWarehouseOption {
   key: string;
   label: string;
-  warehouseId: string;
+  totalCostUsd: number;
+}
+
+interface ClusterOption {
+  key: string;
+  label: string;
   totalCostUsd: number;
 }
 
@@ -224,6 +244,10 @@ type WarehouseStackDatum = {
   label: string;
   totalCostUsd: number;
 } & Record<string, string | number>;
+
+type ClusterTrendDatum = DatabricksClusterTimeSeriesRow & {
+  label: string;
+};
 
 type AllPurposeRecommendationRow = DatabricksOptimizationRecommendation & {
   cpuUtilizationPercent: number | null;
@@ -251,9 +275,11 @@ export function DatabricksOptimize() {
   const { t, locale } = useI18n();
   const formatUsd = useCurrencyUsd();
   const [activeTab, setActiveTab] = useState<DatabricksOptimizeTab>('serverless');
+  const [costMetric, setCostMetric] = useState<DatabricksOptimizeCostMetric>('ListCost');
   const [period, setPeriod] = useState<Period>('last30');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('all');
   const [selectedQueryWarehouseKey, setSelectedQueryWarehouseKey] = useState('all');
+  const [selectedClusterKey, setSelectedClusterKey] = useState('all');
   const [selectedServiceRatioServices, setSelectedServiceRatioServices] = useState<string[]>(
     DEFAULT_SERVICE_RATIO_FILTERS,
   );
@@ -264,6 +290,12 @@ export function DatabricksOptimize() {
   const [recommendationColumnWidths, setRecommendationColumnWidths] = useState(
     DEFAULT_RECOMMENDATION_COLUMN_WIDTHS,
   );
+  const [genieOpen, setGenieOpen] = useState(false);
+  const [genieInitialPrompt, setGenieInitialPrompt] = useState<string | null>(null);
+  const [genieInitialPromptKey, setGenieInitialPromptKey] = useState<string | null>(null);
+  const [genieTitle, setGenieTitle] = useState('');
+  const perfGenieSpace = useGenieSpace(PERF_GENIE_SPACE_PURPOSE);
+  const setupPerfGenie = useSetupGenieSpace(PERF_GENIE_SPACE_PURPOSE);
   const baseRange = useMemo(() => rangeForPeriod(period), [period]);
   const trendGrain: DatabricksTrendGrain = period === 'last30' ? 'day' : 'month';
   const dataSources = useDataSources();
@@ -279,13 +311,14 @@ export function DatabricksOptimize() {
   const sourceSqlEnabled = dataSources.isSuccess && appSettings.isSuccess;
   const serverlessSqlEnabled = activeTab === 'serverless' && sourceSqlEnabled;
   const querySqlEnabled = activeTab === 'query' && sourceSqlEnabled;
+  const clusterSqlEnabled = activeTab === 'cluster' && sourceSqlEnabled;
   const workspaceStatement = useMemo(
-    () => buildDatabricksWorkspacesStatement(sourceTables, baseRange),
-    [baseRange, sourceTables],
+    () => buildDatabricksWorkspacesStatement(sourceTables, baseRange, costMetric),
+    [baseRange, costMetric, sourceTables],
   );
   const workspacesQuery = useSqlStatement<DatabricksOptimizationWorkspace>(workspaceStatement, {
     enabled: sourceSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'workspaces', baseRange, sourceTables],
+    requestKey: ['optimize', 'databricks', 'workspaces', baseRange, sourceTables, costMetric],
   });
   const workspaceOptions = workspacesQuery.rows;
   const workspaceId =
@@ -298,42 +331,61 @@ export function DatabricksOptimize() {
     [baseRange, workspaceId],
   );
   const summaryStatement = useMemo(
-    () => buildDatabricksSummaryStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksSummaryStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const trendStatement = useMemo(
-    () => buildDatabricksTrendStatement(sourceTables, scopedRange, trendGrain),
-    [scopedRange, sourceTables, trendGrain],
+    () => buildDatabricksTrendStatement(sourceTables, scopedRange, trendGrain, costMetric),
+    [costMetric, scopedRange, sourceTables, trendGrain],
   );
   const servicesStatement = useMemo(
-    () => buildDatabricksServicesStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksServicesStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const recommendationsStatement = useMemo(
-    () => buildDatabricksRecommendationsStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksRecommendationsStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const clusterUtilizationStatement = useMemo(
     () => buildDatabricksClusterUtilizationStatement(scopedRange),
     [scopedRange],
   );
+  const clusterResourcesStatement = useMemo(
+    () => buildDatabricksClusterResourcesStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
+  );
   const summaryQuery = useSqlStatement<DatabricksOptimizationSummary>(summaryStatement, {
     enabled: serverlessSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'summary', scopedRange, sourceTables],
+    requestKey: ['optimize', 'databricks', 'summary', scopedRange, sourceTables, costMetric],
   });
   const trendQuery = useSqlStatement<DatabricksOptimizationTrendRow>(trendStatement, {
     enabled: serverlessSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'trend', trendGrain, scopedRange, sourceTables],
+    requestKey: [
+      'optimize',
+      'databricks',
+      'trend',
+      trendGrain,
+      scopedRange,
+      sourceTables,
+      costMetric,
+    ],
   });
   const servicesQuery = useSqlStatement<DatabricksOptimizationServiceRow>(servicesStatement, {
     enabled: serverlessSqlEnabled,
-    requestKey: ['optimize', 'databricks', 'services', scopedRange, sourceTables],
+    requestKey: ['optimize', 'databricks', 'services', scopedRange, sourceTables, costMetric],
   });
   const recommendationsQuery = useSqlStatement<DatabricksOptimizationRecommendation>(
     recommendationsStatement,
     {
       enabled: serverlessSqlEnabled,
-      requestKey: ['optimize', 'databricks', 'recommendations', scopedRange, sourceTables],
+      requestKey: [
+        'optimize',
+        'databricks',
+        'recommendations',
+        scopedRange,
+        sourceTables,
+        costMetric,
+      ],
     },
   );
   const clusterUtilizationQuery = useSqlStatement<DatabricksClusterUtilizationRow>(
@@ -343,13 +395,86 @@ export function DatabricksOptimize() {
       requestKey: ['optimize', 'databricks', 'cluster-utilization', scopedRange],
     },
   );
+  const clusterResourcesQuery = useSqlStatement<DatabricksClusterResourceRow>(
+    clusterResourcesStatement,
+    {
+      enabled: clusterSqlEnabled,
+      requestKey: [
+        'optimize',
+        'databricks',
+        'cluster-resources',
+        scopedRange,
+        sourceTables,
+        costMetric,
+      ],
+    },
+  );
+  const clusterResourceRows = clusterResourcesQuery.rows;
+  const clusterOptions = useMemo(
+    () => buildClusterOptions(clusterResourceRows),
+    [clusterResourceRows],
+  );
+  const clusterFilterKey =
+    selectedClusterKey === 'all' ||
+    clusterOptions.some((option) => option.key === selectedClusterKey)
+      ? selectedClusterKey
+      : 'all';
+  const selectedCluster = useMemo(
+    () =>
+      clusterFilterKey === 'all'
+        ? null
+        : (clusterResourceRows.find((row) => clusterKey(row) === clusterFilterKey) ?? null),
+    [clusterFilterKey, clusterResourceRows],
+  );
+  const clusterTimeSeriesRange = useMemo(
+    () =>
+      selectedCluster?.workspaceId
+        ? { ...baseRange, workspaceId: selectedCluster.workspaceId }
+        : scopedRange,
+    [baseRange, scopedRange, selectedCluster?.workspaceId],
+  );
+  const clusterTimeSeriesStatement = useMemo(
+    () =>
+      selectedCluster
+        ? buildDatabricksClusterTimeSeriesStatement(
+            sourceTables,
+            clusterTimeSeriesRange,
+            selectedCluster.clusterId,
+            trendGrain,
+            costMetric,
+          )
+        : null,
+    [clusterTimeSeriesRange, costMetric, selectedCluster, sourceTables, trendGrain],
+  );
+  const clusterTimeSeriesQuery = useSqlStatement<DatabricksClusterTimeSeriesRow>(
+    clusterTimeSeriesStatement,
+    {
+      enabled: clusterSqlEnabled && Boolean(selectedCluster),
+      requestKey: [
+        'optimize',
+        'databricks',
+        'cluster-time-series',
+        clusterFilterKey,
+        clusterTimeSeriesRange,
+        sourceTables,
+        trendGrain,
+        costMetric,
+      ],
+    },
+  );
   const queryWarehouseTrendStatement = useMemo(
-    () => buildDatabricksQueryWarehouseTrendStatement(sourceTables, scopedRange, trendGrain),
-    [scopedRange, sourceTables, trendGrain],
+    () =>
+      buildDatabricksQueryWarehouseTrendStatement(
+        sourceTables,
+        scopedRange,
+        trendGrain,
+        costMetric,
+      ),
+    [costMetric, scopedRange, sourceTables, trendGrain],
   );
   const queryAttributionStatement = useMemo(
-    () => buildDatabricksQueryAttributionStatement(sourceTables, scopedRange),
-    [scopedRange, sourceTables],
+    () => buildDatabricksQueryAttributionStatement(sourceTables, scopedRange, costMetric),
+    [costMetric, scopedRange, sourceTables],
   );
   const queryWarehouseTrendQuery = useSqlStatement<DatabricksQueryWarehouseTrendRow>(
     queryWarehouseTrendStatement,
@@ -362,6 +487,7 @@ export function DatabricksOptimize() {
         trendGrain,
         scopedRange,
         sourceTables,
+        costMetric,
       ],
     },
   );
@@ -369,7 +495,14 @@ export function DatabricksOptimize() {
     queryAttributionStatement,
     {
       enabled: querySqlEnabled,
-      requestKey: ['optimize', 'databricks', 'query-attribution', scopedRange, sourceTables],
+      requestKey: [
+        'optimize',
+        'databricks',
+        'query-attribution',
+        scopedRange,
+        sourceTables,
+        costMetric,
+      ],
     },
   );
   const summary = summaryQuery.rows[0]
@@ -403,6 +536,17 @@ export function DatabricksOptimize() {
     sqlError('workspaces', workspacesQuery.error),
     sqlError('warehouse_cost', queryWarehouseTrendQuery.error),
     sqlError('query_history', queryAttributionQuery.error),
+  ].filter((error): error is { tableName: string; message: string } => Boolean(error));
+  const clusterLoading =
+    dataSources.isLoading ||
+    appSettings.isLoading ||
+    workspacesQuery.isLoading ||
+    clusterResourcesQuery.isLoading;
+  const clusterTrendLoading = clusterLoading || clusterTimeSeriesQuery.isLoading;
+  const clusterErrors = [
+    sqlError('workspaces', workspacesQuery.error),
+    sqlError('clusters', clusterResourcesQuery.error),
+    selectedCluster ? sqlError('cluster_trend', clusterTimeSeriesQuery.error) : null,
   ].filter((error): error is { tableName: string; message: string } => Boolean(error));
 
   const monthly = useMemo(
@@ -549,6 +693,35 @@ export function DatabricksOptimize() {
       queryTotalExecutionMs: executionMs,
     };
   }, [filteredQueryAttributionRows]);
+  const clusterRows = useMemo(
+    () =>
+      clusterFilterKey === 'all'
+        ? clusterResourceRows
+        : clusterResourceRows.filter((row) => clusterKey(row) === clusterFilterKey),
+    [clusterFilterKey, clusterResourceRows],
+  );
+  const clusterTrendRows = useMemo<ClusterTrendDatum[]>(
+    () =>
+      clusterTimeSeriesQuery.rows.map((row) => ({
+        ...row,
+        cpuUtilizationPercent: normalizeRatio(row.cpuUtilizationPercent),
+        memoryUsedPercent: normalizeRatio(row.memoryUsedPercent),
+        label: trendLabel(row.period, trendGrain, locale),
+      })),
+    [clusterTimeSeriesQuery.rows, locale, trendGrain],
+  );
+
+  const openClusterGenie = (row: DatabricksClusterResourceRow) => {
+    const title = row.clusterName || row.clusterId;
+    setGenieTitle(t('optimize.databricks.cluster.genie.title', { name: title }));
+    setGenieInitialPrompt(buildClusterGeniePrompt(row, scopedRange, locale));
+    setGenieInitialPromptKey(`${row.workspaceId ?? 'unknown'}:${row.clusterId}:${Date.now()}`);
+    setGenieOpen(true);
+    if (!perfGenieSpace.data?.spaceId) {
+      setupPerfGenie.reset();
+      setupPerfGenie.mutate();
+    }
+  };
 
   const resizingColRef = useRef<{ column: RecommendationColumnKey; colEl: HTMLElement } | null>(
     null,
@@ -597,17 +770,6 @@ export function DatabricksOptimize() {
     window.addEventListener('pointerup', stopResize, { once: true });
   };
 
-  const refresh = () => {
-    summaryQuery.refetch();
-    workspacesQuery.refetch();
-    trendQuery.refetch();
-    servicesQuery.refetch();
-    recommendationsQuery.refetch();
-    clusterUtilizationQuery.refetch();
-    queryWarehouseTrendQuery.refetch();
-    queryAttributionQuery.refetch();
-  };
-
   const header = (
     <header className="page-header optimize-page-header">
       <div className="optimize-page-header-row">
@@ -615,61 +777,7 @@ export function DatabricksOptimize() {
           <h2>{t('optimize.databricks.title')}</h2>
         </div>
         <div className="page-header-actions">
-          <div className="flex flex-wrap justify-end gap-2">
-            {activeTab === 'query' ? (
-              <Select value={queryWarehouseFilterKey} onValueChange={setSelectedQueryWarehouseKey}>
-                <SelectTrigger className="w-64">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    {t('optimize.databricks.query.warehouses.all')}
-                  </SelectItem>
-                  {queryWarehouseOptions.map((warehouse) => (
-                    <SelectItem key={warehouse.key} value={warehouse.key}>
-                      {warehouse.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-            <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
-                {workspaceOptions.map((workspace) => {
-                  const value = workspace.workspaceId ?? '';
-                  if (!value) return null;
-                  return (
-                    <SelectItem key={value} value={value}>
-                      {workspace.workspaceName || value}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERIODS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {t(`optimize.databricks.period.${option}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              onClick={refresh}
-              disabled={activeTab === 'query' ? queryLoading : loading}
-            >
-              <RefreshCcw /> {t('dashboard.refresh')}
-            </Button>
-          </div>
+          <SqlWarehouseSelector />
         </div>
       </div>
       <nav className="upper-tabs" role="tablist" aria-label={t('optimize.databricks.title')}>
@@ -686,6 +794,86 @@ export function DatabricksOptimize() {
           </button>
         ))}
       </nav>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={workspaceId} onValueChange={setSelectedWorkspaceId}>
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('optimize.databricks.workspaces.all')}</SelectItem>
+              {workspaceOptions.map((workspace) => {
+                const value = workspace.workspaceId ?? '';
+                if (!value) return null;
+                return (
+                  <SelectItem key={value} value={value}>
+                    {workspace.workspaceName || value}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          {activeTab === 'query' ? (
+            <Select value={queryWarehouseFilterKey} onValueChange={setSelectedQueryWarehouseKey}>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('optimize.databricks.query.warehouses.all')}</SelectItem>
+                {queryWarehouseOptions.map((warehouse) => (
+                  <SelectItem key={warehouse.key} value={warehouse.key}>
+                    {warehouse.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          {activeTab === 'cluster' ? (
+            <Select value={clusterFilterKey} onValueChange={setSelectedClusterKey}>
+              <SelectTrigger className="w-72">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('optimize.databricks.cluster.filter.all')}</SelectItem>
+                {clusterOptions.map((cluster) => (
+                  <SelectItem key={cluster.key} value={cluster.key}>
+                    {cluster.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Select
+            value={costMetric}
+            onValueChange={(value) => setCostMetric(value as DatabricksOptimizeCostMetric)}
+          >
+            <SelectTrigger className="w-40" aria-label={t('optimize.databricks.costMetric.label')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COST_METRICS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`optimize.databricks.costMetric.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={period} onValueChange={(value) => setPeriod(value as Period)}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIODS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`optimize.databricks.period.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
     </header>
   );
 
@@ -810,6 +998,141 @@ export function DatabricksOptimize() {
             )}
           </CardContent>
         </Card>
+      </>
+    );
+  }
+
+  if (activeTab === 'cluster') {
+    return (
+      <>
+        {header}
+
+        {clusterErrors.length > 0 ? (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle />
+            <AlertDescription>
+              {t('optimize.databricks.cluster.failedToLoad')}{' '}
+              {clusterErrors.map((error) => `${error.tableName}: ${error.message}`).join('; ')}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {selectedCluster ? (
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle className="text-sm">
+                {t('optimize.databricks.cluster.trend.title')}
+              </CardTitle>
+              <CardDescription>
+                {t('optimize.databricks.cluster.trend.desc', {
+                  name: selectedCluster.clusterName || selectedCluster.clusterId,
+                })}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {clusterTrendLoading ? (
+                <Skeleton className="h-80 w-full" />
+              ) : clusterTrendRows.length === 0 ? (
+                <EmptyState
+                  title={t('optimize.databricks.cluster.trend.noData')}
+                  description={t('optimize.databricks.empty.adjustFilters')}
+                />
+              ) : (
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart
+                      data={clusterTrendRows}
+                      margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                      <YAxis
+                        yAxisId="cost"
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(value) => compactUsd(Number(value))}
+                      />
+                      <YAxis
+                        yAxisId="utilization"
+                        orientation="right"
+                        domain={[0, 100]}
+                        allowDataOverflow
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(value) => `${Math.round(Number(value))}%`}
+                      />
+                      <RechartsTooltip content={<ClusterTrendTooltip formatUsd={formatUsd} />} />
+                      <Legend />
+                      <Bar
+                        yAxisId="cost"
+                        dataKey="costUsd"
+                        name={t('optimize.databricks.cluster.trend.cost')}
+                        fill={CLUSTER_COST_COLOR}
+                      />
+                      <Line
+                        yAxisId="utilization"
+                        type="monotone"
+                        dataKey="cpuUtilizationPercent"
+                        name={t('optimize.databricks.cluster.trend.cpu')}
+                        stroke={CLUSTER_CPU_COLOR}
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                      />
+                      <Line
+                        yAxisId="utilization"
+                        type="monotone"
+                        dataKey="memoryUsedPercent"
+                        name={t('optimize.databricks.cluster.trend.memory')}
+                        stroke={CLUSTER_MEMORY_COLOR}
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">
+              {t('optimize.databricks.cluster.resources.title')}
+            </CardTitle>
+            <CardDescription>{t('optimize.databricks.cluster.resources.desc')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {clusterLoading ? (
+              <Skeleton className="h-72 w-full" />
+            ) : clusterRows.length === 0 ? (
+              <EmptyState
+                title={t('optimize.databricks.cluster.empty.noClusters')}
+                description={t('optimize.databricks.empty.adjustFilters')}
+              />
+            ) : (
+              <ClusterResourceTable
+                rows={clusterRows}
+                selectedClusterKey={clusterFilterKey === 'all' ? null : clusterFilterKey}
+                onSelect={(row) => setSelectedClusterKey(clusterKey(row))}
+                onInvestigate={openClusterGenie}
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        <GeniePopupChat
+          open={genieOpen}
+          title={genieTitle || t('optimize.databricks.cluster.genie.defaultTitle')}
+          alias={PERF_GENIE_SPACE_PURPOSE}
+          placeholder={t('optimize.databricks.cluster.genie.placeholder')}
+          initialPrompt={genieInitialPrompt}
+          initialPromptKey={genieInitialPromptKey}
+          loading={setupPerfGenie.isPending}
+          error={setupPerfGenie.error instanceof Error ? setupPerfGenie.error.message : null}
+          fullPageHref={`/genie?alias=${PERF_GENIE_SPACE_PURPOSE}`}
+          onClose={() => setGenieOpen(false)}
+        />
       </>
     );
   }
@@ -1135,7 +1458,7 @@ function QueryAttributionTable({ rows }: { rows: DatabricksQueryAttributionRow[]
 
   return (
     <div className="overflow-x-auto">
-      <Table className="table-fixed" style={{ width: '100%' }}>
+      <Table className="table-fixed" style={{ minWidth: 1320, width: '100%' }}>
         <colgroup>
           <col />
           <col style={{ width: 220 }} />
@@ -1240,6 +1563,156 @@ function QueryAttributionTable({ rows }: { rows: DatabricksQueryAttributionRow[]
   );
 }
 
+function ClusterResourceTable({
+  rows,
+  selectedClusterKey,
+  onSelect,
+  onInvestigate,
+}: {
+  rows: DatabricksClusterResourceRow[];
+  selectedClusterKey: string | null;
+  onSelect: (row: DatabricksClusterResourceRow) => void;
+  onInvestigate: (row: DatabricksClusterResourceRow) => void;
+}) {
+  const { t, locale } = useI18n();
+  const formatUsd = useCurrencyUsd();
+  const handleRowKeyDown = (
+    event: ReactKeyboardEvent<HTMLTableRowElement>,
+    row: DatabricksClusterResourceRow,
+  ) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    onSelect(row);
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      <Table className="table-fixed" style={{ width: '100%' }}>
+        <colgroup>
+          <col />
+          <col style={{ width: 180 }} />
+          <col style={{ width: 170 }} />
+          <col style={{ width: 112 }} />
+          <col style={{ width: 112 }} />
+          <col style={{ width: 120 }} />
+          <col style={{ width: 140 }} />
+          <col style={{ width: 220 }} />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t('optimize.databricks.cluster.table.cluster')}</TableHead>
+            <TableHead>{t('optimize.databricks.cluster.table.owner')}</TableHead>
+            <TableHead>{t('optimize.databricks.cluster.table.nodeType')}</TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.cluster.table.cost')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.cluster.table.cpu')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.cluster.table.memory')}
+            </TableHead>
+            <TableHead className="text-right">
+              {t('optimize.databricks.cluster.table.nodeHours')}
+            </TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const rowClusterKey = clusterKey(row);
+            const selected = rowClusterKey === selectedClusterKey;
+            const consoleTarget = row.deleted ? null : databricksClusterTarget(row);
+            return (
+              <TableRow
+                key={rowClusterKey}
+                tabIndex={0}
+                aria-selected={selected}
+                className={cn(
+                  'cursor-pointer transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none',
+                  selected && 'bg-muted/70',
+                )}
+                onClick={() => onSelect(row)}
+                onKeyDown={(event) => handleRowKeyDown(event, row)}
+              >
+                <TableCell className="min-w-0 overflow-hidden">
+                  <div className="grid min-w-0 gap-1">
+                    <span className="truncate font-medium">{row.clusterName || row.clusterId}</span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {row.clusterId}
+                      {row.clusterSource ? ` | ${row.clusterSource}` : ''}
+                      {row.deleted ? ` | ${t('optimize.databricks.cluster.deleted')}` : ''}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="overflow-hidden">
+                  <span className="block truncate">
+                    {row.ownedBy || t('dashboard.notAvailable')}
+                  </span>
+                </TableCell>
+                <TableCell className="overflow-hidden">
+                  <div className="grid min-w-0 gap-0.5">
+                    <span className="truncate">
+                      {row.workerNodeType || t('dashboard.notAvailable')}
+                    </span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {clusterSizeLabel(row, locale)}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="overflow-hidden text-right font-medium">
+                  {formatUsd(row.totalCostUsd)}
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  <UtilizationValue value={row.cpuUtilizationPercent} />
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  <UtilizationValue value={row.memoryUsedPercent} />
+                </TableCell>
+                <TableCell className="overflow-hidden text-right">
+                  {isFiniteNumber(row.observedNodeHours)
+                    ? formatNumber(row.observedNodeHours, locale)
+                    : t('dashboard.notAvailable')}
+                </TableCell>
+                <TableCell className="overflow-hidden">
+                  <div className="flex justify-end gap-2">
+                    <DatabricksConsoleButton
+                      target={consoleTarget}
+                      workspaceId={row.workspaceId}
+                      workspaceName={row.workspaceName}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onInvestigate(row);
+                      }}
+                    >
+                      <Sparkles className="size-4" aria-hidden="true" />
+                      {t('optimize.databricks.cluster.table.investigate')}
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function UtilizationValue({ value }: { value: number | null }) {
+  const { t } = useI18n();
+  if (!isFiniteNumber(value)) {
+    return <span className="text-muted-foreground">{t('dashboard.notAvailable')}</span>;
+  }
+  return <span className={value < 15 ? 'text-(--warning)' : ''}>{formatRatio(value)}</span>;
+}
+
 function QueryStatusBadge({ row }: { row: DatabricksQueryAttributionRow }) {
   const status = row.executionStatus ?? 'UNKNOWN';
   if (row.failedCount > 0) {
@@ -1256,6 +1729,43 @@ function queryExecutionRatio(row: DatabricksQueryAttributionRow): number | null 
     return null;
   }
   return (row.queryExecutionMs / row.warehouseQueryExecutionMs) * 100;
+}
+
+function ClusterTrendTooltip({
+  active,
+  payload,
+  label,
+  formatUsd,
+}: {
+  active?: boolean;
+  payload?: Array<{ name?: string; value?: number; color?: string; dataKey?: string }>;
+  label?: string;
+  formatUsd: (value: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-popover text-popover-foreground border-border rounded-md border px-3 py-2 text-xs shadow-md">
+      <p className="m-0 mb-1 font-medium">{label}</p>
+      {payload
+        .filter((item) => item.value !== null && item.value !== undefined)
+        .map((item) => (
+          <p
+            key={`${item.dataKey}-${item.name}`}
+            className="m-0 flex items-center justify-between gap-5"
+          >
+            <span className="inline-flex items-center gap-2">
+              <span className="h-2 w-2 rounded-sm" style={{ background: item.color }} />
+              {item.name}
+            </span>
+            <span>
+              {item.dataKey === 'costUsd'
+                ? formatUsd(Number(item.value ?? 0))
+                : formatRatio(Number(item.value))}
+            </span>
+          </p>
+        ))}
+    </div>
+  );
 }
 
 function WarehouseCostTooltip({
@@ -1840,6 +2350,144 @@ function InfoTooltip({ label }: { label: string }) {
   );
 }
 
+function DatabricksConsoleButton({
+  target,
+  workspaceId,
+  workspaceName,
+}: {
+  target: DatabricksLinkTarget | null;
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+}) {
+  const { t } = useI18n();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [domain, setDomain] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const upsertWorkspace = useUpsertWorkspace();
+  if (!target || !workspaceId) return null;
+
+  const handleClick = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setError(null);
+    const popup = window.open('about:blank', '_blank');
+    // Do not pass noopener here; we need to redirect this pre-opened popup after the async lookup.
+    if (popup) popup.opener = null;
+    try {
+      const workspace = await queryClient.fetchQuery(workspaceQueryOptions(workspaceId));
+      const url = databricksUrl(workspace.domain, target);
+      if (popup) {
+        popup.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noreferrer noopener');
+      }
+    } catch (err) {
+      popup?.close();
+      const apiError = err as ApiError;
+      if (apiError.status === 404) {
+        upsertWorkspace.reset();
+        setDomain('');
+        setModalOpen(true);
+        return;
+      }
+      setError(apiError.message ?? t('workspaceMapping.loadFailed'));
+      setModalOpen(true);
+    }
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setError(null);
+    const parsedDomain = WorkspaceDomainSchema.safeParse(domain);
+    if (!parsedDomain.success) {
+      setError(t('workspaceMapping.invalidDomain'));
+      return;
+    }
+    upsertWorkspace.mutate(
+      { id: workspaceId, body: { domain: parsedDomain.data } },
+      {
+        onSuccess: (workspace) => {
+          setModalOpen(false);
+          window.open(databricksUrl(workspace.domain, target), '_blank', 'noreferrer noopener');
+        },
+        onError: (err) => {
+          setError((err as Error).message);
+        },
+      },
+    );
+  };
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onKeyDown={(event) => event.stopPropagation()}
+        onClick={handleClick}
+      >
+        <ExternalLink className="size-4" aria-hidden="true" />
+        {t('optimize.databricks.cluster.table.console')}
+      </Button>
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="sm:max-w-lg" onClick={(event) => event.stopPropagation()}>
+          <form onSubmit={handleSubmit}>
+            <DialogHeader>
+              <DialogTitle>{t('workspaceMapping.title')}</DialogTitle>
+              <DialogDescription>
+                {t('workspaceMapping.desc', {
+                  workspace: workspaceName || workspaceId || t('dashboard.notAvailable'),
+                })}
+              </DialogDescription>
+            </DialogHeader>
+            <FieldGroup className="py-4">
+              <Field>
+                <FieldLabel htmlFor={`workspace-console-domain-${workspaceId}`}>
+                  {t('workspaceMapping.domain')}
+                </FieldLabel>
+                <Input
+                  id={`workspace-console-domain-${workspaceId}`}
+                  required
+                  value={domain}
+                  disabled={upsertWorkspace.isPending}
+                  placeholder={t('workspaceMapping.domainPlaceholder')}
+                  onChange={(event) => setDomain(event.target.value)}
+                />
+              </Field>
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
+            </FieldGroup>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setModalOpen(false)}
+                disabled={upsertWorkspace.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={upsertWorkspace.isPending}>
+                {upsertWorkspace.isPending ? (
+                  <>
+                    <Spinner /> {t('common.saving')}
+                  </>
+                ) : (
+                  t('workspaceMapping.saveAndOpen')
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function ResourceNameLink({
   target,
   name,
@@ -1997,6 +2645,11 @@ function databricksQueryTarget(row: DatabricksQueryAttributionRow): DatabricksLi
   };
 }
 
+function databricksClusterTarget(row: DatabricksClusterResourceRow): DatabricksLinkTarget | null {
+  if (!row.workspaceId) return null;
+  return { path: `/compute/clusters/${encodeURIComponent(row.clusterId)}` };
+}
+
 function databricksResourcePath(serviceName: string, resourceId: string): string | null {
   const id = encodeURIComponent(resourceId);
   switch (serviceName) {
@@ -2123,6 +2776,20 @@ function warehouseKey(row: { workspaceId: string | null | undefined; warehouseId
   return workspaceScopedKey(row.workspaceId, row.warehouseId);
 }
 
+function clusterKey(row: { workspaceId: string | null | undefined; clusterId: string }) {
+  return workspaceScopedKey(row.workspaceId, row.clusterId);
+}
+
+function buildClusterOptions(rows: DatabricksClusterResourceRow[]): ClusterOption[] {
+  return rows
+    .map((row) => ({
+      key: clusterKey(row),
+      label: row.clusterName || row.clusterId,
+      totalCostUsd: row.totalCostUsd,
+    }))
+    .sort((a, b) => b.totalCostUsd - a.totalCostUsd || a.label.localeCompare(b.label));
+}
+
 function buildQueryWarehouseOptions(
   trendRows: Array<DatabricksQueryWarehouseTrendRow & { label: string }>,
   queryRows: DatabricksQueryAttributionRow[],
@@ -2134,7 +2801,6 @@ function buildQueryWarehouseOptions(
     options.set(key, {
       key,
       label: current?.label ?? row.warehouseName ?? row.warehouseId,
-      warehouseId: row.warehouseId,
       totalCostUsd: (current?.totalCostUsd ?? 0) + row.costUsd,
     });
   }
@@ -2144,7 +2810,6 @@ function buildQueryWarehouseOptions(
     options.set(key, {
       key,
       label: row.warehouseName ?? row.warehouseId,
-      warehouseId: row.warehouseId,
       totalCostUsd: 0,
     });
   }
@@ -2214,6 +2879,54 @@ function buildWarehouseStackChart(
 
 function clusterUtilizationKey(workspaceId: string | null | undefined, clusterId: string): string {
   return workspaceScopedKey(workspaceId, clusterId);
+}
+
+function clusterSizeLabel(row: DatabricksClusterResourceRow, locale: 'en' | 'ja'): string {
+  const workerCount = clusterWorkerCountLabel(row, locale);
+  const cores = isFiniteNumber(row.workerCoreCount)
+    ? `${formatInteger(row.workerCoreCount, locale)} vCPU`
+    : null;
+  const memory = isFiniteNumber(row.workerMemoryMb)
+    ? `${formatInteger(Math.round(row.workerMemoryMb / 1024), locale)} GB`
+    : null;
+  return (
+    [workerCount ? `${workerCount} workers` : null, cores, memory].filter(Boolean).join(' | ') ||
+    'N/A'
+  );
+}
+
+function clusterWorkerCountLabel(
+  row: DatabricksClusterResourceRow,
+  locale: 'en' | 'ja',
+): string | null {
+  if (isFiniteNumber(row.workerCount)) {
+    return formatInteger(row.workerCount, locale);
+  }
+  if (row.maxAutoscaleWorkers === null) return null;
+  const minWorkers = formatInteger(row.minAutoscaleWorkers ?? 0, locale);
+  const maxWorkers = formatInteger(row.maxAutoscaleWorkers, locale);
+  return `${minWorkers}-${maxWorkers}`;
+}
+
+function buildClusterGeniePrompt(
+  row: DatabricksClusterResourceRow,
+  range: { start: string; end: string },
+  locale: 'en' | 'ja',
+): string {
+  const facts = [`cluster_id=${row.clusterId}`, `date_range=${range.start} to ${range.end}`].join(
+    '\n',
+  );
+  const languageInstruction = locale === 'ja' ? 'Please answer in Japanese. ' : '';
+
+  return `${languageInstruction}Analyze the Databricks cluster identified by cluster_id for the specified date range only. Do not answer with text-only min/max summaries. Use charts or chart-ready query results first, then explain what the visuals mean.
+
+Create these views when data is available:
+1. Hourly time-series chart of avg CPU utilization and avg memory utilization from system.compute.node_timeline.
+2. Query execution count/status time-series from system.query.history.
+3. Query status breakdown chart for succeeded, failed, canceled, and other statuses.
+4. Top long-running, queued/waiting, or failed queries table with user/source context where available.
+
+After the visuals, summarize utilization patterns, low/high CPU or memory periods, failed/canceled/long-running queries, wait/queue/execution duration, and user/source breakdown. Provide concrete verification SQL. If system.query.history has no rows for this cluster_id and date range, state that limitation explicitly and explain what data is needed.\n\n${facts}`;
 }
 
 function utilizationToneClass(value: number | null | undefined): string {
@@ -2287,6 +3000,12 @@ function formatDurationMs(ms: number, locale: 'en' | 'ja'): string {
 function formatInteger(value: number, locale: 'en' | 'ja'): string {
   return new Intl.NumberFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
     maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatNumber(value: number, locale: 'en' | 'ja'): string {
+  return new Intl.NumberFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+    maximumFractionDigits: value >= 100 ? 0 : 1,
   }).format(value);
 }
 

@@ -7,7 +7,11 @@ import type {
 } from '@finlake/shared';
 import { getDatabricksRunSnapshot } from './databricksRunStatus.js';
 import { DataSourceSetupError } from './dataSourceErrors.js';
-import { ensurePricingDataForId, pricingServiceById } from './pricingNotebook.js';
+import {
+  ensurePricingDataForId,
+  isRunnablePricingData,
+  pricingServiceById,
+} from './pricingNotebook.js';
 import { buildAppWorkspaceClient, type WorkspaceClient } from './statementExecution.js';
 
 interface NotebookRunDeps {
@@ -65,19 +69,21 @@ async function submitPricingNotebookRun(
   if (!source) {
     throw new DataSourceSetupError('Notebook source parameter is not configured.', 400);
   }
-  const baseParameters =
+  const parameters =
     service.kind === 'aws'
-      ? {
-          source_url: source,
-          volume_path: pricingData.rawDataPath!,
-          raw_table: pricingData.rawDataTable!,
-          target_table: pricingData.table,
-          aws_service_code: pricingData.service,
-        }
-      : {
-          source_table: source,
-          target_table: pricingData.table,
-        };
+      ? [
+          '--source-url',
+          source,
+          '--volume-path',
+          pricingData.rawDataPath!,
+          '--raw-table',
+          pricingData.rawDataTable!,
+          '--target-table',
+          pricingData.table,
+          '--aws-service-code',
+          pricingData.service,
+        ]
+      : ['--source-table', source, '--target-table', pricingData.table];
 
   let response: JobsSubmitResponse;
   try {
@@ -104,10 +110,10 @@ async function submitPricingNotebookRun(
           {
             task_key: safeTaskKey(pricingData.id),
             environment_key: PRICING_SERVERLESS_ENVIRONMENT_KEY,
-            notebook_task: {
-              notebook_path: pricingData.notebookPath,
+            spark_python_task: {
+              python_file: pricingData.notebookPath,
               source: 'WORKSPACE',
-              base_parameters: baseParameters,
+              parameters,
             },
           },
         ],
@@ -173,14 +179,7 @@ async function ensureRunnablePricingData(
   deps: NotebookRunDeps,
 ): Promise<PricingData> {
   const existing = await db.repos.pricingData.getById(id);
-  const service = pricingServiceById(id);
-  if (
-    existing?.notebookPath &&
-    (service.kind !== 'aws' || existing.rawDataPath) &&
-    (service.kind !== 'aws' || existing.rawDataTable) &&
-    existing.table &&
-    typeof existing.metadata.source === 'string'
-  ) {
+  if (isRunnablePricingData(existing)) {
     return existing;
   }
 

@@ -19,7 +19,7 @@ import {
   LEGACY_SHARED_PIPELINE_SETTING_KEYS,
   SHARED_PIPELINE_SETTING_KEYS,
 } from './dataSourceSetup.js';
-import { deleteFinLakeGenieSpace, GenieServiceError } from './genie.js';
+import { deleteAllFinLakeGenieSpaces, GenieServiceError } from './genie.js';
 
 export const ADMIN_CLEANUP_SETTING_KEYS = [
   CATALOG_SETTING_KEY,
@@ -39,7 +39,7 @@ export const ADMIN_CLEANUP_SETTING_KEYS = [
 export async function cleanupFinLakeResources(
   db: DatabaseClient,
   env: Env,
-  opts: { deleteCatalog: boolean; userToken?: string },
+  opts: { deleteCatalog: boolean; userToken?: string; warehouseId?: string },
 ): Promise<AdminCleanupResponse> {
   const settings = settingsToRecord(await db.repos.appSettings.list());
   const resources: AdminCleanupResourceResult[] = [];
@@ -50,16 +50,22 @@ export async function cleanupFinLakeResources(
   const pipelineId =
     settings[LAKEFLOW_PIPELINE_SETTING_KEYS.pipelineId] ??
     settings[LEGACY_SHARED_PIPELINE_SETTING_KEYS.pipelineId];
+  const dataSources = await db.repos.dataSources.list();
+  const sourcePipelineIds = Array.from(
+    new Set(dataSources.flatMap((source) => (source.pipelineId ? [source.pipelineId] : []))),
+  ).filter((id) => id !== pipelineId);
 
   resources.push(
     ...(await Promise.all([
       deleteJobResource(wc, jobId),
       deletePipelineResource(wc, pipelineId),
+      ...sourcePipelineIds.map((id) => deletePipelineResource(wc, id)),
       deleteWorkspaceResource(wc, settings[SHARED_PIPELINE_SETTING_KEYS.workspaceRoot]),
-      deleteGenieResource(db, env, settings[GENIE_SPACE_SETTING_KEY]),
+      deleteGenieResource(db, env),
       deleteCatalogResource(env, settings[CATALOG_SETTING_KEY], {
         deleteCatalog: opts.deleteCatalog,
         userToken: opts.userToken,
+        warehouseId: opts.warehouseId,
       }),
     ])),
   );
@@ -125,37 +131,36 @@ async function deleteWorkspaceResource(
 async function deleteGenieResource(
   db: DatabaseClient,
   env: Env,
-  spaceId: string | undefined,
 ): Promise<AdminCleanupResourceResult> {
-  const id = spaceId?.trim();
-  if (!id) return skipped('genie_space', null, 'No saved Genie Space id.');
   try {
-    await deleteFinLakeGenieSpace(env, db);
-    return deleted('genie_space', id, 'Genie Space deleted.');
+    const deletedSpaceIds = await deleteAllFinLakeGenieSpaces(env, db);
+    if (deletedSpaceIds.length === 0)
+      return skipped('genie_space', null, 'No saved Genie Space id.');
+    return deleted('genie_space', deletedSpaceIds.join(', '), 'Genie Space deleted.');
   } catch (err) {
     if (err instanceof GenieServiceError) {
-      return failed('genie_space', id, err.message);
+      return failed('genie_space', null, err.message);
     }
-    return failed('genie_space', id, messageOf(err));
+    return failed('genie_space', null, messageOf(err));
   }
 }
 
 async function deleteCatalogResource(
   env: Env,
   catalog: string | undefined,
-  opts: { deleteCatalog: boolean; userToken?: string },
+  opts: { deleteCatalog: boolean; userToken?: string; warehouseId?: string },
 ): Promise<AdminCleanupResourceResult> {
   const name = catalog?.trim();
   if (!opts.deleteCatalog) {
     return skipped('catalog', name || null, 'Physical catalog deletion was not requested.');
   }
   if (!name) return skipped('catalog', null, 'No saved catalog name.');
-  const executor = buildUserExecutor(env, opts.userToken);
+  const executor = buildUserExecutor(env, opts.userToken, opts.warehouseId);
   if (!executor) {
     return failed(
       'catalog',
       name,
-      'OBO access token, DATABRICKS_HOST, and SQL_WAREHOUSE_ID are required to drop the catalog.',
+      'OBO access token, DATABRICKS_HOST, and selected SQL warehouse are required to drop the catalog.',
     );
   }
   try {
@@ -181,6 +186,9 @@ async function cleanupDatabase(db: DatabaseClient): Promise<AdminCleanupDatabase
   await Promise.all([
     countStep('app_settings', failures, async () => {
       result.deletedSettings = await db.repos.appSettings.deleteMany(ADMIN_CLEANUP_SETTING_KEYS);
+    }),
+    countStep('genie_spaces', failures, async () => {
+      await db.repos.genieSpaces.clear();
     }),
     countStep('data_sources', failures, async () => {
       result.deletedDataSources = await db.repos.dataSources.clear();

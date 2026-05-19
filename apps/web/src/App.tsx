@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { SqlWarehouseProvider } from './contexts/SqlWarehouseContext';
 import { AppShell } from './components/layout/AppShell';
 import { Dashboard } from './pages/Dashboard';
 import { Budgets } from './pages/Budgets';
@@ -15,60 +16,94 @@ import { Pricing } from './pages/Configure/Pricing';
 import { Workspaces } from './pages/Configure/Workspaces';
 import { Credentials } from './pages/ExternalData/Credentials';
 import { CostExplore } from './pages/Explore/CostExplore';
-import { Genie } from './pages/Explore/Genie';
+import { Genie, GenieV0 } from './pages/Explore/Genie';
 import { DatabricksOptimize } from './pages/Optimize/DatabricksOptimize';
 import { OptimizeStub } from './pages/Optimize/OptimizeStub';
+import { OnboardingLayout } from './pages/Onboarding/OnboardingLayout';
+import {
+  OnboardingAwsIntegration,
+  OnboardingAwsPricing,
+  OnboardingCatalog,
+  OnboardingDatabricksIntegration,
+  OnboardingDatabricksPricing,
+  OnboardingIntegration,
+  OnboardingPricing,
+} from './pages/Onboarding/OnboardingPages';
 
 export function App() {
   return (
-    <AppShell>
-      <Routes>
-        <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route path="/overview" element={<Dashboard />} />
-        <Route path="/cost-explore" element={<CostExplore />} />
-        <Route path="/budgets" element={<Budgets />} />
-        <Route path="/genie" element={<Genie />} />
-        <Route path="/optimize" element={<Navigate to="/optimize/databricks" replace />} />
-        <Route path="/optimize/databricks" element={<DatabricksOptimize />} />
-        <Route
-          path="/optimize/aws"
-          element={<OptimizeStub titleKey="optimize.aws.title" descKey="optimize.aws.desc" />}
-        />
+    <SqlWarehouseProvider>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<Navigate to="/overview" replace />} />
+          <Route path="/overview" element={<Dashboard />} />
+          <Route path="/cost-explore" element={<CostExplore />} />
+          <Route path="/budgets" element={<Budgets />} />
+          <Route path="/genie" element={<Genie />} />
+          <Route path="/genie-v0" element={<GenieV0 />} />
+          <Route path="/optimize" element={<Navigate to="/optimize/databricks" replace />} />
+          <Route path="/optimize/databricks" element={<DatabricksOptimize />} />
+          <Route
+            path="/optimize/aws"
+            element={<OptimizeStub titleKey="optimize.aws.title" descKey="optimize.aws.desc" />}
+          />
 
-        <Route element={<ConfigureLayout />}>
-          <Route path="/integrations" element={<DataSources />} />
-          <Route path="/integrations/databricks" element={<DatabricksIntegrationDetail />} />
-          <Route path="/integrations/aws" element={<AwsIntegrationDetail />} />
-          <Route path="/tags" element={<GovernedTags />} />
-          <Route path="/transformations" element={<Transformations />} />
-          <Route path="/pricing" element={<Navigate to="/pricing/aws" replace />} />
-          <Route path="/pricing/aws" element={<Pricing provider="aws" />} />
-          <Route path="/pricing/databricks" element={<Pricing provider="databricks" />} />
-          <Route path="/credentials" element={<Credentials />} />
-          <Route path="/workspaces" element={<Workspaces />} />
-          <Route path="/admin" element={<Catalog />} />
-        </Route>
+          <Route element={<OnboardingLayout />}>
+            <Route path="/onboarding" element={<Navigate to="/onboarding/catalog" replace />} />
+            <Route path="/onboarding/catalog" element={<OnboardingCatalog />} />
+            <Route path="/onboarding/integration" element={<OnboardingIntegration />} />
+            <Route
+              path="/onboarding/integrations"
+              element={<Navigate to="/onboarding/integration" replace />}
+            />
+            <Route
+              path="/onboarding/integration/databricks"
+              element={<OnboardingDatabricksIntegration />}
+            />
+            <Route path="/onboarding/integration/aws" element={<OnboardingAwsIntegration />} />
+            <Route path="/onboarding/pricing" element={<OnboardingPricing />} />
+            <Route path="/onboarding/pricing/aws" element={<OnboardingAwsPricing />} />
+            <Route
+              path="/onboarding/pricing/databricks"
+              element={<OnboardingDatabricksPricing />}
+            />
+          </Route>
 
-        <Route path="/configure" element={<Navigate to="/integrations" replace />} />
-        <Route path="/configure/data-sources" element={<Navigate to="/integrations" replace />} />
-        <Route path="/data-sources" element={<Navigate to="/integrations" replace />} />
-        <Route path="/configure/credentials" element={<Navigate to="/credentials" replace />} />
-        <Route path="/configure/workspaces" element={<Navigate to="/workspaces" replace />} />
-        <Route
-          path="/configure/transformations"
-          element={<Navigate to="/transformations" replace />}
-        />
-        <Route path="/configure/pricing" element={<Navigate to="/pricing/aws" replace />} />
-        <Route path="/configure/catalog" element={<Navigate to="/admin" replace />} />
-        <Route path="/catalog" element={<Navigate to="/admin" replace />} />
+          <Route element={<ConfigureLayout />}>
+            <Route path="/integrations" element={<DataSources />} />
+            <Route path="/integrations/databricks" element={<DatabricksIntegrationDetail />} />
+            <Route path="/integrations/aws" element={<AwsIntegrationDetail />} />
+            <Route path="/tags" element={<GovernedTags />} />
+            <Route path="/transformations" element={<Transformations />} />
+            <Route path="/pricing" element={<Navigate to="/pricing/aws" replace />} />
+            <Route path="/pricing/aws" element={<Pricing provider="aws" />} />
+            <Route path="/pricing/databricks" element={<Pricing provider="databricks" />} />
+            <Route path="/credentials" element={<Credentials />} />
+            <Route path="/workspaces" element={<Workspaces />} />
+            <Route path="/admin" element={<Catalog />} />
+          </Route>
 
-        <Route path="/storage-credentials" element={<Navigate to="/credentials" replace />} />
-        <Route path="/bcm-credentials" element={<Navigate to="/credentials" replace />} />
+          <Route path="/configure" element={<Navigate to="/integrations" replace />} />
+          <Route path="/configure/data-sources" element={<Navigate to="/integrations" replace />} />
+          <Route path="/data-sources" element={<Navigate to="/integrations" replace />} />
+          <Route path="/configure/credentials" element={<Navigate to="/credentials" replace />} />
+          <Route path="/configure/workspaces" element={<Navigate to="/workspaces" replace />} />
+          <Route
+            path="/configure/transformations"
+            element={<Navigate to="/transformations" replace />}
+          />
+          <Route path="/configure/pricing" element={<Navigate to="/pricing/aws" replace />} />
+          <Route path="/configure/catalog" element={<Navigate to="/admin" replace />} />
+          <Route path="/catalog" element={<Navigate to="/admin" replace />} />
 
-        <Route path="/settings" element={<Navigate to="/admin" replace />} />
-        <Route path="/setup" element={<Navigate to="/integrations" replace />} />
-        <Route path="*" element={<Navigate to="/overview" replace />} />
-      </Routes>
-    </AppShell>
+          <Route path="/storage-credentials" element={<Navigate to="/credentials" replace />} />
+          <Route path="/bcm-credentials" element={<Navigate to="/credentials" replace />} />
+
+          <Route path="/settings" element={<Navigate to="/admin" replace />} />
+          <Route path="/setup" element={<Navigate to="/integrations" replace />} />
+          <Route path="*" element={<Navigate to="/overview" replace />} />
+        </Routes>
+      </AppShell>
+    </SqlWarehouseProvider>
   );
 }

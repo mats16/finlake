@@ -1,4 +1,5 @@
 import { settingsToRecord, type DatabaseClient } from '@finlake/db';
+import { createHash } from 'node:crypto';
 import {
   ACCOUNT_PRICES_DEFAULT,
   AWS_FOCUS_VERSION,
@@ -31,11 +32,13 @@ import { z } from 'zod';
 import {
   buildAppExecutor,
   buildAppWorkspaceClient,
-  buildUserExecutor,
+  buildUserWorkspaceClient,
+  resolveSqlWarehouseId,
+  StatementExecutor,
 } from './statementExecution.js';
 import {
-  upsertPipelineSchedule,
-  type PipelineScheduleParams,
+  startPipelineUpdate,
+  upsertMultiPipelineSchedule,
   type PipelineSourceFile,
 } from './databricksJobs.js';
 import { DataSourceSetupError } from './dataSourceErrors.js';
@@ -57,6 +60,8 @@ interface AwsFocusConfig {
   exportName: string | null;
 }
 
+const setupLocks = new Map<string, Promise<void>>();
+
 export const SHARED_PIPELINE_SETTING_KEYS = {
   jobId: LAKEFLOW_PIPELINE_SETTING_KEYS.jobId,
   pipelineId: LAKEFLOW_PIPELINE_SETTING_KEYS.pipelineId,
@@ -69,6 +74,7 @@ export const LEGACY_SHARED_PIPELINE_SETTING_KEYS = {
 } as const;
 
 const SHARED_PIPELINE_FILENAME_GOLD = 'gold_usage.sql';
+const GOLD_PIPELINE_TASK_KEY = 'gold_usage';
 const FOCUS_12_BILLING_COLUMNS = [
   { name: 'AvailabilityZone', type: 'STRING' },
   { name: 'BilledCost', type: 'DOUBLE' },
@@ -195,7 +201,7 @@ function readAwsFocusConfig(config: Record<string, unknown>): AwsFocusConfig {
 export function workspacePathFor(
   appName: string,
   key: DataSourceKey,
-  filename = 'databricksFocusTransformPipeline.sql',
+  filename = 'silver.sql',
 ): string {
   return `/Workspace/Shared/${appName}/data_sources/${dataSourceKeySlug(key)}/${filename}`;
 }
@@ -231,6 +237,18 @@ export function resourceLabelBase(source: {
   return `finops-${providerSlug}-${resourceSlug(source)}`;
 }
 
+export function sourceSilverPipelineName(source: {
+  providerName: string;
+  accountId: string;
+  config: Record<string, unknown>;
+}): string {
+  if (isDatabricksProvider(source.providerName)) return 'finops-ingest-databricks-pipeline';
+  if (isAwsProvider(source.providerName)) {
+    return `finops-ingest-aws-${source.accountId}-pipeline`;
+  }
+  return `${resourceLabelBase(source)}-pipeline`;
+}
+
 function dataSourceKeySlug(key: DataSourceKey): string {
   return `${key.providerName}_${key.accountId}`.replace(/[^A-Za-z0-9_-]+/g, '_');
 }
@@ -240,6 +258,18 @@ function dataSourceKeySlug(key: DataSourceKey): string {
  * Lakeflow pipeline/job that materializes all enabled sources.
  */
 export async function setupFocusDataSource(
+  env: Env,
+  db: DatabaseClient,
+  userToken: string | undefined,
+  key: DataSourceKey,
+  body: DataSourceSetupBody,
+): Promise<DataSourceSetupResult> {
+  return withSetupLock(`source:${dataSourceKeyString(key)}`, () =>
+    setupFocusDataSourceLocked(env, db, userToken, key, body),
+  );
+}
+
+async function setupFocusDataSourceLocked(
   env: Env,
   db: DatabaseClient,
   userToken: string | undefined,
@@ -326,9 +356,11 @@ export async function setupFocusDataSource(
   }
 
   if (isDatabricksProvider(source.providerName)) {
-    await assertCanReadUsageTable(env, userToken as string);
-    await grantAppSystemTableAccess(env, userToken as string, databricksAccountPricesTable);
-    await assertAppCanReadSystemTables(env, databricksAccountPricesTable);
+    const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
+    const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
+    await assertCanReadUsageTable(userExecutor);
+    await grantAppSystemTableAccess(env, userExecutor, databricksAccountPricesTable);
+    await assertAppCanReadSystemTables(env, warehouseId, databricksAccountPricesTable);
   }
 
   const candidateSource: DataSource = {
@@ -356,10 +388,19 @@ export async function setupFocusDataSource(
       'lakeflowJob',
     );
   }
+  const silverPipelineId = result.sourcePipelineIds[dataSourceKeyString(candidateSource)];
+  if (!silverPipelineId) {
+    throw new DataSourceSetupError(
+      `Failed to resolve silver pipeline id for ${fqn}.`,
+      500,
+      'lakeflowJob',
+    );
+  }
 
   const updated = await db.repos.dataSources.update(key, {
     tableName,
     focusVersion,
+    pipelineId: silverPipelineId,
     enabled: true,
     config: nextConfig,
   });
@@ -367,7 +408,7 @@ export async function setupFocusDataSource(
   return {
     dataSourceKey: toDataSourceKey(updated),
     jobId: result.jobId,
-    pipelineId: result.pipelineId,
+    pipelineId: silverPipelineId,
     fqn,
     goldFqn: focusViewFqn({
       catalog,
@@ -419,23 +460,44 @@ function s3ExportDataPath({
   return `${s3ExportPath(s3Bucket, s3Prefix, exportName)}/data`;
 }
 
-async function assertCanReadUsageTable(env: Env, userToken: string): Promise<void> {
-  if (!env.SQL_WAREHOUSE_ID) {
+async function resolveSetupWarehouseId(
+  env: Env,
+  userToken: string,
+  warehouseId?: string,
+): Promise<string> {
+  const wc = buildUserWorkspaceClient(env, userToken);
+  if (!wc) {
     throw new DataSourceSetupError(
-      [
-        'SQL_WAREHOUSE_ID must be configured to verify system.billing.usage access',
-        'before creating the FOCUS pipeline/job.',
-      ].join(' '),
+      'OBO access token + DATABRICKS_HOST required to list SQL warehouses before creating the FOCUS pipeline/job.',
       400,
     );
   }
-  const executor = buildUserExecutor(env, userToken);
-  if (!executor) {
+  const resolved = await resolveSqlWarehouseId(wc, warehouseId);
+  if (!resolved) {
     throw new DataSourceSetupError(
-      'Failed to build Databricks SQL executor for system.billing.usage access check.',
-      500,
+      'No accessible SQL warehouse found. Select a SQL warehouse before creating the FOCUS pipeline/job.',
+      400,
     );
   }
+  return resolved;
+}
+
+function buildSetupUserExecutor(
+  env: Env,
+  userToken: string,
+  warehouseId: string,
+): StatementExecutor {
+  const wc = buildUserWorkspaceClient(env, userToken);
+  if (!wc) {
+    throw new DataSourceSetupError(
+      'OBO access token + DATABRICKS_HOST required to create the FOCUS pipeline/job.',
+      400,
+    );
+  }
+  return new StatementExecutor({ workspaceClient: wc, warehouseId });
+}
+
+async function assertCanReadUsageTable(executor: StatementExecutor): Promise<void> {
   try {
     await executor.run(
       'SELECT 1 AS ok FROM system.billing.usage LIMIT 1',
@@ -458,29 +520,13 @@ async function assertCanReadUsageTable(env: Env, userToken: string): Promise<voi
 
 async function grantAppSystemTableAccess(
   env: Env,
-  userToken: string,
+  executor: StatementExecutor,
   accountPricesTable: string | null,
 ): Promise<void> {
-  if (!env.SQL_WAREHOUSE_ID) {
-    throw new DataSourceSetupError(
-      [
-        'SQL_WAREHOUSE_ID must be configured to grant app service principal',
-        'system table access before creating the shared FOCUS pipeline/job.',
-      ].join(' '),
-      400,
-    );
-  }
   const sp = (env.DATABRICKS_CLIENT_ID ?? '').trim();
   if (!sp) {
     throw new DataSourceSetupError(
       'DATABRICKS_CLIENT_ID must be configured before granting system table access.',
-      400,
-    );
-  }
-  const executor = buildUserExecutor(env, userToken);
-  if (!executor) {
-    throw new DataSourceSetupError(
-      'OBO access token + DATABRICKS_HOST + SQL_WAREHOUSE_ID required to grant system table access.',
       400,
     );
   }
@@ -504,18 +550,10 @@ async function grantAppSystemTableAccess(
 
 async function assertAppCanReadSystemTables(
   env: Env,
+  warehouseId: string,
   accountPricesTable: string | null,
 ): Promise<void> {
-  if (!env.SQL_WAREHOUSE_ID) {
-    throw new DataSourceSetupError(
-      [
-        'SQL_WAREHOUSE_ID must be configured to verify app service principal',
-        'system table access before creating the shared FOCUS pipeline/job.',
-      ].join(' '),
-      400,
-    );
-  }
-  const executor = buildAppExecutor(env);
+  const executor = buildAppExecutor(env, warehouseId);
   if (!executor) {
     throw new DataSourceSetupError(
       'Failed to build Databricks SQL executor for app service principal system.billing.usage access check.',
@@ -549,17 +587,23 @@ export async function runDataSourceJob(
   db: DatabaseClient,
   _userToken: string | undefined,
   key: DataSourceKey,
-): Promise<{ dataSourceKey: DataSourceKey; jobId: number; runId: number }> {
+): Promise<{
+  dataSourceKey: DataSourceKey;
+  pipelineId: string;
+  updateId: string;
+  requestId: string | null;
+}> {
   if (!env.DATABRICKS_HOST) {
     throw new DataSourceSetupError('DATABRICKS_HOST must be configured.', 400);
   }
 
   const source = await db.repos.dataSources.get(key);
   if (!source) throw new DataSourceSetupError('Data source not found', 404);
-  const appSettings = settingsToRecord(await db.repos.appSettings.list());
-  const jobId = sharedJobIdSetting(appSettings);
-  if (jobId === null) {
-    throw new DataSourceSetupError('No shared Databricks job has been created.', 400);
+  if (!source.pipelineId) {
+    throw new DataSourceSetupError(
+      'No Lakeflow pipeline has been created for this data source.',
+      400,
+    );
   }
   const wc = buildAppWorkspaceClient(env);
   if (!wc) {
@@ -569,17 +613,12 @@ export async function runDataSourceJob(
     );
   }
 
-  let run;
   try {
-    run = await wc.jobs.runNow({ job_id: jobId });
+    const run = await startPipelineUpdate(wc, source.pipelineId);
+    return { dataSourceKey: toDataSourceKey(source), ...run };
   } catch (err) {
-    throw new DataSourceSetupError(`Failed to run job #${jobId}: ${(err as Error).message}`, 500);
+    throw new DataSourceSetupError((err as Error).message, 500);
   }
-  if (typeof run.run_id !== 'number') {
-    throw new DataSourceSetupError(`Databricks Jobs API returned no run_id`, 500);
-  }
-
-  return { dataSourceKey: toDataSourceKey(source), jobId, runId: run.run_id };
 }
 
 export async function runSharedFocusJob(
@@ -630,6 +669,31 @@ export async function syncSharedFocusPipeline(
 ): Promise<{
   jobId: number;
   pipelineId: string;
+  sourcePipelineIds: Record<string, string>;
+  workspacePaths: string[];
+  cronExpression: string;
+  timezoneId: string;
+}> {
+  return withSetupLock('shared-focus-pipeline', () =>
+    syncSharedFocusPipelineLocked(env, db, sourcesOverride, opts),
+  );
+}
+
+async function syncSharedFocusPipelineLocked(
+  env: Env,
+  db: DatabaseClient,
+  sourcesOverride?: DataSource[],
+  opts?: {
+    catalog?: string;
+    silverSchema?: string;
+    goldSchema?: string;
+    cronExpression?: string;
+    timezoneId?: string;
+  },
+): Promise<{
+  jobId: number;
+  pipelineId: string;
+  sourcePipelineIds: Record<string, string>;
   workspacePaths: string[];
   cronExpression: string;
   timezoneId: string;
@@ -678,12 +742,21 @@ export async function syncSharedFocusPipeline(
   const timezoneId =
     opts?.timezoneId ?? existingSchedule?.timezoneId ?? FOCUS_REFRESH_TIMEZONE_DEFAULT;
 
-  const workspaceRoot =
+  const workspaceRoot = normalizedPipelineWorkspaceRoot(
     appSettings[SHARED_PIPELINE_SETTING_KEYS.workspaceRoot] ??
-    sharedPipelineWorkspaceRoot(env.DATABRICKS_APP_NAME);
+      sharedPipelineWorkspaceRoot(env.DATABRICKS_APP_NAME),
+  );
   const sourceFiles = enabledSources.map((source) => sourcePipelineFile(workspaceRoot, source));
+  const silverTasks = sourceFiles.map((file) => ({
+    taskKey: sourcePipelineTaskKey(file.source),
+    pipelineName: sourceSilverPipelineName(file.source),
+    files: [file],
+    catalog,
+    schema: silverSchema,
+    existingPipelineId: file.source.pipelineId,
+  }));
   const goldFile: PipelineSourceFile = {
-    workspacePath: `${workspaceRoot}/${SHARED_PIPELINE_FILENAME_GOLD}`,
+    workspacePath: `${workspaceRoot}/shared/${SHARED_PIPELINE_FILENAME_GOLD}`,
     pipelineSql: buildUsageGoldSql({
       catalog,
       silverSchema,
@@ -694,31 +767,74 @@ export async function syncSharedFocusPipeline(
       })),
     }),
   };
-  const params: PipelineScheduleParams = {
-    pipelineName: 'finops-focus-shared-pipeline',
-    jobName: 'finops-focus-shared-job',
-    files: [...sourceFiles, goldFile],
-    catalog,
-    schema: silverSchema,
-    cronExpression,
-    timezoneId,
-    servicePrincipalId: env.DATABRICKS_CLIENT_ID,
-    environmentTag: env.NODE_ENV,
-  };
-  const result = await upsertPipelineSchedule(wc, params, {
-    jobId: existingJobId,
-    pipelineId: sharedPipelineIdSetting(appSettings),
-  });
+  const result = await upsertMultiPipelineSchedule(
+    wc,
+    {
+      jobName: 'finops-master-job',
+      pipelines: [
+        ...silverTasks,
+        {
+          taskKey: GOLD_PIPELINE_TASK_KEY,
+          pipelineName: 'finops-gold-aggregate-pipeline',
+          files: [goldFile],
+          catalog,
+          schema: silverSchema,
+          existingPipelineId: sharedPipelineIdSetting(appSettings),
+          dependsOn: silverTasks.map((task) => task.taskKey),
+        },
+      ],
+      cronExpression,
+      timezoneId,
+      servicePrincipalId: env.DATABRICKS_CLIENT_ID,
+      environmentTag: env.NODE_ENV,
+    },
+    {
+      jobId: existingJobId,
+    },
+  );
+
+  const pipelineIdsByTask = Object.fromEntries(
+    result.pipelines.map((pipeline) => [pipeline.taskKey, pipeline.pipelineId]),
+  );
+  const goldPipelineId = pipelineIdsByTask[GOLD_PIPELINE_TASK_KEY];
+  if (!goldPipelineId) {
+    throw new DataSourceSetupError('Gold pipeline task was not created.', 500, 'lakeflowJob');
+  }
+  const resolvedSourcePipelineIds: Record<string, string> = {};
+  for (const file of sourceFiles) {
+    const key = dataSourceKeyString(file.source);
+    const pipelineId = pipelineIdsByTask[sourcePipelineTaskKey(file.source)];
+    if (!pipelineId) {
+      throw new DataSourceSetupError(
+        `Silver pipeline task was not created for ${key}.`,
+        500,
+        'lakeflowJob',
+      );
+    }
+    resolvedSourcePipelineIds[key] = pipelineId;
+  }
 
   await Promise.all([
     db.repos.appSettings.upsert(SHARED_PIPELINE_SETTING_KEYS.jobId, String(result.jobId)),
-    db.repos.appSettings.upsert(SHARED_PIPELINE_SETTING_KEYS.pipelineId, result.pipelineId),
+    db.repos.appSettings.upsert(SHARED_PIPELINE_SETTING_KEYS.pipelineId, goldPipelineId),
     db.repos.appSettings.upsert(SHARED_PIPELINE_SETTING_KEYS.workspaceRoot, workspaceRoot),
     db.repos.appSettings.delete(LEGACY_SHARED_PIPELINE_SETTING_KEYS.jobId),
     db.repos.appSettings.delete(LEGACY_SHARED_PIPELINE_SETTING_KEYS.pipelineId),
+    ...enabledSources.map((source) =>
+      db.repos.dataSources.update(toDataSourceKey(source), {
+        pipelineId: resolvedSourcePipelineIds[dataSourceKeyString(source)],
+      }),
+    ),
   ]);
 
-  return { ...result, cronExpression, timezoneId };
+  return {
+    jobId: result.jobId,
+    pipelineId: goldPipelineId,
+    sourcePipelineIds: resolvedSourcePipelineIds,
+    workspacePaths: result.pipelines.flatMap((pipeline) => pipeline.workspacePaths),
+    cronExpression,
+    timezoneId,
+  };
 }
 
 async function readExistingJobSchedule(
@@ -737,7 +853,12 @@ async function readExistingJobSchedule(
 }
 
 function sharedPipelineWorkspaceRoot(appName: string): string {
-  return `/Workspace/Shared/${appName}/data_sources/shared`;
+  return `/Workspace/Shared/${appName}/data_sources`;
+}
+
+function normalizedPipelineWorkspaceRoot(root: string): string {
+  const trimmed = root.replace(/\/+$/, '');
+  return trimmed.endsWith('/data_sources/shared') ? trimmed.slice(0, -'/shared'.length) : trimmed;
 }
 
 function sharedJobIdSetting(settings: Record<string, string>): number | null {
@@ -757,14 +878,16 @@ function sharedPipelineIdSetting(settings: Record<string, string>): string | nul
 function sourcePipelineFile(
   workspaceRoot: string,
   source: DataSource,
-): PipelineSourceFile & { tableName: string; providerName: string } {
+): PipelineSourceFile & { tableName: string; providerName: string; source: DataSource } {
+  const sourceRoot = `${workspaceRoot}/${dataSourceKeySlug(toDataSourceKey(source))}`;
   if (isDatabricksProvider(source.providerName)) {
     const config = readFocusConfig(source.config);
     const tableName = tableLeafName(source.tableName);
     return {
       tableName,
       providerName: source.providerName,
-      workspacePath: `${workspaceRoot}/databricks_${source.accountId}.sql`,
+      source,
+      workspacePath: `${sourceRoot}/silver.sql`,
       pipelineSql: buildFocusSilverPipelineSql({
         table: tableName,
         accountPricesTable: config.accountPricesTable,
@@ -779,7 +902,8 @@ function sourcePipelineFile(
   return {
     tableName,
     providerName: source.providerName,
-    workspacePath: `${workspaceRoot}/aws_${awsSource.awsAccountId}.sql`,
+    source,
+    workspacePath: `${sourceRoot}/silver.sql`,
     pipelineSql: buildAwsFocusSilverPipelineSql({
       tableName,
       s3Bucket: awsSource.s3Bucket,
@@ -787,6 +911,13 @@ function sourcePipelineFile(
       exportName: awsSource.exportName,
     }),
   };
+}
+
+function sourcePipelineTaskKey(source: DataSource): string {
+  const base = `silver_${dataSourceKeySlug(toDataSourceKey(source))}`;
+  if (base.length <= 90) return base;
+  const hash = createHash('sha1').update(base).digest('hex').slice(0, 10);
+  return `${base.slice(0, 79)}_${hash}`;
 }
 
 export function buildUsageGoldSql({
@@ -941,4 +1072,29 @@ function numberSetting(value: string | undefined): number | null {
   if (!value) return null;
   const n = Number(value);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+async function withSetupLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = setupLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = previous
+    .catch(() => {
+      /* keep the queue moving after a failed setup */
+    })
+    .then(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+  setupLocks.set(key, current);
+  await previous.catch(() => {
+    /* callers should see their own error, not a previous setup failure */
+  });
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (setupLocks.get(key) === current) setupLocks.delete(key);
+  }
 }

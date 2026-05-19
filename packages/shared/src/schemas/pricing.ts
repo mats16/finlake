@@ -82,6 +82,11 @@ export const PricingNotebookDeleteResultSchema = z.object({
 });
 export type PricingNotebookDeleteResult = z.infer<typeof PricingNotebookDeleteResultSchema>;
 
+export const PricingNotebookDeleteBodySchema = z.object({
+  warehouseId: z.string().min(1).max(256).optional(),
+});
+export type PricingNotebookDeleteBody = z.infer<typeof PricingNotebookDeleteBodySchema>;
+
 export const PricingNotebookRunResultSchema = z.object({
   id: z.string(),
   provider: z.string(),

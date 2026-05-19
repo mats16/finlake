@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   ACCOUNT_PRICES_DEFAULT,
   focusSourceTables,
-  parseThreePartTableName,
 } from '../dist/sql/focusView.sql.js';
 
 test('focusSourceTables includes FOCUS system table dependencies once', () => {
@@ -15,6 +14,7 @@ test('focusSourceTables includes FOCUS system table dependencies once', () => {
     'system.lakeflow.pipelines',
     'system.compute.clusters',
     'system.compute.warehouses',
+    'system.billing.account_prices',
   ]);
 });
 
@@ -22,8 +22,4 @@ test('focusSourceTables appends a custom account prices table', () => {
   const tables = focusSourceTables('finops.silver.account_prices').map((t) => t.fqn);
   assert.equal(tables.at(-1), 'finops.silver.account_prices');
   assert.equal(new Set(tables).size, tables.length);
-});
-
-test('parseThreePartTableName rejects incomplete source table names', () => {
-  assert.throws(() => parseThreePartTableName('list_prices'), /three-part table name/);
 });

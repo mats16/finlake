@@ -7,6 +7,7 @@ import {
 } from '@aws-sdk/client-cost-explorer';
 import {
   GOVERNED_TAG_DEFINITIONS,
+  isAwsProvider,
   roleNameFromArn,
   type Env,
   type GovernedTagAwsAccount,
@@ -18,7 +19,9 @@ import {
   type GovernedTagSyncResult,
   type GovernedTagSyncTagResult,
   type GovernedTagsResponse,
+  type ServiceCredentialSummary,
 } from '@finlake/shared';
+import type { DatabaseClient } from '@finlake/db';
 import { logger } from '../config/logger.js';
 import { mapWithConcurrency } from '../utils/mapWithConcurrency.js';
 import {
@@ -42,11 +45,14 @@ interface TagPolicyLike {
 
 export class GovernedTagsServiceError extends WorkspaceServiceError {}
 
-export async function listGovernedTags(env: Env): Promise<GovernedTagsResponse> {
+export async function listGovernedTags(
+  env: Env,
+  db: DatabaseClient,
+): Promise<GovernedTagsResponse> {
   const warnings: string[] = [];
   const [databricksByKey, awsAccounts] = await Promise.all([
     listDatabricksTagPolicies(env, warnings),
-    listFinLakeAwsAccounts(env, warnings),
+    listFinLakeAwsAccounts(env, db, warnings),
   ]);
   const awsByAccount = new Map<string, Map<string, GovernedTagAwsStatus>>();
 
@@ -87,12 +93,13 @@ export async function listGovernedTags(env: Env): Promise<GovernedTagsResponse> 
 
 export async function syncGovernedTags(
   env: Env,
+  db: DatabaseClient,
   body: GovernedTagSyncBody,
 ): Promise<GovernedTagSyncResult> {
   if (body.platform === 'databricks') {
     return syncDatabricksGovernedTags(env, body.tagKey, body.enabled ?? true);
   }
-  return syncAwsCostAllocationTags(env, body.awsAccountId, body.tagKey);
+  return syncAwsCostAllocationTags(env, db, body.awsAccountId, body.tagKey);
 }
 
 async function syncDatabricksGovernedTags(
@@ -188,6 +195,7 @@ async function syncDatabricksGovernedTags(
 
 async function syncAwsCostAllocationTags(
   env: Env,
+  db: DatabaseClient,
   awsAccountId?: string,
   tagKey?: string,
 ): Promise<GovernedTagSyncResult> {
@@ -199,19 +207,19 @@ async function syncAwsCostAllocationTags(
     throw new GovernedTagsServiceError(`Unknown governed tag: ${tagKey}`, 400);
   }
   const warnings: string[] = [];
-  const allAccounts = await listFinLakeAwsAccounts(env, warnings);
+  const allAccounts = await listFinLakeAwsAccounts(env, db, warnings);
   const accounts = awsAccountId
     ? allAccounts.filter((account) => account.awsAccountId === awsAccountId)
     : allAccounts;
 
   if (awsAccountId && accounts.length === 0) {
     throw new GovernedTagsServiceError(
-      `FinLakeServiceRole service credential not found for AWS account ${awsAccountId}`,
+      `Enabled AWS data source not found for AWS account ${awsAccountId}`,
       400,
     );
   }
   if (accounts.length === 0) {
-    throw new GovernedTagsServiceError('No FinLakeServiceRole service credentials found', 400);
+    throw new GovernedTagsServiceError('No enabled AWS data sources found', 400);
   }
 
   const accountResults: GovernedTagSyncAccountResult[] = [];
@@ -223,6 +231,9 @@ async function syncAwsCostAllocationTags(
   await Promise.all(
     accounts.map(async (account) => {
       try {
+        if (!account.credentialName) {
+          throw new GovernedTagsServiceError(missingCredentialMessage(account.awsAccountId), 400);
+        }
         const credential = await generateAwsTemporaryCredentials(
           env,
           account.credentialName,
@@ -300,37 +311,56 @@ async function listDatabricksTagPolicies(
   }
 }
 
-async function listFinLakeAwsAccounts(
+export async function listFinLakeAwsAccounts(
   env: Env,
+  db: DatabaseClient,
   warnings: string[],
+  listCredentials: (
+    env: Env,
+  ) => Promise<ServiceCredentialSummary[]> = listAccessibleServiceCredentials,
 ): Promise<GovernedTagAwsAccount[]> {
-  try {
-    const credentials = await listAccessibleServiceCredentials(env);
-    const byAccount = new Map<string, GovernedTagAwsAccount>();
-    for (const credential of credentials) {
-      if (
-        credential.awsAccountId &&
-        roleNameFromArn(credential.roleArn) === AWS_SERVICE_ROLE_NAME &&
-        !byAccount.has(credential.awsAccountId)
-      ) {
-        byAccount.set(credential.awsAccountId, {
-          awsAccountId: credential.awsAccountId,
-          credentialName: credential.name,
-        });
-      }
+  const [sources, credentials] = await Promise.all([
+    db.repos.dataSources.list(),
+    listCredentials(env).catch((err) => {
+      logger.warn({ err }, 'FinLakeServiceRole credential list failed');
+      warnings.push(`FinLakeServiceRole credentials: ${(err as Error).message}`);
+      return [] as ServiceCredentialSummary[];
+    }),
+  ]);
+  const awsAccountIds = [
+    ...new Set(
+      sources
+        .filter((source) => isAwsProvider(source.providerName) && source.enabled)
+        .map((source) => source.accountId)
+        .filter((accountId) => /^\d{12}$/.test(accountId)),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  if (awsAccountIds.length === 0) return [];
+
+  const credentialByAccount = new Map<string, string>();
+  for (const credential of credentials) {
+    if (
+      credential.awsAccountId &&
+      roleNameFromArn(credential.roleArn) === AWS_SERVICE_ROLE_NAME &&
+      !credentialByAccount.has(credential.awsAccountId)
+    ) {
+      credentialByAccount.set(credential.awsAccountId, credential.name);
     }
-    return [...byAccount.values()].sort((a, b) => a.awsAccountId.localeCompare(b.awsAccountId));
-  } catch (err) {
-    logger.warn({ err }, 'FinLakeServiceRole credential list failed');
-    warnings.push(`FinLakeServiceRole credentials: ${(err as Error).message}`);
-    return [];
   }
+
+  return awsAccountIds.map((awsAccountId) => ({
+    awsAccountId,
+    credentialName: credentialByAccount.get(awsAccountId) ?? null,
+  }));
 }
 
 async function listAwsCostAllocationTags(
   env: Env,
   account: GovernedTagAwsAccount,
 ): Promise<Map<string, GovernedTagAwsStatus>> {
+  if (!account.credentialName) {
+    throw new GovernedTagsServiceError(missingCredentialMessage(account.awsAccountId), 400);
+  }
   const credential = await generateAwsTemporaryCredentials(
     env,
     account.credentialName,
@@ -379,6 +409,10 @@ async function listAwsCostAllocationTags(
     }
   }
   return byKey;
+}
+
+function missingCredentialMessage(awsAccountId: string): string {
+  return `FinLakeServiceRole service credential not found for enabled AWS data source account ${awsAccountId}`;
 }
 
 function databricksStatusFor(

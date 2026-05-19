@@ -49,14 +49,14 @@ A few non-obvious quirks:
 
 The DB layer is the most-edited area and the easiest to break. Three things to know:
 
-1. **`DB_BACKEND` env flag** controls the backend explicitly:
-   - `lakebase` — force Lakebase, fail boot if init fails (no fallback)
-   - `sqlite` — force SQLite, ignore Lakebase env vars
-   - `auto` (default) — try Lakebase if `LAKEBASE_INSTANCE_NAME`/`PGHOST` is set, otherwise fall back to SQLite
+1. **`LAKEBASE_ENDPOINT` controls backend selection**:
+   - present — use Lakebase, fail boot if init or health check fails (no fallback)
+   - absent — use SQLite
 
-   Implemented in `packages/db/src/index.ts`. Don't add new "auto" decision points elsewhere — keep the switch in one place.
+   Implemented in `packages/db/src/index.ts`. Don't add new backend decision points elsewhere — keep the switch in one place.
 
-2. **`@databricks/lakebase` has no ORM**. It returns a `pg.Pool`-compatible driver with auto OAuth refresh. Drizzle (`drizzle-orm/node-postgres`) sits on top. `LakebaseClient` is currently a stub that throws — Phase 1b work.
+2. **`@databricks/lakebase` has no ORM**. It returns a `pg.Pool`-compatible driver with auto OAuth refresh. `LakebaseClient` wires `createLakebasePool()` into Drizzle (`drizzle-orm/node-postgres`) and exposes the same repository interface as SQLite.
+   Databricks Apps should not create FinLake tables in `public`; use the app schema derived from `PGAPPNAME` and `PGUSER` (`{app-name}_schema_{service-principal-id-without-hyphens}`) and set `search_path` there.
 
 3. **SQLite path resolution** (`packages/db/src/paths.ts`):
    - explicit `SQLITE_PATH` wins
@@ -92,9 +92,9 @@ When adding a new data source: add an entry to `dataSourceCatalog.ts`, add a ste
 
 ### Deployment shape
 
-- `app.yaml` — Databricks Apps runtime manifest. The `valueFrom: warehouse` pattern binds resources declared in `resources/app.yml` to env vars.
+- `app.yaml` — Databricks Apps runtime manifest. SQL warehouses are selected at runtime through `/api/sql/warehouses` and `warehouse_id` request bodies, not bound through env vars.
 - `databricks.yml` + `resources/app.yml` — Databricks Asset Bundle. `databricks bundle deploy` uploads source and creates the app + its bound resources.
-- The `app_name` and Lakebase resource are decoupled from the app via the `DB_BACKEND` env flag — leaving Lakebase out of `resources/app.yml` is intentionally supported (SQLite fallback).
+- Lakebase resource binding is optional. If `resources/app.yml` does not bind Lakebase and `LAKEBASE_ENDPOINT` is not injected, the app uses SQLite.
 
 ### Naming
 

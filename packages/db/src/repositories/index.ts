@@ -66,13 +66,18 @@ export interface DataSourceValue {
   accountId: string;
   tableName: string;
   focusVersion: string | null;
+  pipelineId: string | null;
   enabled: boolean;
   config: Record<string, unknown>;
   updatedAt: string;
 }
 
-export type DataSourceCreateInput = Omit<DataSourceValue, 'updatedAt' | 'focusVersion'> & {
+export type DataSourceCreateInput = Omit<
+  DataSourceValue,
+  'updatedAt' | 'focusVersion' | 'pipelineId'
+> & {
   focusVersion?: string | null;
+  pipelineId?: string | null;
 };
 
 export type DataSourceUpdatePatch = Partial<
@@ -120,6 +125,21 @@ export interface AppSettingsRepo {
   deleteMany(keys: readonly string[]): Promise<number>;
 }
 
+export interface GenieSpaceValue {
+  purpose: string;
+  spaceId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenieSpacesRepo {
+  get(purpose: string): Promise<GenieSpaceValue | null>;
+  list(): Promise<GenieSpaceValue[]>;
+  upsert(purpose: string, spaceId: string): Promise<GenieSpaceValue>;
+  delete(purpose: string): Promise<void>;
+  clear(): Promise<number>;
+}
+
 export interface WorkspaceValue {
   id: string;
   domain: string;
@@ -144,6 +164,7 @@ export interface Repositories {
   cachedAggregations: CachedAggregationsRepo;
   setupState: SetupStateRepo;
   appSettings: AppSettingsRepo;
+  genieSpaces: GenieSpacesRepo;
   workspaces: WorkspacesRepo;
   dataSources: DataSourcesRepo;
   pricingData: PricingDataRepo;

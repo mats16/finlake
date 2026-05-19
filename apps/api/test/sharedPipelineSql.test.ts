@@ -4,7 +4,7 @@ import {
   awsUsageTableName,
   buildAwsFocusSilverPipelineSql,
 } from '../src/services/awsFocusTransformPipelineSql.js';
-import { buildUsageGoldSql } from '../src/services/dataSourceSetup.js';
+import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
 import {
   AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT,
@@ -46,6 +46,25 @@ test('awsUsageTableName derives canonical AWS silver table name', () => {
 test('awsUsageTableName rejects non-account identifiers', () => {
   assert.throws(() => awsUsageTableName('aws_usage'));
   assert.throws(() => awsUsageTableName('12345'));
+});
+
+test('sourceSilverPipelineName follows ingest pipeline naming convention', () => {
+  assert.equal(
+    sourceSilverPipelineName({
+      providerName: 'databricks',
+      accountId: 'default',
+      config: {},
+    }),
+    'finops-ingest-databricks-pipeline',
+  );
+  assert.equal(
+    sourceSilverPipelineName({
+      providerName: 'aws',
+      accountId: '123456789012',
+      config: {},
+    }),
+    'finops-ingest-aws-123456789012-pipeline',
+  );
 });
 
 test('buildAwsFocusSilverPipelineSql embeds source-specific values without gold rollup', () => {
@@ -121,6 +140,20 @@ test('buildFocusSilverPipelineSql keeps Databricks SkuPriceDetails as a map', ()
   assert.match(sql, /kv -> kv\.value IS NOT NULL/);
   assert.match(sql, /CAST\(u\.product_features\.is_serverless AS BOOLEAN\) AS x_Serverless/);
   assert.match(sql, /CAST\(u\.product_features\.is_photon AS BOOLEAN\) AS x_Photon/);
+  assert.match(sql, /get_json_object\(to_json\(ap\.pricing\), '\$\.effective_list\.default'\)/);
+  assert.match(sql, /get_json_object\(to_json\(ap\.pricing\), '\$\.default'\)/);
+  assert.match(sql, /get_json_object\(to_json\(lp\.pricing\), '\$\.effective_list\.default'\)/);
+  assert.match(sql, /get_json_object\(to_json\(lp\.pricing\), '\$\.default'\)/);
+  assert.doesNotMatch(sql, /ap\.pricing\.effective_list\.default/);
+  assert.doesNotMatch(sql, /lp\.pricing\.effective_list\.default/);
+  assert.match(
+    sql,
+    /CAST\(get_json_object\(to_json\(lp\.pricing\), '\$\.default'\) AS DECIMAL\(30, 15\)\) AS list_unit_price/,
+  );
+  assert.doesNotMatch(
+    sql,
+    /CAST\(ap\.pricing\.default AS DECIMAL\(30, 15\)\) AS account_unit_price/,
+  );
   assert.doesNotMatch(sql, /to_json\(\s*map_from_entries/);
   assert.doesNotMatch(sql, /HostProviderName/);
   assert.doesNotMatch(sql, /ServiceProviderName/);

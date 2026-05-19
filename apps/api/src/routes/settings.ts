@@ -33,6 +33,7 @@ const AppSettingsBulkBodySchema = z.object({
   provision: z
     .object({
       createIfMissing: z.boolean().optional(),
+      warehouseId: z.string().min(1).max(256).optional(),
     })
     .optional(),
 });
@@ -40,6 +41,15 @@ const AppSettingsBulkBodySchema = z.object({
 const AppSettingSingleBodySchema = z.object({
   value: AppSettingValueSchema,
 });
+
+async function persistAppSettings(
+  db: DatabaseClient,
+  settings: Record<string, string>,
+): Promise<void> {
+  for (const [key, value] of Object.entries(settings)) {
+    await db.repos.appSettings.upsert(key, value);
+  }
+}
 
 export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
   const router = Router();
@@ -66,12 +76,6 @@ export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
       const previousCatalog = previousSettings[CATALOG_SETTING_KEY]?.trim() ?? '';
       const previousSchemas = medallionSchemaNamesFromSettings(previousSettings);
 
-      // Persist settings before provisioning. If provisionCatalog fails below,
-      // the catalog name stays saved so the user can retry via "Fix permission"
-      // without re-entering it. This is intentional — no rollback on failure.
-      for (const [key, value] of Object.entries(parsed.data.settings)) {
-        await db.repos.appSettings.upsert(key, value);
-      }
       const settings = { ...previousSettings, ...parsed.data.settings };
       const catalog = (settings[CATALOG_SETTING_KEY] ?? '').trim();
       const medallionSchemas = medallionSchemaNamesFromSettings(settings);
@@ -83,6 +87,7 @@ export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
         (layer) => medallionSchemas[layer] !== previousSchemas[layer],
       );
       if (!hasCatalog || (!catalogChanged && !schemaChanged && !shouldProvision)) {
+        await persistAppSettings(db, parsed.data.settings);
         res.json({ settings });
         return;
       }
@@ -92,6 +97,7 @@ export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
         const [provision, enabledSources] = await Promise.all([
           provisionCatalog(env, req.user?.accessToken, catalog, {
             createIfMissing: parsed.data.provision?.createIfMissing,
+            warehouseId: parsed.data.provision?.warehouseId,
             schemaNames: medallionSchemas,
             catalogUserGroup: catalogUserGroupFromSettings(settings),
           }),
@@ -99,6 +105,7 @@ export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
             ? db.repos.dataSources.list().then((s) => s.filter((src) => src.enabled))
             : Promise.resolve([]),
         ]);
+        await persistAppSettings(db, parsed.data.settings);
         let pipelineSynced = false;
         if (needPipelineSync && enabledSources.length > 0) {
           await syncSharedFocusPipeline(env, db, enabledSources, {
@@ -113,9 +120,11 @@ export function appSettingsRouter(db: DatabaseClient, env: Env): Router {
         if (err instanceof CatalogServiceError) {
           logger.warn(
             { err, catalog, status: err.statusCode },
-            'provisionCatalog precondition failed; settings persisted without provisioning',
+            'provisionCatalog precondition failed; settings not persisted',
           );
-          res.status(err.statusCode).json({ error: { message: err.message }, settings });
+          res
+            .status(err.statusCode)
+            .json({ error: { message: err.message }, settings: previousSettings });
           return;
         }
         if (err instanceof DataSourceSetupError) {

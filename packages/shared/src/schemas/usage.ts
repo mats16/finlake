@@ -4,6 +4,7 @@ export const UsageRangeSchema = z.object({
   start: z.string().datetime(),
   end: z.string().datetime(),
   workspaceId: z.string().optional(),
+  warehouseId: z.string().min(1).max(256).optional(),
 });
 
 export type UsageRange = z.infer<typeof UsageRangeSchema>;

@@ -60,7 +60,7 @@ export type GovernedTagRow = z.infer<typeof GovernedTagRowSchema>;
 
 export const GovernedTagAwsAccountSchema = z.object({
   awsAccountId: z.string().regex(/^\d{12}$/),
-  credentialName: z.string().min(1),
+  credentialName: z.string().min(1).nullable(),
 });
 export type GovernedTagAwsAccount = z.infer<typeof GovernedTagAwsAccountSchema>;
 
@@ -100,7 +100,7 @@ export type GovernedTagSyncTagResult = z.infer<typeof GovernedTagSyncTagResultSc
 
 export const GovernedTagSyncAccountResultSchema = z.object({
   awsAccountId: z.string().regex(/^\d{12}$/),
-  credentialName: z.string().min(1),
+  credentialName: z.string().min(1).nullable(),
   status: z.enum(['synced', 'failed']),
   message: z.string().nullable(),
 });

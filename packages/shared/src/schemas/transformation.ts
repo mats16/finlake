@@ -14,6 +14,29 @@ export const TransformationSharedRunResultSchema = z.object({
 });
 export type TransformationSharedRunResult = z.infer<typeof TransformationSharedRunResultSchema>;
 
+export const TransformationResourceRunBodySchema = z.object({
+  resourceType: z.enum(['job', 'pipeline']),
+  resourceId: z.string().min(1),
+});
+export type TransformationResourceRunBody = z.infer<typeof TransformationResourceRunBodySchema>;
+
+export const TransformationResourceRunResultSchema = z.discriminatedUnion('resourceType', [
+  z.object({
+    resourceType: z.literal('job'),
+    resourceId: z.string(),
+    jobId: z.number().int().positive(),
+    runId: z.number().int().positive(),
+  }),
+  z.object({
+    resourceType: z.literal('pipeline'),
+    resourceId: z.string(),
+    pipelineId: z.string().min(1),
+    updateId: z.string().min(1),
+    requestId: z.string().nullable(),
+  }),
+]);
+export type TransformationResourceRunResult = z.infer<typeof TransformationResourceRunResultSchema>;
+
 export const TransformationResourceSchema = z.object({
   resourceType: z.enum(['job', 'pipeline']),
   resourceId: z.string(),

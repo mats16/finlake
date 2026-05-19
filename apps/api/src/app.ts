@@ -5,6 +5,7 @@ import { pinoHttp } from 'pino-http';
 import type { Env } from '@finlake/shared';
 import type { DatabaseClient } from '@finlake/db';
 import { logger } from './config/logger.js';
+import { findRepoRoot } from './config/env.js';
 import { errorHandler } from './middlewares/error.js';
 import { oboMiddleware } from './middlewares/obo.js';
 import { healthRouter } from './routes/health.js';
@@ -30,15 +31,14 @@ import { workspacesRouter } from './routes/workspaces.js';
 export interface AppDeps {
   env: Env;
   db: DatabaseClient;
+  serveSpa?: boolean;
 }
 
-export async function buildApp({ env, db }: AppDeps): Promise<express.Express> {
+export async function buildApp({ env, db, serveSpa = true }: AppDeps): Promise<express.Express> {
   const app = express();
   app.disable('x-powered-by');
   app.use(pinoHttp({ logger }));
   app.use(express.json({ limit: '1mb' }));
-
-  await tryAttachAppKit(app);
 
   app.use(oboMiddleware);
 
@@ -49,7 +49,7 @@ export async function buildApp({ env, db }: AppDeps): Promise<express.Express> {
   app.use('/api/app-settings', appSettingsRouter(db, env));
   app.use('/api/settings', settingsRouter(db));
   app.use('/api/me', meRouter(env));
-  app.use('/api/tags', governedTagsRouter(env));
+  app.use('/api/tags', governedTagsRouter(db, env));
   app.use('/api/integrations', dataSourcesRouter(db, env));
   app.use('/api/transformations', transformationsRouter(db, env));
   app.use('/api/catalogs', catalogsRouter(env));
@@ -63,7 +63,7 @@ export async function buildApp({ env, db }: AppDeps): Promise<express.Express> {
   app.use('/api/jobs', jobsRouter(db, env));
   app.use('/api/workspaces', workspacesRouter(db));
 
-  if (env.NODE_ENV === 'production') {
+  if (serveSpa && env.NODE_ENV === 'production') {
     const distDir = resolveWebDistDir(env);
     if (distDir && fs.existsSync(distDir)) {
       logger.info({ distDir }, 'Serving SPA from web dist directory');
@@ -80,41 +80,32 @@ export async function buildApp({ env, db }: AppDeps): Promise<express.Express> {
   return app;
 }
 
-async function tryAttachAppKit(app: express.Express): Promise<void> {
-  try {
-    const appkit: unknown = await import('@databricks/appkit').catch(() => undefined);
-    if (!appkit || typeof appkit !== 'object') {
-      logger.info('@databricks/appkit not available; skipping AppKit middleware');
-      return;
-    }
-    const mod = appkit as { createAppKitServer?: (opts: unknown) => unknown };
-    if (typeof mod.createAppKitServer !== 'function') {
-      logger.info('@databricks/appkit loaded but createAppKitServer not exported');
-      return;
-    }
-    const server = mod.createAppKitServer({});
-    const middleware =
-      typeof (server as { middleware?: () => express.RequestHandler }).middleware === 'function'
-        ? (server as { middleware: () => express.RequestHandler }).middleware()
-        : undefined;
-    if (middleware) {
-      app.use(middleware);
-      logger.info('@databricks/appkit middleware attached');
-    }
-  } catch (err) {
-    logger.warn({ err }, '@databricks/appkit failed to initialize; continuing without it');
-  }
-}
-
-function resolveWebDistDir(env: Env): string | undefined {
+export function resolveWebDistDir(env: Env): string | undefined {
   if (env.WEB_DIST_DIR) {
-    return path.isAbsolute(env.WEB_DIST_DIR)
-      ? env.WEB_DIST_DIR
-      : path.resolve(process.cwd(), env.WEB_DIST_DIR);
+    const candidates = path.isAbsolute(env.WEB_DIST_DIR)
+      ? [env.WEB_DIST_DIR]
+      : buildRelativeDistCandidates(env.WEB_DIST_DIR);
+    return candidates.find(hasIndexHtml);
   }
   const candidates = [
     path.resolve(process.cwd(), 'apps/web/dist'),
     path.resolve(process.cwd(), '../web/dist'),
+    path.resolve(process.cwd(), '../../apps/web/dist'),
+    path.resolve(findRepoRoot(process.cwd()) ?? process.cwd(), 'apps/web/dist'),
   ];
-  return candidates.find((p) => fs.existsSync(p));
+  return candidates.find(hasIndexHtml);
+}
+
+function buildRelativeDistCandidates(relativePath: string): string[] {
+  const cwd = process.cwd();
+  const repoRoot = findRepoRoot(cwd);
+  return [
+    path.resolve(cwd, relativePath),
+    path.resolve(cwd, '..', '..', relativePath),
+    ...(repoRoot ? [path.resolve(repoRoot, relativePath)] : []),
+  ];
+}
+
+function hasIndexHtml(distDir: string): boolean {
+  return fs.existsSync(path.join(distDir, 'index.html'));
 }

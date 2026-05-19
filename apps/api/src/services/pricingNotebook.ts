@@ -32,8 +32,8 @@ import {
 } from './statementExecution.js';
 import { z } from 'zod';
 
-const AWS_PRICING_NOTEBOOK_NAME = 'pricing_ingest_aws.ipynb';
-const DATABRICKS_PRICING_NOTEBOOK_NAME = 'pricing_ingest_databricks.ipynb';
+const AWS_PRICING_NOTEBOOK_NAME = 'pricing_ingest_aws.py';
+const DATABRICKS_PRICING_NOTEBOOK_NAME = 'pricing_ingest_databricks.py';
 const AWS_PROVIDER = 'AWS';
 const DATABRICKS_PROVIDER = 'Databricks';
 
@@ -116,10 +116,17 @@ function defineDatabricksPricingService(
 }
 
 const cachedNotebookContent = new Map<string, string>();
+
+export function pricingNotebookLocalFileName(notebookName: string): string {
+  return pricingNotebookWorkspaceFileName(notebookName);
+}
+
 async function readPricingNotebook(notebookName: string): Promise<string> {
   const cached = cachedNotebookContent.get(notebookName);
   if (cached) return cached;
-  const content = await readFile(new URL(`../notebooks/${notebookName}`, import.meta.url), 'utf8');
+
+  const localFileName = pricingNotebookLocalFileName(notebookName);
+  const content = await readFile(new URL(`../scripts/${localFileName}`, import.meta.url), 'utf8');
   cachedNotebookContent.set(notebookName, content);
   return content;
 }
@@ -128,7 +135,14 @@ export function pricingNotebookWorkspacePath(
   appName: string,
   notebookName = AWS_PRICING_NOTEBOOK_NAME,
 ): string {
-  return `/Workspace/Shared/${appName}/pricing/${notebookName}`;
+  return `/Workspace/Shared/${appName}/pricing/${pricingNotebookWorkspaceFileName(notebookName)}`;
+}
+
+function pricingNotebookWorkspaceFileName(notebookName: string): string {
+  // Handles legacy DB rows that stored .ipynb paths before the ipynb→py migration.
+  if (/\.ipynb$/i.test(notebookName)) return notebookName.replace(/\.ipynb$/i, '.py');
+  if (/\.py$/i.test(notebookName)) return notebookName;
+  return `${notebookName}.py`;
 }
 
 export function pricingServiceById(id: string): PricingService {
@@ -169,7 +183,7 @@ export async function uploadPricingNotebook(
   notebookName = AWS_PRICING_NOTEBOOK_NAME,
 ): Promise<string> {
   const content = await readPricingNotebook(notebookName);
-  await uploadPipelineFile(wc, workspacePath, content, { format: 'JUPYTER', language: 'PYTHON' });
+  await uploadPipelineFile(wc, workspacePath, content, { format: 'RAW' });
   return workspacePath;
 }
 
@@ -217,7 +231,7 @@ export async function deletePricingNotebookData(
   db: DatabaseClient,
   userToken: string | undefined,
   id: string,
-  deps: { executor?: StatementExecutor } = {},
+  deps: { executor?: StatementExecutor; warehouseId?: string } = {},
 ): Promise<PricingNotebookDeleteResult> {
   const service = pricingServiceById(id);
   const pricingData = await db.repos.pricingData.getById(service.id);
@@ -229,10 +243,10 @@ export async function deletePricingNotebookData(
     if (!userToken && !deps.executor) {
       throw new DataSourceSetupError('OBO access token required', 401);
     }
-    const executor = deps.executor ?? buildUserExecutor(env, userToken);
+    const executor = deps.executor ?? buildUserExecutor(env, userToken, deps.warehouseId);
     if (!executor) {
       throw new DataSourceSetupError(
-        'OBO access token + DATABRICKS_HOST + SQL_WAREHOUSE_ID required to drop pricing table.',
+        'OBO access token + DATABRICKS_HOST + selected SQL warehouse required to drop pricing table.',
         400,
       );
     }
@@ -338,14 +352,16 @@ export async function ensurePricingDataForId(
   throw new DataSourceSetupError('Pricing metadata could not be prepared.', 500);
 }
 
-function isRunnablePricingData(pricingData: PricingData | null): pricingData is PricingData {
+export function isRunnablePricingData(pricingData: PricingData | null): pricingData is PricingData {
   if (!pricingData?.notebookPath || !pricingData.table) {
     return false;
   }
   const service = PRICING_SERVICES.find((candidate) => candidate.id === pricingData.id);
   if (!service) return false;
   return Boolean(
-    pricingData.notebookPath.endsWith(`/${service.notebookName}`) &&
+    pricingData.notebookPath.endsWith(
+      `/${pricingNotebookWorkspaceFileName(service.notebookName)}`,
+    ) &&
     (service.kind !== 'aws' || (pricingData.rawDataPath && pricingData.rawDataTable)) &&
     typeof pricingData.metadata.source === 'string',
   );

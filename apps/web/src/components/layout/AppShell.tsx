@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, useLocation } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,9 +30,9 @@ import {
   type LucideIcon,
   Wallet,
 } from 'lucide-react';
+import { CATALOG_SETTING_KEY } from '@finlake/shared';
 import { useI18n, type Locale } from '../../i18n';
 import { useAppSettings, useMe } from '../../api/hooks';
-import { CatalogSetupModal } from '../CatalogSetupModal';
 
 interface NavItem {
   to: string;
@@ -53,7 +53,7 @@ const TOP_LEVEL_ITEMS: NavItem[] = [
   { to: '/overview', labelKey: 'nav.overview', icon: LayoutDashboard, end: true },
   { to: '/cost-explore', labelKey: 'nav.costExplore', icon: ChartLine },
   { to: '/budgets', labelKey: 'nav.budgets', icon: Wallet },
-  { to: '/genie', labelKey: 'nav.genie', icon: Sparkles, end: true },
+  { to: '/genie-v0', labelKey: 'nav.genie', icon: Sparkles, end: true, activePrefixes: ['/genie'] },
 ];
 
 export const CONFIGURE: NavGroup = {
@@ -103,14 +103,14 @@ function buildDatabricksItems(catalogName: string | null): ExternalNavItem[] {
 }
 
 function detectInitialTheme(): ThemeMode {
-  if (typeof window === 'undefined') return 'dark';
+  if (typeof window === 'undefined') return 'light';
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === 'light' || stored === 'dark') return stored;
   } catch {
     // ignore
   }
-  return document.documentElement.classList.contains('light') ? 'light' : 'dark';
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
 function applyTheme(theme: ThemeMode) {
@@ -126,7 +126,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const me = useMe();
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const appSettings = useAppSettings();
-  const catalogName = appSettings.data?.settings.catalog_name?.trim() || null;
+  const catalogName = appSettings.data?.settings[CATALOG_SETTING_KEY]?.trim() || null;
+  const isOnboardingRoute = matchesPathPrefix(location.pathname, '/onboarding');
   const databricksItems = buildDatabricksItems(catalogName);
   const onConfigureRoute = CONFIGURE.items.some((item) => isNavItemActive(location.pathname, item));
   const onOptimizeRoute = OPTIMIZE.items.some((item) => isNavItemActive(location.pathname, item));
@@ -152,6 +153,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
+  if (!isOnboardingRoute && appSettings.isPending) {
+    return null;
+  }
+
+  if (appSettings.isSuccess && !catalogName && location.pathname !== '/onboarding/catalog') {
+    return <Navigate to="/onboarding/catalog" replace />;
+  }
+
+  if (isOnboardingRoute) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -168,7 +181,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={item.to}
                 to={item.to}
                 end={item.end}
-                className={({ isActive }) => (isActive ? 'active' : '')}
+                className={({ isActive }) =>
+                  isActive ||
+                  item.activePrefixes?.some((p) => matchesPathPrefix(location.pathname, p))
+                    ? 'active'
+                    : ''
+                }
               >
                 {Icon ? <Icon className="nav-icon" aria-hidden="true" /> : null}
                 <span>{t(item.labelKey)}</span>
@@ -287,7 +305,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <main className="main">{children}</main>
-      {appSettings.isSuccess && !catalogName ? <CatalogSetupModal /> : null}
     </div>
   );
 }

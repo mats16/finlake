@@ -35,6 +35,8 @@ import {
   findTemplateForRow,
   getTemplateInputConfig,
   getTemplateRegistryEntry,
+  isRegisteredPricing,
+  rowMatchesTemplate,
   type DataSourceTemplate,
 } from './dataSourceCatalog';
 import { useI18n } from '../../i18n';
@@ -61,38 +63,23 @@ const FALLBACK_TEMPLATE: DataSourceTemplate = {
 
 const PRICING_PROVIDER_CONFIGS = [
   {
-    key: 'aws',
-    template: PRICING_AWS_TEMPLATE,
-    logo: { kind: 'aws' as const },
-    path: '/pricing/aws',
-    matches: (row: PricingNotebookState) => row.id.startsWith('aws_'),
-  },
-  {
     key: 'databricks',
     template: PRICING_DATABRICKS_TEMPLATE,
     logo: { kind: 'databricks' as const },
     path: '/pricing/databricks',
     matches: (row: PricingNotebookState) => row.id.startsWith('databricks_'),
   },
+  {
+    key: 'aws',
+    template: PRICING_AWS_TEMPLATE,
+    logo: { kind: 'aws' as const },
+    path: '/pricing/aws',
+    matches: (row: PricingNotebookState) => row.id.startsWith('aws_'),
+  },
 ] as const;
 
 function templateForRow(row: DataSource): DataSourceTemplate {
   return findTemplateForRow(row) ?? FALLBACK_TEMPLATE;
-}
-
-function isRegisteredPricing(row: PricingNotebookState): boolean {
-  return Boolean(
-    row.table ||
-    row.rawDataTable ||
-    row.rawDataPath ||
-    row.notebookWorkspacePath ||
-    row.runId ||
-    row.runStatus !== 'not_started',
-  );
-}
-
-function rowMatchesTemplate(row: DataSource, template: DataSourceTemplate): boolean {
-  return findTemplateForRow(row)?.id === template.id;
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {

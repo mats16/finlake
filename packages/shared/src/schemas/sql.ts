@@ -66,3 +66,22 @@ export const SqlStatementResultResponseSchema = z.object({
 });
 
 export type SqlStatementResultResponse = z.infer<typeof SqlStatementResultResponseSchema>;
+
+export const SqlWarehouseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  state: z.string().nullable(),
+  clusterSize: z.string().nullable(),
+  warehouseType: z.string().nullable(),
+  enableServerlessCompute: z.boolean(),
+  isDefault: z.boolean(),
+});
+
+export type SqlWarehouse = z.infer<typeof SqlWarehouseSchema>;
+
+export const SqlWarehouseListResponseSchema = z.object({
+  items: z.array(SqlWarehouseSchema),
+  defaultWarehouseId: z.string().min(1).nullable(),
+});
+
+export type SqlWarehouseListResponse = z.infer<typeof SqlWarehouseListResponseSchema>;

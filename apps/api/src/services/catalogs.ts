@@ -15,7 +15,7 @@ import {
 } from '@finlake/shared';
 import { logger } from '../config/logger.js';
 import {
-  buildUserExecutor,
+  buildDefaultUserExecutor,
   buildUserWorkspaceClient,
   type StatementExecutor,
 } from './statementExecution.js';
@@ -80,6 +80,7 @@ export class CatalogServiceError extends WorkspaceServiceError {}
 
 interface ProvisionOptions {
   createIfMissing?: boolean;
+  warehouseId?: string;
   schemaNames?: Partial<Record<MedallionSchema, string>>;
   catalogUserGroup?: string;
 }
@@ -112,10 +113,10 @@ export async function provisionCatalog(
   catalog: string,
   opts: ProvisionOptions = {},
 ): Promise<ProvisionResult> {
-  const executor = buildUserExecutor(env, userToken);
+  const executor = await buildDefaultUserExecutor(env, userToken, opts.warehouseId);
   if (!executor) {
     throw new CatalogServiceError(
-      'OBO access token + DATABRICKS_HOST + SQL_WAREHOUSE_ID required to provision a catalog.',
+      'OBO access token + DATABRICKS_HOST + an accessible SQL warehouse required to provision a catalog.',
       400,
     );
   }

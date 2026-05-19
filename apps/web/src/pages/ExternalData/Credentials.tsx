@@ -489,10 +489,12 @@ function ArtifactBlock({ step, title, body }: { step: number; title: string; bod
 export function AwsSetupModal({
   credential,
   artifacts,
+  layout = 'default',
   onClose,
 }: {
   credential: ServiceCredentialSummary | null;
   artifacts: ReturnType<typeof buildAwsSetupArtifacts>;
+  layout?: 'default' | 'onboarding';
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -507,10 +509,15 @@ export function AwsSetupModal({
   }, [credential, onClose]);
 
   if (!credential) return null;
+  const onboardingLayout = layout === 'onboarding';
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4"
+      className={
+        onboardingLayout
+          ? 'onboarding-modal-overlay'
+          : 'fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4'
+      }
       role="presentation"
       onMouseDown={onClose}
     >
@@ -518,7 +525,7 @@ export function AwsSetupModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="aws-service-credential-modal-title"
-        className="bg-background border-border grid max-h-[88vh] w-full max-w-5xl grid-rows-[auto_1fr] rounded-lg border shadow-xl"
+        className={`bg-background border-border grid ${onboardingLayout ? 'max-h-full' : 'max-h-[88vh]'} w-full max-w-5xl grid-rows-[auto_1fr] rounded-lg border shadow-xl`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 p-5">

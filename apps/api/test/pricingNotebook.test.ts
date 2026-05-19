@@ -6,6 +6,7 @@ import { CATALOG_SETTING_KEY, type Env, type PricingData } from '@finlake/shared
 import {
   deletePricingNotebookData,
   ensurePricingDataForId,
+  pricingNotebookLocalFileName,
   pricingNotebookState,
   pricingNotebookStateById,
   pricingNotebookWorkspacePath,
@@ -22,7 +23,7 @@ const APP_NAME = 'finlake-dev';
 const PRICING_NOTEBOOK_WORKSPACE_PATH = pricingNotebookWorkspacePath(APP_NAME);
 const DATABRICKS_PRICING_NOTEBOOK_WORKSPACE_PATH = pricingNotebookWorkspacePath(
   APP_NAME,
-  'pricing_ingest_databricks.ipynb',
+  'pricing_ingest_databricks.py',
 );
 const EC2_SOURCE_URL =
   'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/index.csv';
@@ -125,12 +126,17 @@ function createFakeDb(initial: PricingDataInput[] = []) {
 test('pricingNotebookWorkspacePath stores pricing notebooks under the pricing directory', () => {
   assert.equal(
     pricingNotebookWorkspacePath(APP_NAME),
-    `/Workspace/Shared/${APP_NAME}/pricing/pricing_ingest_aws.ipynb`,
+    `/Workspace/Shared/${APP_NAME}/pricing/pricing_ingest_aws.py`,
   );
   assert.equal(
     pricingNotebookWorkspacePath(APP_NAME, 'pricing_ingest_databricks.ipynb'),
-    `/Workspace/Shared/${APP_NAME}/pricing/pricing_ingest_databricks.ipynb`,
+    `/Workspace/Shared/${APP_NAME}/pricing/pricing_ingest_databricks.py`,
   );
+});
+
+test('pricingNotebookLocalFileName resolves pricing scripts', () => {
+  assert.equal(pricingNotebookLocalFileName('pricing_ingest_aws.ipynb'), 'pricing_ingest_aws.py');
+  assert.equal(pricingNotebookLocalFileName('pricing_ingest_aws'), 'pricing_ingest_aws.py');
 });
 
 test('pricingNotebookState returns AWS and Databricks defaults', async () => {
@@ -301,7 +307,7 @@ test('ensurePricingDataForId stores Databricks list pricing metadata in pricing_
       async uploadNotebook(wc, workspacePath, notebookName) {
         assert.equal(wc, workspaceClient);
         assert.equal(workspacePath, DATABRICKS_PRICING_NOTEBOOK_WORKSPACE_PATH);
-        assert.equal(notebookName, 'pricing_ingest_databricks.ipynb');
+        assert.equal(notebookName, 'pricing_ingest_databricks.py');
         return workspacePath;
       },
     },
@@ -343,7 +349,7 @@ test('ensurePricingDataForId stores Databricks account pricing metadata in prici
       async uploadNotebook(wc, workspacePath, notebookName) {
         assert.equal(wc, workspaceClient);
         assert.equal(workspacePath, DATABRICKS_PRICING_NOTEBOOK_WORKSPACE_PATH);
-        assert.equal(notebookName, 'pricing_ingest_databricks.ipynb');
+        assert.equal(notebookName, 'pricing_ingest_databricks.py');
         return workspacePath;
       },
     },
@@ -535,7 +541,6 @@ test('deletePricingNotebookData requires OBO token when dropping Unity Catalog t
     await deletePricingNotebookData(
       {
         DATABRICKS_HOST: 'https://example.cloud.databricks.com',
-        SQL_WAREHOUSE_ID: 'warehouse-1',
       } as Env,
       fake.db,
       undefined,
@@ -610,16 +615,21 @@ test('submitManagedNotebookRunById submits an RDS run with service-specific para
       {
         task_key: 'aws_rds',
         environment_key: 'pricing_serverless',
-        notebook_task: {
-          notebook_path: PRICING_NOTEBOOK_WORKSPACE_PATH,
+        spark_python_task: {
+          python_file: PRICING_NOTEBOOK_WORKSPACE_PATH,
           source: 'WORKSPACE',
-          base_parameters: {
-            source_url: RDS_SOURCE_URL,
-            volume_path: RDS_VOLUME_PATH,
-            raw_table: RDS_RAW_TABLE,
-            target_table: 'finops.pricing.aws_rds',
-            aws_service_code: 'AmazonRDS',
-          },
+          parameters: [
+            '--source-url',
+            RDS_SOURCE_URL,
+            '--volume-path',
+            RDS_VOLUME_PATH,
+            '--raw-table',
+            RDS_RAW_TABLE,
+            '--target-table',
+            'finops.pricing.aws_rds',
+            '--aws-service-code',
+            'AmazonRDS',
+          ],
         },
       },
     ],
@@ -687,13 +697,15 @@ test('submitManagedNotebookRunById submits a Databricks account prices run with 
       {
         task_key: 'databricks_account_prices',
         environment_key: 'pricing_serverless',
-        notebook_task: {
-          notebook_path: DATABRICKS_PRICING_NOTEBOOK_WORKSPACE_PATH,
+        spark_python_task: {
+          python_file: DATABRICKS_PRICING_NOTEBOOK_WORKSPACE_PATH,
           source: 'WORKSPACE',
-          base_parameters: {
-            source_table: DATABRICKS_ACCOUNT_PRICES_SOURCE_TABLE,
-            target_table: 'finops.pricing.databricks_account_prices',
-          },
+          parameters: [
+            '--source-table',
+            DATABRICKS_ACCOUNT_PRICES_SOURCE_TABLE,
+            '--target-table',
+            'finops.pricing.databricks_account_prices',
+          ],
         },
       },
     ],
@@ -707,7 +719,17 @@ test('submitManagedNotebookRunById prepares missing pricing metadata with servic
   const workspaceClient = {
     workspace: {
       async mkdirs() {},
-      async import({ path }: { path: string }) {
+      async import({
+        path,
+        format,
+        language,
+      }: {
+        path: string;
+        format?: string;
+        language?: string;
+      }) {
+        assert.equal(format, 'RAW');
+        assert.equal(language, undefined);
         importedPath = path;
       },
       async getStatus({ path }: { path: string }) {
@@ -740,5 +762,72 @@ test('submitManagedNotebookRunById prepares missing pricing metadata with servic
   assert.deepEqual(
     (payload as { tasks: Array<{ task_key: string }> }).tasks[0]?.task_key,
     'aws_ec2',
+  );
+});
+
+test('submitManagedNotebookRunById reuploads legacy .ipynb workspace notebook paths as Python scripts', async () => {
+  const fake = createFakeDb([
+    {
+      provider: 'AWS',
+      service: 'AmazonEC2',
+      id: 'aws_ec2',
+      table: 'finops.pricing.aws_ec2',
+      rawDataTable: EC2_RAW_TABLE,
+      rawDataPath: EC2_VOLUME_PATH,
+      notebookPath: `${PRICING_NOTEBOOK_WORKSPACE_PATH}.ipynb`,
+      notebookId: 'legacy-notebook',
+      metadata: { source: EC2_SOURCE_URL },
+      updatedAt: UPDATED_AT,
+    },
+  ]);
+  let importedPath: string | null = null;
+  let payload: unknown;
+  const workspaceClient = {
+    workspace: {
+      async mkdirs() {},
+      async import({
+        path,
+        format,
+        language,
+      }: {
+        path: string;
+        format?: string;
+        language?: string;
+      }) {
+        assert.equal(format, 'RAW');
+        assert.equal(language, undefined);
+        importedPath = path;
+      },
+      async getStatus({ path }: { path: string }) {
+        assert.equal(path, PRICING_NOTEBOOK_WORKSPACE_PATH);
+        return { object_id: 12345 };
+      },
+    },
+    apiClient: {
+      async request(options: { path: string; method: string; payload?: unknown }) {
+        assert.equal(options.path, '/api/2.2/jobs/runs/submit');
+        assert.equal(options.method, 'POST');
+        payload = options.payload;
+        return { run_id: 67890 };
+      },
+    },
+  } as unknown as WorkspaceClient;
+
+  await submitManagedNotebookRunById(
+    {
+      DATABRICKS_APP_NAME: APP_NAME,
+      DATABRICKS_HOST: 'https://example.cloud.databricks.com',
+    } as Env,
+    fake.db,
+    'aws_ec2',
+    { workspaceClient },
+  );
+
+  assert.equal(importedPath, PRICING_NOTEBOOK_WORKSPACE_PATH);
+  assert.equal(fake.stored('aws_ec2')?.notebookPath, PRICING_NOTEBOOK_WORKSPACE_PATH);
+  assert.equal(
+    (payload as { tasks: Array<{ spark_python_task: { python_file: string } }> }).tasks[0]
+      ?.spark_python_task.python_file,
+    PRICING_NOTEBOOK_WORKSPACE_PATH,
   );
 });
