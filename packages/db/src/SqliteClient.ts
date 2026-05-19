@@ -15,6 +15,8 @@ import type {
   DataSourceUpdatePatch,
   DataSourceValue,
   DataSourcesRepo,
+  GenieSpacesRepo,
+  GenieSpaceValue,
   PricingDataRepo,
   PricingDataRunPatch,
   PricingDataUpsertInput,
@@ -53,6 +55,7 @@ export class SqliteClient implements DatabaseClient {
       cachedAggregations: new SqliteCachedAggregationsRepo(db),
       setupState: new SqliteSetupStateRepo(db),
       appSettings: new SqliteAppSettingsRepo(db),
+      genieSpaces: new SqliteGenieSpacesRepo(db),
       workspaces: new SqliteWorkspacesRepo(db),
       dataSources: new SqliteDataSourcesRepo(db),
       pricingData: new SqlitePricingDataRepo(db),
@@ -122,6 +125,12 @@ export class SqliteClient implements DatabaseClient {
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )`,
+      `CREATE TABLE IF NOT EXISTS genie_spaces (
+        purpose TEXT PRIMARY KEY,
+        space_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
       `CREATE TABLE IF NOT EXISTS workspaces (
         id TEXT PRIMARY KEY,
         domain TEXT NOT NULL,
@@ -175,9 +184,27 @@ export class SqliteClient implements DatabaseClient {
     await this.dropColumnIfExists('data_sources', 'job_id');
     await this.addColumnIfMissing('data_sources', 'pipeline_id', 'TEXT');
     await this.migrateWorkspacesDomainColumn();
+    await this.migrateLegacyGenieSpace();
     await this.migrateAppSettingKey('focus_pipeline_job_id', 'lakeflow_pipeline_job_id');
     await this.migrateAppSettingKey('focus_pipeline_id', 'lakeflow_pipeline_id');
     logger.debug('SQLite schema bootstrap complete');
+  }
+
+  private async migrateLegacyGenieSpace(): Promise<void> {
+    const now = new Date().toISOString();
+    await this.raw.execute({
+      sql: `INSERT INTO genie_spaces (purpose, space_id, created_at, updated_at)
+        SELECT 'finops', value, ?, ?
+        FROM app_settings
+        WHERE key = 'genie_space_id'
+          AND TRIM(value) <> ''
+          AND NOT EXISTS (SELECT 1 FROM genie_spaces WHERE purpose = 'finops')`,
+      args: [now, now],
+    });
+    await this.raw.execute({
+      sql: 'DELETE FROM app_settings WHERE key = ?',
+      args: ['genie_space_id'],
+    });
   }
 
   private async migrateAppSettingKey(oldKey: string, newKey: string): Promise<void> {
@@ -821,4 +848,60 @@ class SqliteAppSettingsRepo implements AppSettingsRepo {
     const result = await this.db.delete(s.appSettings).where(inArray(s.appSettings.key, [...keys]));
     return result.rowsAffected;
   }
+}
+
+class SqliteGenieSpacesRepo implements GenieSpacesRepo {
+  constructor(private db: Db) {}
+
+  async get(purpose: string): Promise<GenieSpaceValue | null> {
+    const rows = await this.db
+      .select()
+      .from(s.genieSpaces)
+      .where(eq(s.genieSpaces.purpose, purpose))
+      .limit(1);
+    const row = rows[0];
+    return row ? toGenieSpace(row) : null;
+  }
+
+  async list(): Promise<GenieSpaceValue[]> {
+    const rows = await this.db.select().from(s.genieSpaces).orderBy(s.genieSpaces.purpose);
+    return rows.map(toGenieSpace);
+  }
+
+  async upsert(purpose: string, spaceId: string): Promise<GenieSpaceValue> {
+    const now = new Date().toISOString();
+    const existing = await this.get(purpose);
+    const row = {
+      purpose,
+      spaceId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db
+      .insert(s.genieSpaces)
+      .values(row)
+      .onConflictDoUpdate({
+        target: s.genieSpaces.purpose,
+        set: { spaceId, updatedAt: now },
+      });
+    return row;
+  }
+
+  async delete(purpose: string): Promise<void> {
+    await this.db.delete(s.genieSpaces).where(eq(s.genieSpaces.purpose, purpose));
+  }
+
+  async clear(): Promise<number> {
+    const result = await this.db.run(sql`delete from genie_spaces`);
+    return result.rowsAffected;
+  }
+}
+
+function toGenieSpace(row: typeof s.genieSpaces.$inferSelect): GenieSpaceValue {
+  return {
+    purpose: row.purpose,
+    spaceId: row.spaceId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }

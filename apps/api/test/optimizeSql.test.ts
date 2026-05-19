@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  DatabricksClusterResourceRowSchema,
+  DatabricksClusterTimeSeriesRowSchema,
   DatabricksClusterUtilizationRowSchema,
   DatabricksQueryAttributionRowSchema,
   DatabricksQueryWarehouseTrendRowSchema,
@@ -11,6 +13,10 @@ import {
   buildDatabricksQueryAttributionStatement,
   buildDatabricksQueryWarehouseTrendSql,
   buildDatabricksQueryWarehouseTrendStatement,
+  buildDatabricksClusterResourcesSql,
+  buildDatabricksClusterResourcesStatement,
+  buildDatabricksClusterTimeSeriesSql,
+  buildDatabricksClusterTimeSeriesStatement,
   buildDatabricksClusterUtilizationSql,
   buildDatabricksClusterUtilizationStatement,
   buildDatabricksOptimizeCte,
@@ -182,6 +188,88 @@ test('buildDatabricksClusterUtilizationStatement includes date and workspace par
     '2026-02-01T00:00:00.000Z',
   );
   assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
+});
+
+test('buildDatabricksClusterResourcesSql joins cluster metadata, utilization, and cost', () => {
+  const sql = buildDatabricksClusterResourcesSql('-- cte --');
+
+  assert.match(sql, /FROM system\.compute\.clusters/);
+  assert.match(sql, /FROM system\.compute\.node_timeline/);
+  assert.match(sql, /FROM system\.compute\.node_types/);
+  assert.match(
+    sql,
+    /service_name IN \('ALL_PURPOSE', 'INTERACTIVE', 'JOBS', 'DLT', 'LAKEFLOW_CONNECT'\)/,
+  );
+  assert.match(sql, /FULL OUTER JOIN cluster_cost/);
+  assert.match(sql, /FULL OUTER JOIN cluster_metrics/);
+  assert.match(sql, /weighted_cpu_seconds \/ cm\.observed_node_seconds/);
+  assert.match(sql, /weighted_memory_seconds \/ cm\.observed_node_seconds/);
+  assert.match(sql, /ORDER BY total_cost_usd DESC, observed_node_hours DESC/);
+});
+
+test('buildDatabricksClusterResourcesStatement includes billing and workspace params', () => {
+  const statement = buildDatabricksClusterResourcesStatement(
+    sources,
+    {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-02-01T00:00:00.000Z',
+      workspaceId: '123456789',
+    },
+    'BilledCost',
+  );
+
+  assert.match(statement.query, /CAST\(COALESCE\(BilledCost, 0\) AS DOUBLE\) AS cost_usd/);
+  assert.equal(
+    statement.params.find((p) => p.name === 'start_ts')?.value,
+    '2026-01-01T00:00:00.000Z',
+  );
+  assert.equal(
+    statement.params.find((p) => p.name === 'end_ts')?.value,
+    '2026-02-01T00:00:00.000Z',
+  );
+  assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
+  assert.equal(statement.params.find((p) => p.name === 'billing_account_id_0')?.value, 'abc-123');
+});
+
+test('buildDatabricksClusterTimeSeriesSql joins cost with CPU and memory metrics by period', () => {
+  const sql = buildDatabricksClusterTimeSeriesSql('-- cte --', 'day');
+
+  assert.match(
+    sql,
+    /date_format\(date_trunc\('DAY', charge_period_start\), 'yyyy-MM-dd'\) AS period/,
+  );
+  assert.match(sql, /resource_id = :cluster_id/);
+  assert.match(sql, /FROM system\.compute\.node_timeline/);
+  assert.match(sql, /cluster_id = :cluster_id/);
+  assert.match(sql, /COALESCE\(cpu_user_percent, 0\) \+ COALESCE\(cpu_system_percent, 0\)/);
+  assert.match(sql, /CAST\(mem_used_percent AS DOUBLE\) AS mem_used_percent/);
+  assert.match(sql, /FULL OUTER JOIN cluster_metrics/);
+  assert.match(sql, /weighted_cpu_seconds \/ cm\.observed_node_seconds/);
+  assert.match(sql, /weighted_memory_seconds \/ cm\.observed_node_seconds/);
+  assert.match(sql, /ORDER BY period/);
+});
+
+test('buildDatabricksClusterTimeSeriesStatement includes cluster and billing params', () => {
+  const statement = buildDatabricksClusterTimeSeriesStatement(
+    sources,
+    {
+      start: '2026-01-01T00:00:00.000Z',
+      end: '2026-02-01T00:00:00.000Z',
+      workspaceId: '123456789',
+    },
+    'cluster-1',
+    'month',
+    'BilledCost',
+  );
+
+  assert.match(statement.query, /CAST\(COALESCE\(BilledCost, 0\) AS DOUBLE\) AS cost_usd/);
+  assert.match(
+    statement.query,
+    /date_format\(date_trunc\('MONTH', charge_period_start\), 'yyyy-MM'\) AS period/,
+  );
+  assert.equal(statement.params.find((p) => p.name === 'workspace_id')?.value, '123456789');
+  assert.equal(statement.params.find((p) => p.name === 'cluster_id')?.value, 'cluster-1');
+  assert.equal(statement.params.find((p) => p.name === 'billing_account_id_0')?.value, 'abc-123');
 });
 
 test('buildDatabricksQueryWarehouseTrendSql groups SQL warehouse cost by period and warehouse', () => {
@@ -515,4 +603,48 @@ test('DatabricksClusterUtilizationRowSchema parses cluster utilization rows', ()
 
   assert.equal(row.clusterId, 'cluster-1');
   assert.equal(row.cpuUtilizationPercent, 42.5);
+});
+
+test('DatabricksClusterResourceRowSchema parses cluster resource rows', () => {
+  const row = DatabricksClusterResourceRowSchema.parse({
+    workspaceId: '123',
+    workspaceName: 'workspace-a',
+    clusterId: 'cluster-1',
+    clusterName: 'Shared cluster',
+    ownedBy: 'user@example.com',
+    clusterSource: 'UI',
+    dbrVersion: '15.4.x-scala2.12',
+    driverNodeType: 'i3.xlarge',
+    workerNodeType: 'i3.xlarge',
+    workerCoreCount: 4,
+    workerMemoryMb: 32768,
+    workerCount: 2,
+    minAutoscaleWorkers: null,
+    maxAutoscaleWorkers: null,
+    autoTerminationMinutes: 60,
+    dataSecurityMode: 'USER_ISOLATION',
+    totalCostUsd: 123.45,
+    cpuUtilizationPercent: 12.3,
+    memoryUsedPercent: 45.6,
+    observedNodeHours: 78.9,
+    lastSeenAt: '2026-01-31T00:00:00.000Z',
+    deleted: false,
+  });
+
+  assert.equal(row.clusterId, 'cluster-1');
+  assert.equal(row.totalCostUsd, 123.45);
+});
+
+test('DatabricksClusterTimeSeriesRowSchema parses cluster trend rows', () => {
+  const row = DatabricksClusterTimeSeriesRowSchema.parse({
+    period: '2026-01-31',
+    costUsd: 12.34,
+    cpuUtilizationPercent: 22.5,
+    memoryUsedPercent: 47.8,
+    observedNodeHours: 9.5,
+  });
+
+  assert.equal(row.period, '2026-01-31');
+  assert.equal(row.costUsd, 12.34);
+  assert.equal(row.cpuUtilizationPercent, 22.5);
 });

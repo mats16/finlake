@@ -262,6 +262,9 @@ export const en = {
     genie: {
       title: 'Genie',
       desc: 'Ask questions and explore FinOps signals with natural language.',
+      apiDesc: 'Ask FinLake Genie through the API chat interface.',
+      apiPerfDesc: 'Investigate Databricks compute performance through the API chat interface.',
+      iframeDesc: 'Open the Databricks-hosted Genie iframe experience.',
     },
   },
   optimize: {
@@ -274,6 +277,7 @@ export const en = {
       tabs: {
         serverless: 'Serverless',
         query: 'SQL',
+        cluster: 'Cluster',
       },
       workspaces: {
         all: 'All workspaces',
@@ -366,6 +370,54 @@ export const en = {
           noQueries: 'No query history rows',
           noQueriesDesc:
             'Grant access to system.query.history or adjust the period and workspace filter.',
+        },
+      },
+      cluster: {
+        failedToLoad: 'Failed to load cluster performance signals.',
+        deleted: 'deleted',
+        filter: {
+          all: 'All clusters',
+        },
+        kpi: {
+          clusters: 'Clusters',
+          resources: 'Classic compute resources',
+          cost: 'Cluster Cost',
+          selectedPeriod: 'Selected cost metric in period',
+          nodeHours: 'Node Hours',
+          observedRuntime: 'Observed node timeline runtime',
+          lowCpu: 'Low CPU',
+          underFifteen: 'Clusters below 15% CPU',
+        },
+        resources: {
+          title: 'Cluster resources',
+          desc: 'Classic compute clusters joined with FOCUS cost and system.compute utilization metrics.',
+        },
+        trend: {
+          title: 'Cluster trend',
+          desc: 'Cost, CPU, and memory utilization for {name}.',
+          noData: 'No cluster trend data',
+          cost: 'Cost',
+          cpu: 'CPU',
+          memory: 'Memory',
+        },
+        table: {
+          cluster: 'Cluster',
+          owner: 'Owner',
+          nodeType: 'Node type',
+          cost: 'Cost',
+          cpu: 'CPU',
+          memory: 'Memory',
+          nodeHours: 'Node hours',
+          console: 'Console',
+          investigate: 'Investigate',
+        },
+        empty: {
+          noClusters: 'No cluster resources',
+        },
+        genie: {
+          title: 'Investigate {name}',
+          defaultTitle: 'Cluster Genie',
+          placeholder: 'Ask about this cluster performance or cost...',
         },
       },
       legend: {

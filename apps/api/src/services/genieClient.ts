@@ -93,6 +93,53 @@ export async function createGenieSpace(
   return (await response.json()) as CreateGenieSpaceResponse;
 }
 
+export async function updateGenieSpace(
+  host: string,
+  token: string,
+  spaceId: string,
+  opts: {
+    title?: string;
+    description?: string;
+    warehouseId?: string;
+    serializedSpace?: unknown;
+  },
+  ErrorClass: ServiceErrorCtor,
+): Promise<CreateGenieSpaceResponse> {
+  const body: Record<string, unknown> = {};
+  if (opts.title !== undefined) body.title = opts.title;
+  if (opts.description !== undefined) body.description = opts.description;
+  if (opts.warehouseId !== undefined) body.warehouse_id = opts.warehouseId;
+  if (opts.serializedSpace !== undefined) {
+    body.serialized_space = JSON.stringify(opts.serializedSpace);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${host}/api/2.0/genie/spaces/${encodeURIComponent(spaceId)}`, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    logger.error({ err, spaceId }, 'Update Genie Space request failed');
+    throw new ErrorClass(`Failed to update Genie Space: ${(err as Error).message}`, 502);
+  }
+
+  if (!response.ok) {
+    const message = await databricksErrorMessage(response);
+    logger.warn({ status: response.status, message, spaceId }, 'Update Genie Space failed');
+    throw new ErrorClass(
+      `Failed to update Genie Space: ${message}`,
+      mapDatabricksStatusCode(response, message),
+    );
+  }
+
+  return (await response.json()) as CreateGenieSpaceResponse;
+}
+
 export async function createGenieMessage(
   host: string,
   token: string,
@@ -304,6 +351,7 @@ export async function databricksErrorMessage(response: Response): Promise<string
 
 function mapDatabricksStatusCode(response: Response, errorMessage: string): number {
   if (response.status === 401) return 401;
+  if (response.status === 404) return 404;
   if (response.status === 403 || isPermissionDenied(errorMessage)) return 403;
   return 502;
 }

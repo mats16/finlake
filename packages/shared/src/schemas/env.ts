@@ -1,18 +1,14 @@
 import { z } from 'zod';
 
-export const DbBackendSchema = z.enum(['lakebase', 'sqlite', 'auto']);
-export type DbBackend = z.infer<typeof DbBackendSchema>;
-
 export const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().default(8080),
 
   WEB_DIST_DIR: z.string().optional(),
 
-  DB_BACKEND: DbBackendSchema.default('auto'),
   SQLITE_PATH: z.string().optional(),
 
-  LAKEBASE_INSTANCE_NAME: z.string().optional(),
+  PGAPPNAME: z.string().optional(),
   PGHOST: z.string().optional(),
   PGDATABASE: z.string().optional(),
   PGUSER: z.string().optional(),

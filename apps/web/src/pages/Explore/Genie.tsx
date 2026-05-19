@@ -16,36 +16,51 @@ import {
   Skeleton,
   Spinner,
 } from '@databricks/appkit-ui/react';
-import { CATALOG_SETTING_KEY, GENIE_SPACE_SETTING_KEY } from '@finlake/shared';
+import {
+  CATALOG_SETTING_KEY,
+  DEFAULT_GENIE_SPACE_PURPOSE,
+  PERF_GENIE_SPACE_PURPOSE,
+  type GenieSpacePurpose,
+} from '@finlake/shared';
 import { AlertCircle, ExternalLink, MoreVertical, Sparkles, Trash2 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../../components/PageHeader';
+import { GenieChatPanel } from '../../components/GenieChatPanel';
 import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
 import { useSelectedSqlWarehouse } from '../../contexts/SqlWarehouseContext';
-import { useAppSettings, useDeleteGenieSpace, useMe, useSetupGenieSpace } from '../../api/hooks';
+import {
+  useAppSettings,
+  useDeleteGenieSpace,
+  useGenieSpace,
+  useMe,
+  useSetupGenieSpace,
+} from '../../api/hooks';
 import { useI18n } from '../../i18n';
 
 export function Genie() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
+  const [searchParams] = useSearchParams();
+  const purpose = parseGeniePurpose(searchParams.get('alias') ?? searchParams.get('purpose'));
   const settings = useAppSettings();
-  const setup = useSetupGenieSpace();
-  const deleteSpace = useDeleteGenieSpace();
+  const genieSpace = useGenieSpace(purpose);
+  const setup = useSetupGenieSpace(purpose);
+  const deleteSpace = useDeleteGenieSpace(purpose);
   const { selectedWarehouseId } = useSelectedSqlWarehouse();
   const me = useMe();
   const appSettings = settings.data?.settings ?? {};
-  const genieSpaceId = appSettings[GENIE_SPACE_SETTING_KEY]?.trim() || '';
+  const genieSpaceId = genieSpace.data?.spaceId?.trim() || '';
   const catalog = appSettings[CATALOG_SETTING_KEY]?.trim() || '';
   const workspaceUrl = me.data?.workspaceUrl ?? null;
-  const workspaceId = me.data?.workspaceId ?? null;
   const genieSpaceUrl = genieSpaceId ? databricksGenieSpaceUrl(workspaceUrl, genieSpaceId) : null;
-  const genieEmbedUrl = genieSpaceId
-    ? databricksGenieEmbedUrl(workspaceUrl, workspaceId, genieSpaceId, locale)
-    : null;
+  const initialPrompt = searchParams.get('prompt')?.trim() || null;
+  const initialPromptKey = initialPrompt ? `${purpose}:${initialPrompt}` : null;
+  const catalogRequired = purpose === 'finops';
 
   return (
     <>
       <PageHeader
         title={t('explore.genie.title')}
-        subtitle={t('explore.genie.desc')}
+        subtitle={purpose === 'perf' ? t('explore.genie.apiPerfDesc') : t('explore.genie.apiDesc')}
         actions={
           <div className="flex flex-wrap justify-end gap-2">
             <SqlWarehouseSelector triggerClassName="w-full sm:w-[280px]" />
@@ -63,7 +78,77 @@ export function Genie() {
         }
       />
 
-      {settings.isLoading || (genieSpaceId && me.isLoading) ? (
+      {settings.isLoading || genieSpace.isLoading || (genieSpaceId && me.isLoading) ? (
+        <Card>
+          <CardContent>
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-64" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          </CardContent>
+        </Card>
+      ) : genieSpaceId ? (
+        <GenieApiChatSurface
+          alias={purpose}
+          initialPrompt={initialPrompt}
+          initialPromptKey={initialPromptKey}
+          deleteError={deleteSpace.error instanceof Error ? deleteSpace.error.message : null}
+        />
+      ) : (
+        <GenieSetupCard
+          catalog={catalog}
+          catalogRequired={catalogRequired}
+          setupError={setup.error instanceof Error ? setup.error.message : null}
+          setupPending={setup.isPending}
+          setupDisabled={!selectedWarehouseId}
+          onSetup={() => setup.mutate()}
+        />
+      )}
+    </>
+  );
+}
+
+export function GenieV0() {
+  const { t, locale } = useI18n();
+  const settings = useAppSettings();
+  const genieSpace = useGenieSpace('finops');
+  const setup = useSetupGenieSpace('finops');
+  const deleteSpace = useDeleteGenieSpace('finops');
+  const { selectedWarehouseId } = useSelectedSqlWarehouse();
+  const me = useMe();
+  const appSettings = settings.data?.settings ?? {};
+  const genieSpaceId = genieSpace.data?.spaceId?.trim() || '';
+  const catalog = appSettings[CATALOG_SETTING_KEY]?.trim() || '';
+  const workspaceUrl = me.data?.workspaceUrl ?? null;
+  const workspaceId = me.data?.workspaceId ?? null;
+  const genieSpaceUrl = genieSpaceId ? databricksGenieSpaceUrl(workspaceUrl, genieSpaceId) : null;
+  const genieEmbedUrl = genieSpaceId
+    ? databricksGenieEmbedUrl(workspaceUrl, workspaceId, genieSpaceId, locale)
+    : null;
+
+  return (
+    <>
+      <PageHeader
+        title={t('explore.genie.title')}
+        subtitle={t('explore.genie.iframeDesc')}
+        actions={
+          <div className="flex flex-wrap justify-end gap-2">
+            <SqlWarehouseSelector triggerClassName="w-full sm:w-[280px]" />
+            {genieSpaceId ? (
+              <GenieActions
+                genieSpaceUrl={genieSpaceUrl}
+                deletePending={deleteSpace.isPending}
+                onDelete={() => {
+                  if (!window.confirm(t('genie.confirmDelete'))) return;
+                  deleteSpace.mutate();
+                }}
+              />
+            ) : null}
+          </div>
+        }
+      />
+
+      {settings.isLoading || genieSpace.isLoading || (genieSpaceId && me.isLoading) ? (
         <Card>
           <CardContent>
             <div className="space-y-2">
@@ -80,6 +165,7 @@ export function Genie() {
       ) : (
         <GenieSetupCard
           catalog={catalog}
+          catalogRequired
           setupError={setup.error instanceof Error ? setup.error.message : null}
           setupPending={setup.isPending}
           setupDisabled={!selectedWarehouseId}
@@ -88,6 +174,12 @@ export function Genie() {
       )}
     </>
   );
+}
+
+function parseGeniePurpose(value: string | null | undefined): GenieSpacePurpose {
+  return value?.trim().toLowerCase() === PERF_GENIE_SPACE_PURPOSE
+    ? PERF_GENIE_SPACE_PURPOSE
+    : DEFAULT_GENIE_SPACE_PURPOSE;
 }
 
 function databricksGenieSpaceUrl(workspaceUrl: string | null, spaceId: string): string | null {
@@ -195,14 +287,57 @@ function GenieChatSurface({
   );
 }
 
+function GenieApiChatSurface({
+  alias,
+  initialPrompt,
+  initialPromptKey,
+  deleteError,
+}: {
+  alias: GenieSpacePurpose;
+  initialPrompt: string | null;
+  initialPromptKey: string | null;
+  deleteError: string | null;
+}) {
+  const { t } = useI18n();
+  const placeholder =
+    alias === 'perf'
+      ? t('optimize.databricks.cluster.genie.placeholder')
+      : t('genie.inputPlaceholder');
+
+  return (
+    <>
+      {deleteError ? (
+        <Alert variant="destructive" className="mb-3">
+          <AlertCircle />
+          <AlertTitle>{t('genie.deleteFailed')}</AlertTitle>
+          <AlertDescription>{deleteError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Card className="h-[calc(100vh-176px)] min-h-[560px] overflow-hidden">
+        <CardContent className="h-full p-0">
+          <GenieChatPanel
+            alias={alias}
+            placeholder={placeholder}
+            initialPrompt={initialPrompt}
+            initialPromptKey={initialPromptKey}
+          />
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 function GenieSetupCard({
   catalog,
+  catalogRequired,
   setupError,
   setupPending,
   setupDisabled,
   onSetup,
 }: {
   catalog: string;
+  catalogRequired: boolean;
   setupError: string | null;
   setupPending: boolean;
   setupDisabled: boolean;
@@ -220,7 +355,7 @@ function GenieSetupCard({
       </CardHeader>
       <CardContent>
         <div className="grid justify-items-center gap-4">
-          {!catalog ? (
+          {catalogRequired && !catalog ? (
             <Alert>
               <AlertCircle />
               <AlertTitle>{t('genie.catalogMissingTitle')}</AlertTitle>
@@ -239,7 +374,7 @@ function GenieSetupCard({
           <Button
             type="button"
             onClick={onSetup}
-            disabled={!catalog || setupPending || setupDisabled}
+            disabled={(catalogRequired && !catalog) || setupPending || setupDisabled}
           >
             {setupPending ? <Spinner /> : <Sparkles />}
             {setupPending ? t('genie.settingUp') : t('genie.setupAction')}

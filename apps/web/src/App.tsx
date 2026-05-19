@@ -16,7 +16,7 @@ import { Pricing } from './pages/Configure/Pricing';
 import { Workspaces } from './pages/Configure/Workspaces';
 import { Credentials } from './pages/ExternalData/Credentials';
 import { CostExplore } from './pages/Explore/CostExplore';
-import { Genie } from './pages/Explore/Genie';
+import { Genie, GenieV0 } from './pages/Explore/Genie';
 import { DatabricksOptimize } from './pages/Optimize/DatabricksOptimize';
 import { OptimizeStub } from './pages/Optimize/OptimizeStub';
 import { OnboardingLayout } from './pages/Onboarding/OnboardingLayout';
@@ -40,6 +40,7 @@ export function App() {
           <Route path="/cost-explore" element={<CostExplore />} />
           <Route path="/budgets" element={<Budgets />} />
           <Route path="/genie" element={<Genie />} />
+          <Route path="/genie-v0" element={<GenieV0 />} />
           <Route path="/optimize" element={<Navigate to="/optimize/databricks" replace />} />
           <Route path="/optimize/databricks" element={<DatabricksOptimize />} />
           <Route

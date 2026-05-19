@@ -22,6 +22,8 @@ import type {
   ExternalLocationListResponse,
   GenieChatRequest,
   GenieChatResponse,
+  GenieSpacePurpose,
+  GenieSpaceResponse,
   GenieSetupResponse,
   GovernedTagsResponse,
   GovernedTagSyncBody,
@@ -408,30 +410,41 @@ export function useAdminCleanup() {
   });
 }
 
-export function useSetupGenieSpace() {
+export function useGenieSpace(purpose: GenieSpacePurpose = 'finops') {
+  return useQuery({
+    queryKey: ['genieSpace', purpose],
+    queryFn: () => apiFetch<GenieSpaceResponse>(`/api/genie/${encodeURIComponent(purpose)}/space`),
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
+export function useSetupGenieSpace(purpose: GenieSpacePurpose = 'finops') {
   const qc = useQueryClient();
   const { selectedWarehouseId } = useSelectedSqlWarehouse();
   return useMutation({
     mutationFn: () =>
-      apiFetch<GenieSetupResponse>('/api/genie/setup', {
+      apiFetch<GenieSetupResponse>(`/api/genie/${encodeURIComponent(purpose)}/setup`, {
         method: 'POST',
         body: JSON.stringify(withWarehouseId({}, selectedWarehouseId)),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['genieSpace', purpose] });
     },
   });
 }
 
-export function useDeleteGenieSpace() {
+export function useDeleteGenieSpace(purpose: GenieSpacePurpose = 'finops') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      apiFetch<void>('/api/genie/space', {
+      apiFetch<void>(`/api/genie/${encodeURIComponent(purpose)}/space`, {
         method: 'DELETE',
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['genieSpace', purpose] });
     },
   });
 }

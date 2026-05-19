@@ -26,8 +26,9 @@ npm run dev
 # Express API:    http://localhost:8080/api/health
 ```
 
-The default `DB_BACKEND=sqlite` writes to `./data/finlake.db` locally and
-`/home/app/data/finlake.db` on Databricks Apps.
+By default, FinLake uses SQLite and writes to `./data/finlake.db` locally and
+`/home/app/data/finlake.db` on Databricks Apps. If `LAKEBASE_ENDPOINT` is set,
+the API uses Lakebase instead.
 
 ## Deploying to Databricks Apps
 
@@ -43,10 +44,9 @@ service principal `SELECT` on `system.billing.usage` / `system.billing.list_pric
 
 ## Database backend selection
 
-`DB_BACKEND` controls which client is used:
+The API selects its database backend from `LAKEBASE_ENDPOINT`:
 
-| Value            | Behavior                                                                               |
-| ---------------- | -------------------------------------------------------------------------------------- |
-| `lakebase`       | Force Lakebase. Boot fails if init fails (no fallback).                                |
-| `sqlite`         | Force SQLite. `LAKEBASE_*` env vars are ignored.                                       |
-| `auto` (default) | Try Lakebase if `LAKEBASE_INSTANCE_NAME` or `PGHOST` is set, else fall back to SQLite. |
+| Environment                    | Behavior                                                                   |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `LAKEBASE_ENDPOINT` is set     | Use Lakebase. Boot fails if Lakebase initialization or health check fails. |
+| `LAKEBASE_ENDPOINT` is not set | Use SQLite. `SQLITE_PATH` can override the local database path.            |

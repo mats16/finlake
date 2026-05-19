@@ -267,6 +267,9 @@ export const ja: Dictionary = {
     genie: {
       title: 'Genie',
       desc: '自然言語で質問し、FinOps シグナルを探索するための画面です。',
+      apiDesc: 'API チャットインターフェイスで FinLake Genie に質問します。',
+      apiPerfDesc: 'API チャットインターフェイスで Databricks compute の性能を調査します。',
+      iframeDesc: 'Databricks hosted Genie の iframe 画面を開きます。',
     },
   },
   optimize: {
@@ -279,6 +282,7 @@ export const ja: Dictionary = {
       tabs: {
         serverless: 'Serverless',
         query: 'SQL',
+        cluster: 'Cluster',
       },
       workspaces: {
         all: 'すべてのワークスペース',
@@ -371,6 +375,54 @@ export const ja: Dictionary = {
           noQueries: 'Query History の行がありません',
           noQueriesDesc:
             'system.query.history への権限を付与するか、期間またはワークスペース条件を変更してください。',
+        },
+      },
+      cluster: {
+        failedToLoad: 'Cluster パフォーマンスシグナルを読み込めませんでした。',
+        deleted: '削除済み',
+        filter: {
+          all: 'すべての clusters',
+        },
+        kpi: {
+          clusters: 'Clusters',
+          resources: 'Classic compute リソース',
+          cost: 'Cluster コスト',
+          selectedPeriod: '選択期間の選択コスト指標',
+          nodeHours: 'Node hours',
+          observedRuntime: '観測できた node timeline 起動時間',
+          lowCpu: '低 CPU',
+          underFifteen: 'CPU 15% 未満の clusters',
+        },
+        resources: {
+          title: 'Cluster リソース',
+          desc: 'Classic compute clusters を FOCUS コストと system.compute 利用率メトリクスに結合して表示します。',
+        },
+        trend: {
+          title: 'Cluster トレンド',
+          desc: '{name} のコスト、CPU、memory 利用率です。',
+          noData: 'Cluster トレンドデータがありません',
+          cost: 'コスト',
+          cpu: 'CPU',
+          memory: 'Memory',
+        },
+        table: {
+          cluster: 'Cluster',
+          owner: 'Owner',
+          nodeType: 'Node type',
+          cost: 'コスト',
+          cpu: 'CPU',
+          memory: 'Memory',
+          nodeHours: 'Node hours',
+          console: 'Console',
+          investigate: '調査',
+        },
+        empty: {
+          noClusters: 'Cluster リソースがありません',
+        },
+        genie: {
+          title: '{name} を調査',
+          defaultTitle: 'Cluster Genie',
+          placeholder: 'この cluster の performance や cost について質問...',
         },
       },
       legend: {

@@ -94,6 +94,43 @@ export const DatabricksClusterUtilizationRowSchema = z.object({
 
 export type DatabricksClusterUtilizationRow = z.infer<typeof DatabricksClusterUtilizationRowSchema>;
 
+export const DatabricksClusterResourceRowSchema = z.object({
+  workspaceId: z.string().nullable(),
+  workspaceName: z.string().nullable(),
+  clusterId: z.string(),
+  clusterName: z.string().nullable(),
+  ownedBy: z.string().nullable(),
+  clusterSource: z.string().nullable(),
+  dbrVersion: z.string().nullable(),
+  driverNodeType: z.string().nullable(),
+  workerNodeType: z.string().nullable(),
+  workerCoreCount: z.number().nullable(),
+  workerMemoryMb: z.number().nullable(),
+  workerCount: z.number().nullable(),
+  minAutoscaleWorkers: z.number().nullable(),
+  maxAutoscaleWorkers: z.number().nullable(),
+  autoTerminationMinutes: z.number().nullable(),
+  dataSecurityMode: z.string().nullable(),
+  totalCostUsd: z.number(),
+  cpuUtilizationPercent: z.number().nullable(),
+  memoryUsedPercent: z.number().nullable(),
+  observedNodeHours: z.number().nullable(),
+  lastSeenAt: z.string().nullable(),
+  deleted: z.boolean(),
+});
+
+export type DatabricksClusterResourceRow = z.infer<typeof DatabricksClusterResourceRowSchema>;
+
+export const DatabricksClusterTimeSeriesRowSchema = z.object({
+  period: z.string(),
+  costUsd: z.number(),
+  cpuUtilizationPercent: z.number().nullable(),
+  memoryUsedPercent: z.number().nullable(),
+  observedNodeHours: z.number().nullable(),
+});
+
+export type DatabricksClusterTimeSeriesRow = z.infer<typeof DatabricksClusterTimeSeriesRowSchema>;
+
 export const DatabricksQueryWarehouseTrendRowSchema = z.object({
   period: z.string(),
   workspaceId: z.string().nullable(),

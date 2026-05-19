@@ -148,6 +148,35 @@ export function buildDatabricksClusterUtilizationStatement(
   };
 }
 
+export function buildDatabricksClusterResourcesStatement(
+  sources: DatabricksOptimizeSource[],
+  range: DatabricksOptimizationRange,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
+): SqlStatementInput {
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
+  return {
+    query: buildDatabricksClusterResourcesSql(cte),
+    params: databricksOptimizeParams(sources, range),
+  };
+}
+
+export function buildDatabricksClusterTimeSeriesStatement(
+  sources: DatabricksOptimizeSource[],
+  range: DatabricksOptimizationRange,
+  clusterId: string,
+  grain: DatabricksTrendGrain,
+  costMetric: DatabricksOptimizeCostMetric = 'ListCost',
+): SqlStatementInput {
+  const cte = buildDatabricksOptimizeCte(sources, costMetric);
+  return {
+    query: buildDatabricksClusterTimeSeriesSql(cte, grain),
+    params: [
+      ...databricksOptimizeParams(sources, range),
+      { name: 'cluster_id', value: clusterId, type: 'STRING' },
+    ],
+  };
+}
+
 export function buildDatabricksQueryWarehouseTrendStatement(
   sources: DatabricksOptimizeSource[],
   range: DatabricksOptimizationRange,
@@ -282,6 +311,224 @@ SELECT
     ELSE CAST(NULL AS DOUBLE)
   END AS cpu_utilization_percent
 FROM cluster_metrics
+`;
+}
+
+export function buildDatabricksClusterResourcesSql(cte: string): string {
+  return /* sql */ `
+${cte},
+cluster_cost AS (
+  SELECT
+    workspace_id,
+    resource_id AS cluster_id,
+    MAX(workspace_name) AS workspace_name,
+    MAX(resource_name) AS resource_name,
+    CAST(SUM(cost_usd) AS DOUBLE) AS total_cost_usd
+  FROM filtered
+  WHERE resource_id IS NOT NULL
+    AND TRIM(resource_id) <> ''
+    AND service_name IN ('ALL_PURPOSE', 'INTERACTIVE', 'JOBS', 'DLT', 'LAKEFLOW_CONNECT')
+  GROUP BY workspace_id, resource_id
+),
+latest_clusters AS (
+  SELECT *
+  FROM (
+    SELECT
+      CAST(workspace_id AS STRING) AS workspace_id,
+      cluster_id,
+      cluster_name,
+      owned_by,
+      cluster_source,
+      dbr_version,
+      driver_node_type,
+      worker_node_type,
+      CAST(worker_count AS DOUBLE) AS worker_count,
+      CAST(min_autoscale_workers AS DOUBLE) AS min_autoscale_workers,
+      CAST(max_autoscale_workers AS DOUBLE) AS max_autoscale_workers,
+      CAST(auto_termination_minutes AS DOUBLE) AS auto_termination_minutes,
+      data_security_mode,
+      delete_time,
+      ROW_NUMBER() OVER (
+        PARTITION BY workspace_id, cluster_id
+        ORDER BY change_time DESC
+      ) AS row_num
+    FROM system.compute.clusters
+    WHERE create_time < :end_ts
+      AND (delete_time IS NULL OR delete_time >= :start_ts)
+      AND (:workspace_id IS NULL OR CAST(workspace_id AS STRING) = :workspace_id)
+      AND cluster_id IS NOT NULL
+      AND TRIM(cluster_id) <> ''
+  )
+  WHERE row_num = 1
+),
+overlapped_node_timeline AS (
+  SELECT
+    CAST(workspace_id AS STRING) AS workspace_id,
+    cluster_id,
+    CAST(
+      GREATEST(
+        TIMESTAMPDIFF(
+          SECOND,
+          GREATEST(start_time, :start_ts),
+          LEAST(end_time, :end_ts)
+        ),
+        0
+      ) AS DOUBLE
+    ) AS overlap_seconds,
+    CAST(COALESCE(cpu_user_percent, 0) + COALESCE(cpu_system_percent, 0) AS DOUBLE) AS cpu_percent,
+    CAST(mem_used_percent AS DOUBLE) AS mem_used_percent,
+    end_time
+  FROM system.compute.node_timeline
+  WHERE start_time < :end_ts
+    AND end_time > :start_ts
+    AND (:workspace_id IS NULL OR CAST(workspace_id AS STRING) = :workspace_id)
+    AND cluster_id IS NOT NULL
+    AND TRIM(cluster_id) <> ''
+),
+cluster_metrics AS (
+  SELECT
+    workspace_id,
+    cluster_id,
+    CAST(SUM(cpu_percent * overlap_seconds) AS DOUBLE) AS weighted_cpu_seconds,
+    CAST(SUM(mem_used_percent * overlap_seconds) AS DOUBLE) AS weighted_memory_seconds,
+    CAST(SUM(overlap_seconds) AS DOUBLE) AS observed_node_seconds,
+    MAX(end_time) AS last_seen_at
+  FROM overlapped_node_timeline
+  WHERE overlap_seconds > 0
+  GROUP BY workspace_id, cluster_id
+),
+node_types AS (
+  SELECT
+    node_type,
+    CAST(MAX(core_count) AS DOUBLE) AS core_count,
+    CAST(MAX(memory_mb) AS DOUBLE) AS memory_mb
+  FROM system.compute.node_types
+  GROUP BY node_type
+)
+SELECT
+  COALESCE(lc.workspace_id, cc.workspace_id, cm.workspace_id) AS workspace_id,
+  cc.workspace_name,
+  COALESCE(lc.cluster_id, cc.cluster_id, cm.cluster_id) AS cluster_id,
+  COALESCE(lc.cluster_name, cc.resource_name) AS cluster_name,
+  lc.owned_by,
+  lc.cluster_source,
+  lc.dbr_version,
+  lc.driver_node_type,
+  lc.worker_node_type,
+  nt.core_count AS worker_core_count,
+  nt.memory_mb AS worker_memory_mb,
+  lc.worker_count,
+  lc.min_autoscale_workers,
+  lc.max_autoscale_workers,
+  lc.auto_termination_minutes,
+  lc.data_security_mode,
+  CAST(COALESCE(cc.total_cost_usd, 0) AS DOUBLE) AS total_cost_usd,
+  CASE
+    WHEN cm.observed_node_seconds > 0
+      THEN CAST(cm.weighted_cpu_seconds / cm.observed_node_seconds AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS cpu_utilization_percent,
+  CASE
+    WHEN cm.observed_node_seconds > 0
+      THEN CAST(cm.weighted_memory_seconds / cm.observed_node_seconds AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS memory_used_percent,
+  CASE
+    WHEN cm.observed_node_seconds > 0
+      THEN CAST(cm.observed_node_seconds / 3600.0 AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS observed_node_hours,
+  CAST(cm.last_seen_at AS STRING) AS last_seen_at,
+  CAST(lc.delete_time IS NOT NULL AS BOOLEAN) AS deleted
+FROM latest_clusters lc
+FULL OUTER JOIN cluster_cost cc
+  ON lc.workspace_id = cc.workspace_id
+ AND lc.cluster_id = cc.cluster_id
+FULL OUTER JOIN cluster_metrics cm
+  ON COALESCE(lc.workspace_id, cc.workspace_id) = cm.workspace_id
+ AND COALESCE(lc.cluster_id, cc.cluster_id) = cm.cluster_id
+LEFT JOIN node_types nt
+  ON lc.worker_node_type = nt.node_type
+WHERE COALESCE(lc.cluster_id, cc.cluster_id, cm.cluster_id) IS NOT NULL
+ORDER BY total_cost_usd DESC, observed_node_hours DESC
+LIMIT 100
+`;
+}
+
+export function buildDatabricksClusterTimeSeriesSql(
+  cte: string,
+  grain: DatabricksTrendGrain,
+): string {
+  const unit = grain === 'day' ? 'DAY' : 'MONTH';
+  const format = grain === 'day' ? 'yyyy-MM-dd' : 'yyyy-MM';
+  const costPeriodExpression = `date_format(date_trunc('${unit}', charge_period_start), '${format}')`;
+  const metricPeriodExpression = `date_format(date_trunc('${unit}', GREATEST(start_time, :start_ts)), '${format}')`;
+
+  return /* sql */ `
+${cte},
+cluster_cost AS (
+  SELECT
+    ${costPeriodExpression} AS period,
+    CAST(SUM(cost_usd) AS DOUBLE) AS cost_usd
+  FROM filtered
+  WHERE resource_id = :cluster_id
+    AND service_name IN ('ALL_PURPOSE', 'INTERACTIVE', 'JOBS', 'DLT', 'LAKEFLOW_CONNECT')
+  GROUP BY ${costPeriodExpression}
+),
+overlapped_node_timeline AS (
+  SELECT
+    ${metricPeriodExpression} AS period,
+    CAST(
+      GREATEST(
+        TIMESTAMPDIFF(
+          SECOND,
+          GREATEST(start_time, :start_ts),
+          LEAST(end_time, :end_ts)
+        ),
+        0
+      ) AS DOUBLE
+    ) AS overlap_seconds,
+    CAST(COALESCE(cpu_user_percent, 0) + COALESCE(cpu_system_percent, 0) AS DOUBLE) AS cpu_percent,
+    CAST(mem_used_percent AS DOUBLE) AS mem_used_percent
+  FROM system.compute.node_timeline
+  WHERE start_time < :end_ts
+    AND end_time > :start_ts
+    AND (:workspace_id IS NULL OR CAST(workspace_id AS STRING) = :workspace_id)
+    AND cluster_id = :cluster_id
+),
+cluster_metrics AS (
+  SELECT
+    period,
+    CAST(SUM(cpu_percent * overlap_seconds) AS DOUBLE) AS weighted_cpu_seconds,
+    CAST(SUM(mem_used_percent * overlap_seconds) AS DOUBLE) AS weighted_memory_seconds,
+    CAST(SUM(overlap_seconds) AS DOUBLE) AS observed_node_seconds
+  FROM overlapped_node_timeline
+  WHERE overlap_seconds > 0
+  GROUP BY period
+)
+SELECT
+  COALESCE(cc.period, cm.period) AS period,
+  CAST(COALESCE(cc.cost_usd, 0) AS DOUBLE) AS cost_usd,
+  CASE
+    WHEN cm.observed_node_seconds > 0
+      THEN CAST(cm.weighted_cpu_seconds / cm.observed_node_seconds AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS cpu_utilization_percent,
+  CASE
+    WHEN cm.observed_node_seconds > 0
+      THEN CAST(cm.weighted_memory_seconds / cm.observed_node_seconds AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS memory_used_percent,
+  CASE
+    WHEN cm.observed_node_seconds > 0
+      THEN CAST(cm.observed_node_seconds / 3600.0 AS DOUBLE)
+    ELSE CAST(NULL AS DOUBLE)
+  END AS observed_node_hours
+FROM cluster_cost cc
+FULL OUTER JOIN cluster_metrics cm
+  ON cc.period = cm.period
+WHERE COALESCE(cc.period, cm.period) IS NOT NULL
+ORDER BY period
 `;
 }
 

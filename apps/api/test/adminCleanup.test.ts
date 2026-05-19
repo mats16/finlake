@@ -93,6 +93,29 @@ function fakeDb(settings: Record<string, string>): DatabaseClient {
         }),
         delete: async () => {},
       },
+      genieSpaces: {
+        get: async () => null,
+        list: async () => [],
+        upsert: async (purpose: string, spaceId: string) => ({
+          purpose,
+          spaceId,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        }),
+        delete: async () => {},
+        clear: async () => 0,
+      },
+      workspaces: {
+        get: async () => null,
+        list: async () => [],
+        upsert: async (id: string, domain: string) => ({
+          id,
+          domain,
+          updatedAt: new Date(0).toISOString(),
+        }),
+        delete: async () => {},
+        clear: async () => 0,
+      },
       dataSources: {
         clear: async () => 2,
         list: async () => [],

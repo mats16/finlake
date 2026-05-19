@@ -175,3 +175,33 @@ test('SqliteClient adds pipeline_id to existing data_sources without dropping ro
     }
   });
 });
+
+test('SqliteClient migrates legacy genie_space_id app setting to genie_spaces', async () => {
+  await withTempDb(async (path) => {
+    const raw = createClient({ url: `file:${path}` });
+    try {
+      await raw.execute(
+        `CREATE TABLE app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )`,
+      );
+      await raw.execute({
+        sql: 'INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)',
+        args: ['genie_space_id', 'space-123', new Date().toISOString()],
+      });
+    } finally {
+      raw.close();
+    }
+
+    const db = await SqliteClient.create({ sqlitePath: path });
+    try {
+      const space = await db.repos.genieSpaces.get('finops');
+      assert.equal(space?.spaceId, 'space-123');
+      assert.equal(await db.repos.appSettings.get('genie_space_id'), null);
+    } finally {
+      await db.close();
+    }
+  });
+});
