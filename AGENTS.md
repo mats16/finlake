@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Last reviewed: 2026-05-20
+
 ## What this is
 
 FinLake is a FinOps web app deployed as a Databricks App. The runtime is Node.js 22.16, the UI is React 19 (Vite), and the API is Express extended by `@databricks/appkit`. The same Express process serves the SPA in production (`/api/*` is the API; everything else falls through to `index.html`).
