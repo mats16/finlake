@@ -181,6 +181,71 @@ test('upsertMultiPipelineSchedule replaces a saved pipeline id that no longer ex
   assert.equal(result.pipelines[0]?.pipelineId, 'replacement-pipeline');
 });
 
+test('upsertMultiPipelineSchedule references external pipelines without updating them', async () => {
+  const imports: unknown[] = [];
+  const createdPipelines: unknown[] = [];
+  const createdJobs: unknown[] = [];
+  const wc = {
+    workspace: {
+      mkdirs: async () => {},
+      import: async (input: unknown) => imports.push(input),
+    },
+    pipelines: {
+      create: async (input: unknown) => {
+        createdPipelines.push(input);
+        return { pipeline_id: 'managed-gold' };
+      },
+    },
+    jobs: {
+      create: async (input: unknown) => {
+        createdJobs.push(input);
+        return { job_id: 654 };
+      },
+    },
+  };
+
+  const result = await upsertMultiPipelineSchedule(
+    wc as never,
+    {
+      jobName: 'finops-master-job',
+      pipelines: [
+        {
+          taskKey: 'silver_custom_pipeline_123',
+          pipelineName: 'finops-custom-pipeline',
+          files: [],
+          catalog: 'finops',
+          schema: 'focus',
+          externalPipelineId: 'external-pipeline-123',
+        },
+        {
+          taskKey: 'gold_usage',
+          pipelineName: 'finops-gold-aggregate-pipeline',
+          files: [
+            {
+              workspacePath: '/Workspace/Shared/finlake/data_sources/shared/gold_usage.sql',
+              pipelineSql: 'CREATE VIEW usage AS SELECT 1',
+            },
+          ],
+          catalog: 'finops',
+          schema: 'focus',
+          dependsOn: ['silver_custom_pipeline_123'],
+        },
+      ],
+      cronExpression: '0 0 21 * * ?',
+      timezoneId: 'UTC',
+    },
+    { jobId: null },
+  );
+
+  assert.equal(result.pipelines[0]?.pipelineId, 'external-pipeline-123');
+  assert.equal(imports.length, 1);
+  assert.equal(createdPipelines.length, 1);
+  const job = createdJobs[0] as {
+    tasks: Array<{ task_key: string; pipeline_task: { pipeline_id: string } }>;
+  };
+  assert.equal(job.tasks[0]?.pipeline_task.pipeline_id, 'external-pipeline-123');
+});
+
 test('upsertMultiPipelineSchedule retries job creation while pipeline reference is not visible', async () => {
   let jobCreateAttempts = 0;
   const wc = {

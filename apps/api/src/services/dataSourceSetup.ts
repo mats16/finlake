@@ -12,6 +12,7 @@ import {
   focusSourceTables,
   focusViewFqn,
   isAwsProvider,
+  isCustomProvider,
   isDatabricksProvider,
   medallionSchemaNamesFromSettings,
   normalizeS3Prefix,
@@ -746,8 +747,10 @@ async function syncSharedFocusPipelineLocked(
     appSettings[SHARED_PIPELINE_SETTING_KEYS.workspaceRoot] ??
       sharedPipelineWorkspaceRoot(env.DATABRICKS_APP_NAME),
   );
-  const sourceFiles = enabledSources.map((source) => sourcePipelineFile(workspaceRoot, source));
-  const silverTasks = sourceFiles.map((file) => ({
+  const managedSourceFiles = enabledSources
+    .filter((source) => !isCustomProvider(source.providerName))
+    .map((source) => sourcePipelineFile(workspaceRoot, source));
+  const managedSilverTasks = managedSourceFiles.map((file) => ({
     taskKey: sourcePipelineTaskKey(file.source),
     pipelineName: sourceSilverPipelineName(file.source),
     files: [file],
@@ -755,16 +758,24 @@ async function syncSharedFocusPipelineLocked(
     schema: silverSchema,
     existingPipelineId: file.source.pipelineId,
   }));
+  const customSilverTasks = enabledSources
+    .filter((source) => isCustomProvider(source.providerName) && source.pipelineId)
+    .map((source) => ({
+      taskKey: sourcePipelineTaskKey(source),
+      pipelineName: sourceSilverPipelineName(source),
+      files: [],
+      catalog,
+      schema: silverSchema,
+      externalPipelineId: source.pipelineId,
+    }));
+  const silverTasks = [...managedSilverTasks, ...customSilverTasks];
   const goldFile: PipelineSourceFile = {
     workspacePath: `${workspaceRoot}/shared/${SHARED_PIPELINE_FILENAME_GOLD}`,
     pipelineSql: buildUsageGoldSql({
       catalog,
       silverSchema,
       goldSchema,
-      sources: sourceFiles.map((file) => ({
-        tableName: file.tableName,
-        providerName: file.providerName,
-      })),
+      sources: enabledSources.map((source) => goldUsageSource(catalog, silverSchema, source)),
     }),
   };
   const result = await upsertMultiPipelineSchedule(
@@ -801,9 +812,12 @@ async function syncSharedFocusPipelineLocked(
     throw new DataSourceSetupError('Gold pipeline task was not created.', 500, 'lakeflowJob');
   }
   const resolvedSourcePipelineIds: Record<string, string> = {};
-  for (const file of sourceFiles) {
-    const key = dataSourceKeyString(file.source);
-    const pipelineId = pipelineIdsByTask[sourcePipelineTaskKey(file.source)];
+  for (const source of enabledSources) {
+    const key = dataSourceKeyString(source);
+    const pipelineId = pipelineIdsByTask[sourcePipelineTaskKey(source)];
+    if (!pipelineId && isCustomProvider(source.providerName) && !source.pipelineId) {
+      continue;
+    }
     if (!pipelineId) {
       throw new DataSourceSetupError(
         `Silver pipeline task was not created for ${key}.`,
@@ -920,6 +934,31 @@ function sourcePipelineTaskKey(source: DataSource): string {
   return `${base.slice(0, 79)}_${hash}`;
 }
 
+function goldUsageSource(
+  catalog: string,
+  silverSchema: string,
+  source: DataSource,
+): { tableName: string; providerName: string; sourceTableSql: string } {
+  return {
+    tableName: tableLeafName(source.tableName),
+    providerName: source.providerName,
+    sourceTableSql: sourceTableSql(catalog, silverSchema, source.tableName),
+  };
+}
+
+function sourceTableSql(catalog: string, defaultSchema: string, tableName: string): string {
+  const parts = tableName.split('.').map((part) => part.trim());
+  let resolved: string[];
+  if (parts.length === 3) {
+    resolved = parts;
+  } else if (parts.length === 2) {
+    resolved = catalog ? [catalog, ...parts] : parts;
+  } else {
+    resolved = catalog ? [catalog, defaultSchema, tableName] : [defaultSchema, tableName];
+  }
+  return resolved.map((part) => quoteIdent(part)).join('.');
+}
+
 export function buildUsageGoldSql({
   catalog,
   silverSchema,
@@ -929,14 +968,14 @@ export function buildUsageGoldSql({
   catalog: string;
   silverSchema: string;
   goldSchema: string;
-  sources: Array<{ tableName: string; providerName: string }>;
+  sources: Array<{ tableName: string; providerName: string; sourceTableSql?: string }>;
 }): string {
   const usageDetailUnionSql = sources
     .map(
       (source) =>
         `SELECT
     ${USAGE_DETAIL_COLUMNS.map((column) => usageDetailColumnExpression(source, column)).join(',\n    ')}
-  FROM ${quoteIdent(catalog)}.${quoteIdent(silverSchema)}.${quoteIdent(source.tableName)}`,
+  FROM ${source.sourceTableSql ?? `${quoteIdent(catalog)}.${quoteIdent(silverSchema)}.${quoteIdent(source.tableName)}`}`,
     )
     .join('\n  UNION ALL\n  ');
   return /* sql */ `CREATE VIEW ${quoteIdent('usage')}

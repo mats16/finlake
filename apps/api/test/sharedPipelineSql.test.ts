@@ -91,6 +91,23 @@ test('buildAwsFocusSilverPipelineSql embeds source-specific values without gold 
   assert.doesNotMatch(sql, /gold_schema_name/);
 });
 
+test('buildUsageGoldSql can read a source table outside the default silver schema', () => {
+  const sql = buildUsageGoldSql({
+    catalog: 'finops',
+    silverSchema: 'focus',
+    goldSchema: 'analytics',
+    sources: [
+      {
+        tableName: 'custom_usage',
+        providerName: 'custom',
+        sourceTableSql: '`external_catalog`.`silver`.`custom_usage`',
+      },
+    ],
+  });
+
+  assert.match(sql, /FROM `external_catalog`\.`silver`\.`custom_usage`/);
+});
+
 test('AWS FOCUS data export query includes AWS extension columns', () => {
   assert.match(AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT, /^SELECT /);
   assert.match(AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT, /x_Discounts/);

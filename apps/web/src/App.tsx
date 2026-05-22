@@ -7,6 +7,7 @@ import { ConfigureLayout } from './pages/Configure/ConfigureLayout';
 import { DataSources } from './pages/Configure/DataSources';
 import {
   AwsIntegrationDetail,
+  CustomIntegrationDetail,
   DatabricksIntegrationDetail,
 } from './pages/Configure/IntegrationDetails';
 import { Catalog } from './pages/Configure/Catalog';
@@ -73,6 +74,7 @@ export function App() {
             <Route path="/integrations" element={<DataSources />} />
             <Route path="/integrations/databricks" element={<DatabricksIntegrationDetail />} />
             <Route path="/integrations/aws" element={<AwsIntegrationDetail />} />
+            <Route path="/integrations/custom" element={<CustomIntegrationDetail />} />
             <Route path="/tags" element={<GovernedTags />} />
             <Route path="/transformations" element={<Transformations />} />
             <Route path="/pricing" element={<Navigate to="/pricing/aws" replace />} />

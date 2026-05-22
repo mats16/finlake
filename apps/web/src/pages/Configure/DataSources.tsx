@@ -83,12 +83,13 @@ function templateForRow(row: DataSource): DataSourceTemplate {
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {
-  return template.id === 'aws';
+  return template.id === 'aws' || template.id === 'custom';
 }
 
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
   if (template.id === 'databricks_focus13') return '/integrations/databricks';
   if (template.id === 'aws') return '/integrations/aws';
+  if (template.id === 'custom') return '/integrations/custom';
   return null;
 }
 
@@ -146,6 +147,10 @@ export function DataSources() {
   };
 
   const onAddTemplate = async (tpl: DataSourceTemplate) => {
+    if (tpl.id === 'custom') {
+      navigate('/integrations/custom');
+      return;
+    }
     const input = getTemplateInputConfig(tpl);
     if (!tpl.available || !input) {
       return;
@@ -203,7 +208,12 @@ export function DataSources() {
                   <TableRow
                     key={dataSourceKeyString(row)}
                     className="cursor-pointer"
-                    onClick={() => navigate(detailPathForRow(row) ?? '/integrations')}
+                    onClick={() => {
+                      const detailPath = detailPathForRow(row);
+                      if (detailPath) {
+                        navigate(detailPath);
+                      }
+                    }}
                   >
                     <TableCell>
                       <div className="flex min-w-56 items-center gap-3">

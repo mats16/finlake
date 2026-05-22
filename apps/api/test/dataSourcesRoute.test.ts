@@ -8,6 +8,7 @@ import {
   DEFAULT_DATABRICKS_ACCOUNT_ID,
   EnvSchema,
   PROVIDER_AWS,
+  PROVIDER_CUSTOM,
   PROVIDER_DATABRICKS,
   type DataSource,
   type Env,
@@ -122,6 +123,54 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
     assert.ok(stored, 'row should be retrievable via composite PK');
     assert.equal(stored.name, 'AWS prod');
     assert.equal(stored.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates custom row with external pipeline id and qualified table', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_schema.custom_usage',
+        pipelineId: 'pipeline-123',
+        enabled: true,
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_CUSTOM);
+    assert.equal(body.accountId, 'pipeline-123');
+    assert.equal(body.tableName, 'custom_schema.custom_usage');
+    assert.equal(body.pipelineId, 'pipeline-123');
+    assert.equal(body.enabled, true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates custom row without pipelineId', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_CUSTOM);
+    assert.match(body.accountId, /^table_[a-f0-9]{24}$/);
+    assert.equal(body.pipelineId, null);
   } finally {
     await env.close();
   }

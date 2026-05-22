@@ -1078,6 +1078,27 @@ export const en = {
       notImplemented:
         "This provider is not yet implemented. We're tracking it on the FinLake roadmap.",
     },
+    custom: {
+      name: 'Custom data source',
+      addTitle: 'Add custom data source',
+      addDesc:
+        'Register an existing FOCUS table. You can optionally attach an existing Lakeflow pipeline so the shared master job runs it before the gold rollup.',
+      displayName: 'Name',
+      namePlaceholder: 'Enter a display name',
+      pipelineId: 'Pipeline',
+      pipelinePlaceholder: 'Select a pipeline',
+      pipelineSearchPlaceholder: 'Search pipelines...',
+      noPipeline: 'No pipeline',
+      noPipelines: 'No pipelines found.',
+      pipelineHelp:
+        'When no pipeline is selected, the master job will read the table but will not refresh its source pipeline.',
+      tableName: 'Table',
+      tablePlaceholder: 'Select a table',
+      tableHelp:
+        'Tables are listed from the configured FinLake silver schema. Create the table there first, then select it here.',
+      noTables: 'No tables were found in the configured silver schema.',
+      addAction: 'Add data source',
+    },
     detail: {
       eyebrow: 'Integrations',
       backToIntegrations: 'Back to integrations',
@@ -1086,6 +1107,8 @@ export const en = {
       connected: 'Connected',
       awsEmpty: 'No AWS accounts match this view.',
       awsAccountsTitle: 'AWS accounts',
+      customEmpty: 'No custom data sources have been added yet.',
+      customSourcesTitle: 'Custom data sources',
       connectAccount: 'Connect account',
       selectedSettings: 'Settings for AWS account {account}',
       configureAccount: 'Configure AWS account {account}',

@@ -39,6 +39,8 @@ export interface PipelineJobTaskParams {
   configuration?: Record<string, string>;
   /** Existing pipeline id to update, when known. */
   existingPipelineId?: string | null;
+  /** Externally managed pipeline id to reference from the job without updating it. */
+  externalPipelineId?: string | null;
   /** Upstream task keys this pipeline task depends on. */
   dependsOn?: string[];
 }
@@ -319,6 +321,14 @@ export async function upsertMultiPipelineSchedule(
 
   const pipelines = await Promise.all(
     params.pipelines.map(async (pipeline) => {
+      if (pipeline.externalPipelineId) {
+        return {
+          taskKey: pipeline.taskKey,
+          pipelineId: pipeline.externalPipelineId,
+          workspacePaths: [],
+          dependsOn: pipeline.dependsOn ?? [],
+        };
+      }
       await Promise.all(
         pipeline.files.map((file) => uploadPipelineFile(wc, file.workspacePath, file.pipelineSql)),
       );

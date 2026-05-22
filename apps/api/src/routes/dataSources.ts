@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { DatabaseClient } from '@finlake/db';
+import { createHash } from 'node:crypto';
 import {
   DATA_SOURCE_TEMPLATES,
   DataSourceCreateBodySchema,
@@ -18,6 +19,10 @@ import {
   syncSharedFocusPipeline,
 } from '../services/dataSourceSetup.js';
 import { DataSourceSetupError } from '../services/dataSourceErrors.js';
+import {
+  CustomDataSourceOptionsError,
+  listCustomDataSourceOptions,
+} from '../services/customDataSourceOptions.js';
 
 const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   'awsAccountId',
@@ -35,6 +40,18 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
+  });
+
+  router.get('/custom-options', async (req, res, next) => {
+    try {
+      res.json(await listCustomDataSourceOptions(db, env, req.user?.accessToken));
+    } catch (err) {
+      if (err instanceof CustomDataSourceOptionsError) {
+        res.status(err.statusCode).json({ error: { message: err.message } });
+        return;
+      }
+      next(err);
+    }
   });
 
   router.get('/configurations', async (_req, res, next) => {
@@ -58,7 +75,15 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         res.status(400).json({ error: { message: 'Invalid templateId' } });
         return;
       }
-      const accountId = accountIdForCreate(parsed.data.providerName, parsed.data.accountId);
+      const isCustomTemplate = parsed.data.templateId === 'custom';
+      const pipelineId = parsed.data.pipelineId?.trim() || null;
+      const accountId = accountIdForCreate(
+        isCustomTemplate,
+        parsed.data.providerName,
+        parsed.data.accountId,
+        pipelineId,
+        parsed.data.tableName,
+      );
       if (!accountId) {
         res.status(400).json({ error: { message: 'accountId is required' } });
         return;
@@ -69,6 +94,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         accountId,
         tableName: parsed.data.tableName,
         focusVersion: template.focus_version,
+        pipelineId,
         enabled: parsed.data.enabled ?? false,
         config: parsed.data.config ?? {},
       });
@@ -218,8 +244,18 @@ function parseDataSourceKey(params: {
   return parsed.success ? parsed.data : null;
 }
 
-function accountIdForCreate(providerName: string, accountId: string | undefined): string | null {
+function accountIdForCreate(
+  isCustomTemplate: boolean,
+  providerName: string,
+  accountId: string | undefined,
+  pipelineId: string | null,
+  tableName: string,
+): string | null {
   if (accountId?.trim()) return accountId.trim();
+  if (isCustomTemplate && pipelineId) return pipelineId;
+  if (isCustomTemplate) {
+    return `table_${createHash('sha1').update(tableName).digest('hex').slice(0, 24)}`;
+  }
   return isDatabricksProvider(providerName) ? DEFAULT_DATABRICKS_ACCOUNT_ID : null;
 }
 

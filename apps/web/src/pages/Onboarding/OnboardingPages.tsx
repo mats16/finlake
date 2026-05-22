@@ -1,14 +1,20 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { type DataSource, type PricingNotebookState } from '@finlake/shared';
 import { Button, Skeleton } from '@databricks/appkit-ui/react';
 import { ArrowRight, X } from 'lucide-react';
 import { CatalogSettingsForm } from '../../components/CatalogSettingsForm';
-import { useDataSources, useDataSourceTemplates, usePricingNotebook } from '../../api/hooks';
+import {
+  useCreateDataSource,
+  useDataSources,
+  useDataSourceTemplates,
+  usePricingNotebook,
+} from '../../api/hooks';
 import { useI18n } from '../../i18n';
 import { AwsIntegrationDetail, DatabricksIntegrationDetail } from '../Configure/IntegrationDetails';
 import { Pricing } from '../Configure/Pricing';
 import { DataSourceTile, type TileBadge } from '../Configure/DataSourceTile';
+import { CustomDataSourceDialog } from '../Configure/CustomDataSourceDialog';
 import {
   DATA_SOURCE_TEMPLATES,
   PRICING_AWS_TEMPLATE,
@@ -19,6 +25,7 @@ import {
   rowMatchesTemplate,
   type DataSourceTemplate,
 } from '../Configure/dataSourceCatalog';
+import { messageOf } from '../Configure/utils';
 
 const INTEGRATION_BACK_PROPS = {
   backTo: '/onboarding/integration',
@@ -68,6 +75,8 @@ export function OnboardingIntegration() {
   const navigate = useNavigate();
   const dataSources = useDataSources();
   const templates = useDataSourceTemplates();
+  const createDs = useCreateDataSource();
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const rows = dataSources.data?.items ?? [];
   const availableTemplates = useMemo(
     () => templates.data?.items ?? DATA_SOURCE_TEMPLATES,
@@ -89,7 +98,8 @@ export function OnboardingIntegration() {
             const existing = rows.find((row) => rowMatchesTemplate(row, template));
             const registryEntry = getTemplateRegistryEntry(template);
             const detailPath = detailPathForTemplate(template);
-            const canOpen = Boolean(detailPath) && canCreateTemplate(template);
+            const canOpen =
+              canCreateTemplate(template) && (Boolean(detailPath) || template.id === 'custom');
             const badges = integrationBadges(existing, template, t);
 
             return (
@@ -99,12 +109,41 @@ export function OnboardingIntegration() {
                 logo={registryEntry?.logo}
                 badges={badges}
                 muted={!canOpen}
-                onClick={canOpen ? () => navigate(detailPath!) : undefined}
+                onClick={
+                  canOpen
+                    ? () => {
+                        if (template.id === 'custom') {
+                          createDs.reset();
+                          setCustomDialogOpen(true);
+                          return;
+                        }
+                        navigate(detailPath!);
+                      }
+                    : undefined
+                }
               />
             );
           })}
         </div>
       ) : null}
+      <CustomDataSourceDialog
+        open={customDialogOpen}
+        createPending={createDs.isPending}
+        createError={messageOf(createDs.error)}
+        onClose={() => setCustomDialogOpen(false)}
+        onSubmit={async ({ name, pipelineId, tableName }) => {
+          await createDs.mutateAsync({
+            templateId: 'custom',
+            name,
+            providerName: 'custom',
+            accountId: pipelineId ?? undefined,
+            tableName,
+            pipelineId: pipelineId ?? undefined,
+            enabled: true,
+          });
+          setCustomDialogOpen(false);
+        }}
+      />
     </section>
   );
 }

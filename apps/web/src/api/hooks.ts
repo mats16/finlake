@@ -9,6 +9,7 @@ import type {
   AwsFocusExportCreateResponse,
   CatalogListResponse,
   CreateBudgetInput,
+  CustomDataSourceOptionsResponse,
   DataSource,
   DataSourceCreateBody,
   DataSourceKey,
@@ -594,6 +595,16 @@ export function useDataSourceTemplates() {
     queryKey: ['dataSourceTemplates'],
     queryFn: () => apiFetch<{ items: DataSourceTemplate[] }>('/api/integrations/templates'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCustomDataSourceOptions(enabled = true) {
+  return useQuery({
+    queryKey: ['dataSources', 'customOptions'],
+    queryFn: () => apiFetch<CustomDataSourceOptionsResponse>('/api/integrations/custom-options'),
+    enabled,
+    staleTime: 60 * 1000,
+    retry: false,
   });
 }
 
