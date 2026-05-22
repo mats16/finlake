@@ -78,22 +78,13 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       }
       const isCustomTemplate = parsed.data.templateId === 'custom';
       const pipelineId = parsed.data.pipelineId?.trim() || null;
-      if (isCustomTemplate) {
-        const existingSources = await db.repos.dataSources.list();
-        const duplicate = existingSources.find(
-          (source) =>
-            isCustomProvider(source.providerName) &&
-            normalizeTableNameForComparison(source.tableName) ===
-              normalizeTableNameForComparison(parsed.data.tableName),
-        );
-        if (duplicate) {
-          res.status(409).json({
-            error: {
-              message: `Custom data source table is already registered: ${parsed.data.tableName}`,
-            },
-          });
-          return;
-        }
+      if (isCustomTemplate && (await customTableAlreadyRegistered(db, parsed.data.tableName))) {
+        res.status(409).json({
+          error: {
+            message: `Custom data source table is already registered: ${parsed.data.tableName}`,
+          },
+        });
+        return;
       }
       const accountId = accountIdForCreate(
         isCustomTemplate,
@@ -285,6 +276,19 @@ function isRegisteredAwsSource(source: {
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function customTableAlreadyRegistered(
+  db: DatabaseClient,
+  tableName: string,
+): Promise<boolean> {
+  const normalizedTableName = normalizeTableNameForComparison(tableName);
+  const existingSources = await db.repos.dataSources.list();
+  return existingSources.some(
+    (source) =>
+      isCustomProvider(source.providerName) &&
+      normalizeTableNameForComparison(source.tableName) === normalizedTableName,
+  );
 }
 
 function normalizeTableNameForComparison(tableName: string): string {

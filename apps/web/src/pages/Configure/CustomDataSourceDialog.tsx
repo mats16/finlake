@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type WheelEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type WheelEvent } from 'react';
 import type { CustomDataSourcePipelineOption } from '@finlake/shared';
 import {
   Alert,
@@ -70,9 +70,17 @@ export function CustomDataSourceDialog({
   const { t } = useI18n();
   const options = useCustomDataSourceOptions(open);
   const pipelines = options.data?.pipelines ?? [];
-  const registeredTables = new Set(registeredTableNames.map(normalizeTableNameForComparison));
-  const tables = (options.data?.tables ?? []).filter(
-    (table) => !registeredTables.has(normalizeTableNameForComparison(table.fullName)),
+  const sourceTables = options.data?.tables ?? [];
+  const registeredTables = useMemo(
+    () => new Set(registeredTableNames.map(normalizeTableNameForComparison)),
+    [registeredTableNames],
+  );
+  const tables = useMemo(
+    () =>
+      sourceTables.filter(
+        (table) => !registeredTables.has(normalizeTableNameForComparison(table.fullName)),
+      ),
+    [registeredTables, sourceTables],
   );
   const [name, setName] = useState('');
   const [pipelineId, setPipelineId] = useState(NO_PIPELINE_VALUE);
@@ -82,6 +90,10 @@ export function CustomDataSourceDialog({
   const selectedTableName = tableName.trim();
   const canSubmit =
     Boolean(selectedName && selectedTableName) && !createPending && !options.isLoading;
+  const tableEmptyMessage =
+    sourceTables.length > 0
+      ? t('dataSources.custom.allTablesRegistered')
+      : t('dataSources.custom.noTables');
 
   useEffect(() => {
     if (!open) return;
@@ -153,11 +165,7 @@ export function CustomDataSourceDialog({
             </Select>
             <p className="text-muted-foreground m-0 text-xs">{t('dataSources.custom.tableHelp')}</p>
             {!options.isLoading && tables.length === 0 ? (
-              <p className="text-destructive m-0 text-xs">
-                {options.data?.tables.length
-                  ? t('dataSources.custom.allTablesRegistered')
-                  : t('dataSources.custom.noTables')}
-              </p>
+              <p className="text-destructive m-0 text-xs">{tableEmptyMessage}</p>
             ) : null}
           </div>
 
