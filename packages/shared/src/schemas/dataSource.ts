@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IDENT_RE, type MedallionSchema } from '../sql/focusView.sql.js';
+import { IDENT_RE, UC_IDENTIFIER_PART_RE, type MedallionSchema } from '../sql/focusView.sql.js';
 
 /** `app_settings` key holding the default Unity Catalog name. */
 export const CATALOG_SETTING_KEY = 'catalog_name';
@@ -73,11 +73,13 @@ export const DataSourceAccountIdSchema = z.string().min(1).max(128);
 export const DEFAULT_DATABRICKS_ACCOUNT_ID = 'default';
 export const PROVIDER_DATABRICKS = 'databricks';
 export const PROVIDER_AWS = 'aws';
+export const PROVIDER_CUSTOM = 'custom';
 
 export function normalizeProviderName(providerName: string): string {
   const lower = providerName.trim().toLowerCase();
   if (lower === 'databricks') return PROVIDER_DATABRICKS;
   if (lower === 'aws' || lower === 'amazon web services') return PROVIDER_AWS;
+  if (lower === 'custom' || lower === 'custom data source') return PROVIDER_CUSTOM;
   return providerName.trim();
 }
 
@@ -87,6 +89,10 @@ export function isDatabricksProvider(providerName: string): boolean {
 
 export function isAwsProvider(providerName: string): boolean {
   return normalizeProviderName(providerName) === PROVIDER_AWS;
+}
+
+export function isCustomProvider(providerName: string): boolean {
+  return normalizeProviderName(providerName) === PROVIDER_CUSTOM;
 }
 
 export const DataSourceProviderNameSchema = z
@@ -125,16 +131,20 @@ export const DataSourceTableNameSchema = z
   .string()
   .min(1)
   .max(384)
-  .regex(
-    /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,2}$/,
-    'must be one to three dot-separated identifiers',
-  );
+  .refine((value) => {
+    const parts = value.split('.');
+    return (
+      parts.length >= 1 &&
+      parts.length <= 3 &&
+      parts.every((part) => UC_IDENTIFIER_PART_RE.test(part))
+    );
+  }, 'must be one to three dot-separated Unity Catalog identifiers');
 
 export const DataSourceSchema = z.object({
   name: z.string().min(1).max(256),
   providerName: DataSourceProviderNameSchema,
   accountId: DataSourceAccountIdSchema,
-  tableName: DataSourceIdentifierSchema,
+  tableName: DataSourceTableNameSchema,
   focusVersion: z.string().min(1).max(32).nullable(),
   pipelineId: z.string().min(1).nullable(),
   enabled: z.boolean(),
@@ -148,7 +158,8 @@ export const DataSourceCreateBodySchema = z.object({
   name: z.string().min(1).max(256),
   providerName: DataSourceProviderNameSchema,
   accountId: DataSourceAccountIdSchema.optional(),
-  tableName: DataSourceIdentifierSchema,
+  tableName: DataSourceTableNameSchema,
+  pipelineId: z.string().min(1).max(256).optional(),
   enabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
@@ -156,11 +167,36 @@ export type DataSourceCreateBody = z.infer<typeof DataSourceCreateBodySchema>;
 
 export const DataSourceUpdateBodySchema = z.object({
   name: z.string().min(1).max(256).optional(),
-  tableName: DataSourceIdentifierSchema.optional(),
+  tableName: DataSourceTableNameSchema.optional(),
+  pipelineId: z.string().min(1).max(256).nullable().optional(),
   enabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
 export type DataSourceUpdateBody = z.infer<typeof DataSourceUpdateBodySchema>;
+
+export const CustomDataSourcePipelineOptionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  state: z.string().nullable(),
+});
+export type CustomDataSourcePipelineOption = z.infer<typeof CustomDataSourcePipelineOptionSchema>;
+
+export const CustomDataSourceTableOptionSchema = z.object({
+  catalog: z.string().min(1),
+  schema: z.string().min(1),
+  name: z.string().min(1),
+  fullName: DataSourceTableNameSchema,
+  tableType: z.string().nullable(),
+});
+export type CustomDataSourceTableOption = z.infer<typeof CustomDataSourceTableOptionSchema>;
+
+export const CustomDataSourceOptionsResponseSchema = z.object({
+  defaultCatalog: z.string().nullable(),
+  defaultSchema: z.string(),
+  pipelines: z.array(CustomDataSourcePipelineOptionSchema),
+  tables: z.array(CustomDataSourceTableOptionSchema),
+});
+export type CustomDataSourceOptionsResponse = z.infer<typeof CustomDataSourceOptionsResponseSchema>;
 
 export const DATABRICKS_FOCUS_VERSION = '1.3';
 export const AWS_FOCUS_VERSION = '1.2';
@@ -204,6 +240,17 @@ export const DATA_SOURCE_TEMPLATES = [
     },
   },
   {
+    id: 'custom',
+    name: 'Custom data source',
+    description: 'Register an externally managed FOCUS table and Lakeflow pipeline',
+    subtitle: 'by your team',
+    focus_version: null,
+    available: true,
+    appearance: {
+      brandColor: '#475467',
+    },
+  },
+  {
     id: 'gcp',
     name: 'Google Cloud',
     description: 'Google Cloud billing export support is coming soon.',
@@ -235,7 +282,7 @@ export const FOCUS_REFRESH_CRON_DEFAULT = '0 0 21 * * ?';
 export const FOCUS_REFRESH_TIMEZONE_DEFAULT = 'UTC';
 
 export const DataSourceSetupBodySchema = z.object({
-  tableName: DataSourceIdentifierSchema.optional(),
+  tableName: DataSourceTableNameSchema.optional(),
   accountPricesTable: z.string().min(1).max(256).optional(),
   warehouseId: z.string().min(1).max(256).optional(),
 });

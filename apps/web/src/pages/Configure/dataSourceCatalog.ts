@@ -74,6 +74,12 @@ export const DATA_SOURCE_TEMPLATE_REGISTRY: Record<string, DataSourceTemplateReg
     logo: { kind: 'snowflake' },
   },
   custom: {
+    input: {
+      providerName: 'custom',
+      defaultTableName: 'custom_usage',
+      setupSteps: [],
+    },
+    matches: [{ providerName: 'custom', defaultTableName: 'custom_usage' }],
     logo: { kind: 'abbr', label: 'src' },
   },
 };

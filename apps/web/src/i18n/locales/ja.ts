@@ -1088,6 +1088,28 @@ export const ja: Dictionary = {
       notImplemented:
         'このプロバイダーはまだ実装されていません。FinLake のロードマップで進捗を追跡しています。',
     },
+    custom: {
+      name: 'カスタムデータソース',
+      addTitle: 'カスタムデータソースを追加',
+      addDesc:
+        '既存の FOCUS テーブルを登録します。既存の Lakeflow pipeline を任意で紐付けると、shared master job が gold rollup の前にその pipeline を実行します。',
+      displayName: 'Name',
+      namePlaceholder: '表示名を入力',
+      pipelineId: 'Pipeline',
+      pipelinePlaceholder: 'Pipeline を選択',
+      pipelineSearchPlaceholder: 'Pipeline を検索...',
+      noPipeline: 'Pipeline なし',
+      noPipelines: 'Pipeline が見つかりません。',
+      pipelineHelp:
+        'Pipeline を選択しない場合、master job はテーブルを読み込みますが、元の pipeline は更新しません。',
+      tableName: 'Table',
+      tablePlaceholder: 'テーブルを選択',
+      tableHelp:
+        '設定済みの FinLake silver スキーマからテーブルを一覧表示します。先に対象テーブルを作成してから選択してください。',
+      noTables: '設定済みの silver スキーマにテーブルが見つかりません。',
+      allTablesRegistered: '設定済みの silver スキーマ内のテーブルはすべて登録済みです。',
+      addAction: 'データソースを追加',
+    },
     detail: {
       eyebrow: 'Integrations',
       backToIntegrations: 'Integrations に戻る',
@@ -1096,6 +1118,8 @@ export const ja: Dictionary = {
       connected: '接続済み',
       awsEmpty: '表示できる AWS アカウントがありません。',
       awsAccountsTitle: 'AWS アカウント',
+      customEmpty: 'カスタムデータソースはまだ追加されていません。',
+      customSourcesTitle: 'カスタムデータソース',
       connectAccount: 'アカウントを接続',
       selectedSettings: 'AWS アカウント {account} の設定',
       configureAccount: 'AWS アカウント {account} を設定',

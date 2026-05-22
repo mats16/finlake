@@ -32,6 +32,7 @@ import {
   CATALOG_SETTING_KEY,
   dataSourceKeyString,
   isAwsProvider,
+  isCustomProvider,
   isDatabricksProvider,
   medallionSchemaNamesFromSettings,
   toDataSourceKey,
@@ -42,6 +43,7 @@ import {
 import {
   useAppSettings,
   useCreateServiceCredential,
+  useCreateDataSource,
   useDataSources,
   useDeleteDataSource,
 } from '../../api/hooks';
@@ -61,6 +63,7 @@ import {
   getTemplateInputConfig,
   getTemplateRegistryEntry,
 } from './dataSourceCatalog';
+import { CustomDataSourceDialog } from './CustomDataSourceDialog';
 import type { DatabricksFocusDraft } from './DataSources';
 import type { AwsFocusDraft } from './useAwsFocusForm';
 import { configString, messageOf, nextTableName } from './utils';
@@ -74,6 +77,9 @@ function providerRows(rows: DataSource[], templateId: string): DataSource[] {
     }
     if (templateId === 'databricks_focus13') {
       return isDatabricksProvider(row.providerName);
+    }
+    if (templateId === 'custom') {
+      return isCustomProvider(row.providerName);
     }
     return findTemplateForRow(row)?.id === templateId;
   });
@@ -107,6 +113,7 @@ function formatUpdatedAt(value: string, locale: Locale): string {
 const EMPTY_SETTINGS: Record<string, string> = {};
 
 function dataSourceTableDisplayName(row: DataSource, settings: Record<string, string>): string {
+  if (isCustomProvider(row.providerName) && row.tableName.includes('.')) return row.tableName;
   const catalog = settings[CATALOG_SETTING_KEY]?.trim();
   const silverSchema = medallionSchemaNamesFromSettings(settings).silver;
   return catalog
@@ -127,7 +134,7 @@ function IntegrationHeader({
   eyebrowKey = 'dataSources.detail.eyebrow',
   backLabelKey = 'dataSources.detail.backToIntegrations',
 }: {
-  templateId: 'aws' | 'databricks_focus13';
+  templateId: 'aws' | 'custom' | 'databricks_focus13';
   backTo?: string;
   eyebrowKey?: string;
   backLabelKey?: string;
@@ -194,6 +201,56 @@ export function DatabricksIntegrationDetail(props: IntegrationDetailProps = {}) 
       ) : draft ? (
         <FocusViewSection row={null} draft={draft} onCreated={setCreatedRow} />
       ) : null}
+    </>
+  );
+}
+
+export function CustomIntegrationDetail(props: IntegrationDetailProps = {}) {
+  const { locale, t } = useI18n();
+  const dataSources = useDataSources();
+  const createDs = useCreateDataSource();
+  const rows = dataSources.data?.items ?? [];
+  const customRows = useMemo(() => providerRows(rows, 'custom'), [rows]);
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
+
+  return (
+    <>
+      <IntegrationHeader templateId="custom" {...props} />
+      <div className="grid gap-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="m-0 text-base font-semibold">
+              {t('dataSources.detail.customSourcesTitle')}
+            </h4>
+            <p className="text-muted-foreground mt-1 mb-0 text-sm">
+              {t('dataSources.custom.addDesc')}
+            </p>
+          </div>
+          <Button type="button" className="gap-2" onClick={() => setCustomDialogOpen(true)}>
+            <Plug className="size-4" aria-hidden="true" />
+            {t('dataSources.custom.addAction')}
+          </Button>
+        </div>
+        <CustomDataSourcesTable rows={customRows} locale={locale} />
+      </div>
+      <CustomDataSourceDialog
+        open={customDialogOpen}
+        createPending={createDs.isPending}
+        createError={messageOf(createDs.error)}
+        registeredTableNames={customRows.map((row) => row.tableName)}
+        onClose={() => setCustomDialogOpen(false)}
+        onSubmit={async ({ name, pipelineId, tableName }) => {
+          await createDs.mutateAsync({
+            templateId: 'custom',
+            name,
+            providerName: 'custom',
+            tableName,
+            pipelineId: pipelineId ?? undefined,
+            enabled: true,
+          });
+          setCustomDialogOpen(false);
+        }}
+      />
     </>
   );
 }
@@ -748,6 +805,97 @@ function AwsConnectSetupModal({
             onCreateProgressCompleteChange={setCreateProgressComplete}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomDataSourcesTable({ rows, locale }: { rows: DataSource[]; locale: Locale }) {
+  const { t } = useI18n();
+  const deleteDs = useDeleteDataSource();
+  const appSettings = useAppSettings();
+  const settings = appSettings.data?.settings ?? EMPTY_SETTINGS;
+  const deleteErrorMessage = messageOf(deleteDs.error);
+
+  const onRemove = (row: DataSource) => {
+    if (!window.confirm(t('dataSources.confirmDelete', { name: row.name }))) return;
+    deleteDs.mutate(toDataSourceKey(row));
+  };
+
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <CardContent className="text-muted-foreground py-8 text-sm">
+          {t('dataSources.detail.customEmpty')}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid gap-3">
+      {deleteErrorMessage ? (
+        <Alert variant="destructive">
+          <Info />
+          <AlertDescription>{deleteErrorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('dataSources.custom.displayName')}</TableHead>
+              <TableHead>{t('dataSources.columns.table')}</TableHead>
+              <TableHead>{t('dataSources.custom.pipelineId')}</TableHead>
+              <TableHead>{t('dataSources.detail.columns.lastUpdated')}</TableHead>
+              <TableHead>{t('dataSources.detail.columns.status')}</TableHead>
+              <TableHead className="text-right" aria-label={t('dataSources.columns.actions')} />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={dataSourceKeyString(row)}>
+                <TableCell>
+                  <div className="min-w-48 font-medium">{row.name}</div>
+                </TableCell>
+                <TableCell>
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {dataSourceTableDisplayName(row, settings)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {row.pipelineId ?? t('dataSources.custom.noPipeline')}
+                  </span>
+                </TableCell>
+                <TableCell>{formatUpdatedAt(row.updatedAt, locale)}</TableCell>
+                <TableCell>
+                  {row.enabled ? t('dataSources.badges.enabled') : t('dataSources.badges.disabled')}
+                </TableCell>
+                <TableCell className="text-right">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8"
+                        aria-label={t('dataSources.detail.moreActions')}
+                      >
+                        <MoreHorizontal className="size-4" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem disabled={deleteDs.isPending} onClick={() => onRemove(row)}>
+                        {t('dataSources.detail.remove')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
     </div>
   );

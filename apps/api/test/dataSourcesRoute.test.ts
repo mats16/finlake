@@ -8,6 +8,7 @@ import {
   DEFAULT_DATABRICKS_ACCOUNT_ID,
   EnvSchema,
   PROVIDER_AWS,
+  PROVIDER_CUSTOM,
   PROVIDER_DATABRICKS,
   type DataSource,
   type Env,
@@ -122,6 +123,112 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
     assert.ok(stored, 'row should be retrievable via composite PK');
     assert.equal(stored.name, 'AWS prod');
     assert.equal(stored.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates custom row with external pipeline id and qualified table', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_schema.custom_usage',
+        pipelineId: 'pipeline-123',
+        enabled: true,
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_CUSTOM);
+    assert.match(body.accountId, /^custom_[0-9a-f-]{36}$/);
+    assert.equal(body.tableName, 'custom_schema.custom_usage');
+    assert.equal(body.pipelineId, 'pipeline-123');
+    assert.equal(body.enabled, true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates custom row without pipelineId', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_CUSTOM);
+    assert.match(body.accountId, /^custom_[0-9a-f-]{36}$/);
+    assert.equal(body.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates distinct custom rows for the same pipeline', async () => {
+  const env = await startServer();
+  try {
+    const first = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed A',
+      providerName: 'custom',
+      accountId: 'pipeline-123',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+    });
+    const second = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed B',
+      providerName: 'custom',
+      accountId: 'pipeline-123',
+      tableName: 'custom_usage_2',
+      pipelineId: 'pipeline-123',
+    });
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.notEqual(first.body.accountId, second.body.accountId);
+    assert.equal(first.body.pipelineId, 'pipeline-123');
+    assert.equal(second.body.pipelineId, 'pipeline-123');
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations rejects duplicate custom table registrations', async () => {
+  const env = await startServer();
+  try {
+    const first = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed A',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+    });
+    const second = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed B',
+        providerName: 'custom',
+        tableName: 'CUSTOM_USAGE',
+      },
+    );
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 409);
+    assert.match(second.body.error.message, /already registered/);
   } finally {
     await env.close();
   }

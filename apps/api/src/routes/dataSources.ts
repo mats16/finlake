@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { DatabaseClient } from '@finlake/db';
+import { randomUUID } from 'node:crypto';
 import {
   DATA_SOURCE_TEMPLATES,
   DataSourceCreateBodySchema,
@@ -8,6 +9,7 @@ import {
   DataSourceUpdateBodySchema,
   DEFAULT_DATABRICKS_ACCOUNT_ID,
   isAwsProvider,
+  isCustomProvider,
   isDatabricksProvider,
   type DataSourceKey,
   type Env,
@@ -18,6 +20,10 @@ import {
   syncSharedFocusPipeline,
 } from '../services/dataSourceSetup.js';
 import { DataSourceSetupError } from '../services/dataSourceErrors.js';
+import {
+  CustomDataSourceOptionsError,
+  listCustomDataSourceOptions,
+} from '../services/customDataSourceOptions.js';
 
 const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   'awsAccountId',
@@ -35,6 +41,18 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
+  });
+
+  router.get('/custom-options', async (req, res, next) => {
+    try {
+      res.json(await listCustomDataSourceOptions(db, env, req.user?.accessToken));
+    } catch (err) {
+      if (err instanceof CustomDataSourceOptionsError) {
+        res.status(err.statusCode).json({ error: { message: err.message } });
+        return;
+      }
+      next(err);
+    }
   });
 
   router.get('/configurations', async (_req, res, next) => {
@@ -58,7 +76,21 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         res.status(400).json({ error: { message: 'Invalid templateId' } });
         return;
       }
-      const accountId = accountIdForCreate(parsed.data.providerName, parsed.data.accountId);
+      const isCustomTemplate = parsed.data.templateId === 'custom';
+      const pipelineId = parsed.data.pipelineId?.trim() || null;
+      if (isCustomTemplate && (await customTableAlreadyRegistered(db, parsed.data.tableName))) {
+        res.status(409).json({
+          error: {
+            message: `Custom data source table is already registered: ${parsed.data.tableName}`,
+          },
+        });
+        return;
+      }
+      const accountId = accountIdForCreate(
+        isCustomTemplate,
+        parsed.data.providerName,
+        parsed.data.accountId,
+      );
       if (!accountId) {
         res.status(400).json({ error: { message: 'accountId is required' } });
         return;
@@ -69,6 +101,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         accountId,
         tableName: parsed.data.tableName,
         focusVersion: template.focus_version,
+        pipelineId,
         enabled: parsed.data.enabled ?? false,
         config: parsed.data.config ?? {},
       });
@@ -218,7 +251,14 @@ function parseDataSourceKey(params: {
   return parsed.success ? parsed.data : null;
 }
 
-function accountIdForCreate(providerName: string, accountId: string | undefined): string | null {
+function accountIdForCreate(
+  isCustomTemplate: boolean,
+  providerName: string,
+  accountId: string | undefined,
+): string | null {
+  if (isCustomTemplate) {
+    return `custom_${randomUUID()}`;
+  }
   if (accountId?.trim()) return accountId.trim();
   return isDatabricksProvider(providerName) ? DEFAULT_DATABRICKS_ACCOUNT_ID : null;
 }
@@ -236,4 +276,24 @@ function isRegisteredAwsSource(source: {
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function customTableAlreadyRegistered(
+  db: DatabaseClient,
+  tableName: string,
+): Promise<boolean> {
+  const normalizedTableName = normalizeTableNameForComparison(tableName);
+  const existingSources = await db.repos.dataSources.list();
+  return existingSources.some(
+    (source) =>
+      isCustomProvider(source.providerName) &&
+      normalizeTableNameForComparison(source.tableName) === normalizedTableName,
+  );
+}
+
+function normalizeTableNameForComparison(tableName: string): string {
+  return tableName
+    .split('.')
+    .map((part) => part.trim().toLowerCase())
+    .join('.');
 }
