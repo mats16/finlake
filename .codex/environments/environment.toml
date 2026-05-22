@@ -3,9 +3,28 @@ version = 1
 name = "finlake"
 
 [setup]
-script = ""
+script = '''
+cd "$CODEX_WORKTREE_PATH"
+cp "$CODEX_SOURCE_TREE_PATH/.env.local" ./
+npm install
+'''
 
 [[actions]]
 name = "Run"
 icon = "run"
 command = "npm run dev"
+
+[[actions]]
+name = "Format"
+icon = "debug"
+command = "npm run format"
+
+[[actions]]
+name = "Lint"
+icon = "debug"
+command = "npm run lint"
+
+[[actions]]
+name = "Unit test"
+icon = "test"
+command = "npm run test"
