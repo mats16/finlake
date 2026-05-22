@@ -38,14 +38,15 @@ export type FocusSourceTableRef = FocusViewTarget & {
   fqn: string;
 };
 
-/** Single source of truth for unquoted SQL identifiers used across the app. */
+/** Single source of truth for UI-authored unquoted SQL identifiers used across the app. */
 export const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const UC_IDENTIFIER_PART_RE = /^[A-Za-z0-9_]+$/;
 const QUALIFIED_RE = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,2}$/;
 
 function quoteIdent(part: string): string {
-  if (!IDENT_RE.test(part)) {
+  if (!UC_IDENTIFIER_PART_RE.test(part)) {
     throw new Error(
-      `Invalid identifier "${part}": must match /^[A-Za-z_][A-Za-z0-9_]*$/ (no quoting required).`,
+      `Invalid identifier "${part}": expected letters, numbers, or underscores only.`,
     );
   }
   return `\`${part}\``;

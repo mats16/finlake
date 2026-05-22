@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IDENT_RE, type MedallionSchema } from '../sql/focusView.sql.js';
+import { IDENT_RE, UC_IDENTIFIER_PART_RE, type MedallionSchema } from '../sql/focusView.sql.js';
 
 /** `app_settings` key holding the default Unity Catalog name. */
 export const CATALOG_SETTING_KEY = 'catalog_name';
@@ -131,10 +131,14 @@ export const DataSourceTableNameSchema = z
   .string()
   .min(1)
   .max(384)
-  .regex(
-    /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,2}$/,
-    'must be one to three dot-separated identifiers',
-  );
+  .refine((value) => {
+    const parts = value.split('.');
+    return (
+      parts.length >= 1 &&
+      parts.length <= 3 &&
+      parts.every((part) => UC_IDENTIFIER_PART_RE.test(part))
+    );
+  }, 'must be one to three dot-separated Unity Catalog identifiers');
 
 export const DataSourceSchema = z.object({
   name: z.string().min(1).max(256),
@@ -278,7 +282,7 @@ export const FOCUS_REFRESH_CRON_DEFAULT = '0 0 21 * * ?';
 export const FOCUS_REFRESH_TIMEZONE_DEFAULT = 'UTC';
 
 export const DataSourceSetupBodySchema = z.object({
-  tableName: DataSourceIdentifierSchema.optional(),
+  tableName: DataSourceTableNameSchema.optional(),
   accountPricesTable: z.string().min(1).max(256).optional(),
   warehouseId: z.string().min(1).max(256).optional(),
 });

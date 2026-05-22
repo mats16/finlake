@@ -1107,6 +1107,7 @@ export const ja: Dictionary = {
       tableHelp:
         '設定済みの FinLake silver スキーマからテーブルを一覧表示します。先に対象テーブルを作成してから選択してください。',
       noTables: '設定済みの silver スキーマにテーブルが見つかりません。',
+      allTablesRegistered: '設定済みの silver スキーマ内のテーブルはすべて登録済みです。',
       addAction: 'データソースを追加',
     },
     detail: {

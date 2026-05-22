@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { type DataSource, type PricingNotebookState } from '@finlake/shared';
+import { isCustomProvider, type DataSource, type PricingNotebookState } from '@finlake/shared';
 import { Button, Skeleton } from '@databricks/appkit-ui/react';
 import { ArrowRight, X } from 'lucide-react';
 import { CatalogSettingsForm } from '../../components/CatalogSettingsForm';
@@ -130,13 +130,15 @@ export function OnboardingIntegration() {
         open={customDialogOpen}
         createPending={createDs.isPending}
         createError={messageOf(createDs.error)}
+        registeredTableNames={rows
+          .filter((row) => isCustomProvider(row.providerName))
+          .map((row) => row.tableName)}
         onClose={() => setCustomDialogOpen(false)}
         onSubmit={async ({ name, pipelineId, tableName }) => {
           await createDs.mutateAsync({
             templateId: 'custom',
             name,
             providerName: 'custom',
-            accountId: pipelineId ?? undefined,
             tableName,
             pipelineId: pipelineId ?? undefined,
             enabled: true,

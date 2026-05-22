@@ -9,12 +9,15 @@ import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTran
 import {
   AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT,
   AWS_EC2_PRICING_TABLE_DEFAULT,
+  DataSourceSetupBodySchema,
+  DataSourceTableNameSchema,
   DATABRICKS_ACCOUNT_PRICES_TABLE_DEFAULT,
   DATABRICKS_LIST_PRICES_TABLE_DEFAULT,
   DOWNLOADS_VOLUME_DEFAULT,
   MEDALLION_SCHEMA_DEFAULTS,
   PRICING_SCHEMA_DEFAULT,
   medallionSchemaNamesFromSettings,
+  quoteIdent,
 } from '@finlake/shared';
 
 const databricksSilverSql = buildFocusSilverPipelineSql({
@@ -106,6 +109,18 @@ test('buildUsageGoldSql can read a source table outside the default silver schem
   });
 
   assert.match(sql, /FROM `external_catalog`\.`silver`\.`custom_usage`/);
+});
+
+test('data source table schemas allow numeric-prefixed Unity Catalog identifiers', () => {
+  assert.equal(
+    DataSourceTableNameSchema.parse('finops.focus.2024_revenue'),
+    'finops.focus.2024_revenue',
+  );
+  assert.equal(
+    DataSourceSetupBodySchema.parse({ tableName: 'focus.2024_revenue' }).tableName,
+    'focus.2024_revenue',
+  );
+  assert.equal(quoteIdent('2024_revenue'), '`2024_revenue`');
 });
 
 test('AWS FOCUS data export query includes AWS extension columns', () => {

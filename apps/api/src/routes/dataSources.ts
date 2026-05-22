@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { DatabaseClient } from '@finlake/db';
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
   DATA_SOURCE_TEMPLATES,
   DataSourceCreateBodySchema,
@@ -9,6 +9,7 @@ import {
   DataSourceUpdateBodySchema,
   DEFAULT_DATABRICKS_ACCOUNT_ID,
   isAwsProvider,
+  isCustomProvider,
   isDatabricksProvider,
   type DataSourceKey,
   type Env,
@@ -77,12 +78,27 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       }
       const isCustomTemplate = parsed.data.templateId === 'custom';
       const pipelineId = parsed.data.pipelineId?.trim() || null;
+      if (isCustomTemplate) {
+        const existingSources = await db.repos.dataSources.list();
+        const duplicate = existingSources.find(
+          (source) =>
+            isCustomProvider(source.providerName) &&
+            normalizeTableNameForComparison(source.tableName) ===
+              normalizeTableNameForComparison(parsed.data.tableName),
+        );
+        if (duplicate) {
+          res.status(409).json({
+            error: {
+              message: `Custom data source table is already registered: ${parsed.data.tableName}`,
+            },
+          });
+          return;
+        }
+      }
       const accountId = accountIdForCreate(
         isCustomTemplate,
         parsed.data.providerName,
         parsed.data.accountId,
-        pipelineId,
-        parsed.data.tableName,
       );
       if (!accountId) {
         res.status(400).json({ error: { message: 'accountId is required' } });
@@ -248,14 +264,11 @@ function accountIdForCreate(
   isCustomTemplate: boolean,
   providerName: string,
   accountId: string | undefined,
-  pipelineId: string | null,
-  tableName: string,
 ): string | null {
-  if (accountId?.trim()) return accountId.trim();
-  if (isCustomTemplate && pipelineId) return pipelineId;
   if (isCustomTemplate) {
-    return `table_${createHash('sha1').update(tableName).digest('hex').slice(0, 24)}`;
+    return `custom_${randomUUID()}`;
   }
+  if (accountId?.trim()) return accountId.trim();
   return isDatabricksProvider(providerName) ? DEFAULT_DATABRICKS_ACCOUNT_ID : null;
 }
 
@@ -272,4 +285,11 @@ function isRegisteredAwsSource(source: {
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function normalizeTableNameForComparison(tableName: string): string {
+  return tableName
+    .split('.')
+    .map((part) => part.trim().toLowerCase())
+    .join('.');
 }

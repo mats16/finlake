@@ -1097,6 +1097,7 @@ export const en = {
       tableHelp:
         'Tables are listed from the configured FinLake silver schema. Create the table there first, then select it here.',
       noTables: 'No tables were found in the configured silver schema.',
+      allTablesRegistered: 'All tables in the configured silver schema are already registered.',
       addAction: 'Add data source',
     },
     detail: {

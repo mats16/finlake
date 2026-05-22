@@ -113,7 +113,7 @@ function formatUpdatedAt(value: string, locale: Locale): string {
 const EMPTY_SETTINGS: Record<string, string> = {};
 
 function dataSourceTableDisplayName(row: DataSource, settings: Record<string, string>): string {
-  if (row.tableName.includes('.')) return row.tableName;
+  if (isCustomProvider(row.providerName) && row.tableName.includes('.')) return row.tableName;
   const catalog = settings[CATALOG_SETTING_KEY]?.trim();
   const silverSchema = medallionSchemaNamesFromSettings(settings).silver;
   return catalog
@@ -237,13 +237,13 @@ export function CustomIntegrationDetail(props: IntegrationDetailProps = {}) {
         open={customDialogOpen}
         createPending={createDs.isPending}
         createError={messageOf(createDs.error)}
+        registeredTableNames={customRows.map((row) => row.tableName)}
         onClose={() => setCustomDialogOpen(false)}
         onSubmit={async ({ name, pipelineId, tableName }) => {
           await createDs.mutateAsync({
             templateId: 'custom',
             name,
             providerName: 'custom',
-            accountId: pipelineId ?? undefined,
             tableName,
             pipelineId: pipelineId ?? undefined,
             enabled: true,

@@ -54,6 +54,7 @@ export function CustomDataSourceDialog({
   createError,
   onClose,
   onSubmit,
+  registeredTableNames = [],
 }: {
   open: boolean;
   createPending: boolean;
@@ -64,11 +65,15 @@ export function CustomDataSourceDialog({
     pipelineId: string | null;
     tableName: string;
   }) => Promise<void>;
+  registeredTableNames?: string[];
 }) {
   const { t } = useI18n();
   const options = useCustomDataSourceOptions(open);
   const pipelines = options.data?.pipelines ?? [];
-  const tables = options.data?.tables ?? [];
+  const registeredTables = new Set(registeredTableNames.map(normalizeTableNameForComparison));
+  const tables = (options.data?.tables ?? []).filter(
+    (table) => !registeredTables.has(normalizeTableNameForComparison(table.fullName)),
+  );
   const [name, setName] = useState('');
   const [pipelineId, setPipelineId] = useState(NO_PIPELINE_VALUE);
   const [tableName, setTableName] = useState('');
@@ -148,7 +153,11 @@ export function CustomDataSourceDialog({
             </Select>
             <p className="text-muted-foreground m-0 text-xs">{t('dataSources.custom.tableHelp')}</p>
             {!options.isLoading && tables.length === 0 ? (
-              <p className="text-destructive m-0 text-xs">{t('dataSources.custom.noTables')}</p>
+              <p className="text-destructive m-0 text-xs">
+                {options.data?.tables.length
+                  ? t('dataSources.custom.allTablesRegistered')
+                  : t('dataSources.custom.noTables')}
+              </p>
             ) : null}
           </div>
 
@@ -189,6 +198,13 @@ export function CustomDataSourceDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function normalizeTableNameForComparison(tableName: string): string {
+  return tableName
+    .split('.')
+    .map((part) => part.trim().toLowerCase())
+    .join('.');
 }
 
 function PipelineCombobox({
