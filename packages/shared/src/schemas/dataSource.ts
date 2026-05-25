@@ -107,6 +107,34 @@ export function normalizeGcpBillingAccountId(accountId: string): string {
   return accountId.trim().replace(/_/g, '-');
 }
 
+export const GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX = 'gcp_billing_export_resource_v1_';
+export const GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX = 'gcp_billing_export_resource_';
+
+export function isGcpDetailedBillingExportTable(tableName: string): boolean {
+  return tableName.trim().startsWith(GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX);
+}
+
+export function isGcpBillingExportResourceTable(tableName: string): boolean {
+  return tableName.trim().startsWith(GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX);
+}
+
+export function gcpBillingAccountIdFromTableName(tableName: string): string {
+  const trimmed = tableName.trim();
+  const accountId = trimmed.startsWith(GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX)
+    ? trimmed.slice(GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX.length)
+    : trimmed;
+  return normalizeGcpBillingAccountId(accountId);
+}
+
+export function gcpUsageTableName(accountId: string): string {
+  const suffix = accountId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return suffix ? `gcp_${suffix}_usage` : 'gcp_usage';
+}
+
 export const DataSourceProviderNameSchema = z
   .string()
   .min(1)

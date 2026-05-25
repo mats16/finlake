@@ -12,9 +12,12 @@ import {
   LAKEFLOW_PIPELINE_SETTING_KEYS,
   focusSourceTables,
   focusViewFqn,
+  gcpBillingAccountIdFromTableName,
+  gcpUsageTableName,
   isAwsProvider,
   isCustomProvider,
   isDatabricksProvider,
+  isGcpDetailedBillingExportTable,
   isGcpProvider,
   medallionSchemaNamesFromSettings,
   normalizeGcpBillingAccountId,
@@ -54,9 +57,6 @@ import {
 import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineSql.js';
 import {
   buildGcpFocusSilverPipelineSql,
-  gcpBillingAccountIdFromTableName,
-  gcpUsageTableName,
-  isGcpDetailedBillingExportTable,
 } from './gcpFocusTransformPipelineSql.js';
 import { grantStatements } from './focusPermissions.js';
 

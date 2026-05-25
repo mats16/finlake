@@ -6,8 +6,6 @@ import {
 } from '../src/services/awsFocusTransformPipelineSql.js';
 import {
   buildGcpFocusSilverPipelineSql,
-  gcpBillingAccountIdFromTableName,
-  gcpUsageTableName,
 } from '../src/services/gcpFocusTransformPipelineSql.js';
 import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
@@ -22,6 +20,8 @@ import {
   GCP_FOCUS_VERSION,
   MEDALLION_SCHEMA_DEFAULTS,
   PRICING_SCHEMA_DEFAULT,
+  gcpBillingAccountIdFromTableName,
+  gcpUsageTableName,
   medallionSchemaNamesFromSettings,
   normalizeGcpBillingAccountId,
   quoteIdent,

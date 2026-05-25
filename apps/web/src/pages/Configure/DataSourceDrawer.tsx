@@ -44,8 +44,11 @@ import {
   CATALOG_SETTING_KEY,
   DATABRICKS_FOCUS_VERSION,
   GCP_FOCUS_VERSION,
+  gcpBillingAccountIdFromTableName,
+  gcpUsageTableName,
+  isGcpBillingExportResourceTable,
+  isGcpDetailedBillingExportTable,
   medallionSchemaNamesFromSettings,
-  normalizeGcpBillingAccountId,
   normalizeS3Prefix,
   s3BucketFromUrl,
   tableLeafName,
@@ -1152,8 +1155,6 @@ function AwsPipelineActions({
   );
 }
 
-const GCP_DETAILED_BILLING_TABLE_PREFIX = 'gcp_billing_export_resource_v1_';
-const GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX = 'gcp_billing_export_resource_';
 const HIDDEN_GCP_SCHEMA_NAMES = new Set(['information_schema', 'public']);
 
 interface GcpCatalogOption {
@@ -1192,28 +1193,8 @@ function gcpErrorStep(message: string): GcpSetupStepId {
   return 'lakeflowJob';
 }
 
-function billingAccountIdFromGcpTable(tableName: string): string {
-  const accountId = tableName.startsWith(GCP_DETAILED_BILLING_TABLE_PREFIX)
-    ? tableName.slice(GCP_DETAILED_BILLING_TABLE_PREFIX.length)
-    : tableName;
-  return normalizeGcpBillingAccountId(accountId);
-}
-
-function gcpUsageTableName(accountId: string): string {
-  const suffix = accountId
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return suffix ? `gcp_${suffix}_usage` : 'gcp_usage';
-}
-
-function isGcpBillingExportResourceTable(tableName: string): boolean {
-  return tableName.startsWith(GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX);
-}
-
 function isRequiredGcpDetailedBillingTable(tableName: string): boolean {
-  return tableName.startsWith(GCP_DETAILED_BILLING_TABLE_PREFIX);
+  return isGcpDetailedBillingExportTable(tableName);
 }
 
 function isForeignCatalog(catalog: GcpCatalogOption): boolean {
@@ -1258,7 +1239,7 @@ export function GcpFocusSection({
     () => new Set(row ? [] : (excludedAccountIds ?? [])),
     [excludedAccountIds, row],
   );
-  const billingAccountId = sourceTable ? billingAccountIdFromGcpTable(sourceTable) : '';
+  const billingAccountId = sourceTable ? gcpBillingAccountIdFromTableName(sourceTable) : '';
   const derivedTableName = gcpUsageTableName(billingAccountId);
   const baseTableName =
     row?.tableName ?? (sourceTable ? derivedTableName : (draft?.tableName ?? 'gcp_usage'));
@@ -1308,7 +1289,7 @@ export function GcpFocusSection({
   const sourceTableOptions = useMemo(() => {
     const options = tables.data?.tables ?? [];
     if (row || excluded.size === 0) return options;
-    return options.filter((table) => !excluded.has(billingAccountIdFromGcpTable(table.name)));
+    return options.filter((table) => !excluded.has(gcpBillingAccountIdFromTableName(table.name)));
   }, [excluded, row, tables.data?.tables]);
   const sourceCatalogOptions = useMemo(() => {
     return (catalogs.data?.catalogs ?? []).filter(isForeignCatalog);
