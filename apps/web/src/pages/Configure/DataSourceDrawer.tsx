@@ -1186,7 +1186,7 @@ function updateGcpSetupSteps(
 }
 
 function gcpErrorStep(message: string): GcpSetupStepId {
-  if (/grant|foreign catalog|source|USE CATALOG|USE SCHEMA|SELECT/i.test(message)) {
+  if (/USE CATALOG|USE SCHEMA|GRANT\b|Foreign Catalog/i.test(message)) {
     return 'sourceGrants';
   }
   return 'lakeflowJob';

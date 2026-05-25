@@ -81,12 +81,12 @@ SELECT
   CASE
     WHEN NULLIF(TRIM(finlake_reservation_name), '') IS NULL THEN CAST(NULL AS STRING)
     WHEN lower(COALESCE(finlake_is_unused_reservation, 'false')) = 'true'
-      OR CAST(resource.global_name AS STRING) NOT LIKE '%/instances/%'
       THEN 'Unused'
     ELSE 'Used'
   END AS CapacityReservationStatus,
   CASE finlake_cost_type
     WHEN 'tax' THEN 'Tax'
+    WHEN 'negotiated_discount' THEN 'Credit'
     WHEN 'adjustment' THEN 'Adjustment'
     WHEN 'rounding_error' THEN 'Adjustment'
     ELSE 'Usage'

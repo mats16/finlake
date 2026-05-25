@@ -185,7 +185,13 @@ test('buildGcpFocusSilverPipelineSql maps detailed billing export into FOCUS col
   );
   assert.match(sql, /map_from_entries\(/);
   assert.match(sql, /WHEN 'rounding_error' THEN 'Adjustment'/);
+  assert.match(sql, /WHEN 'negotiated_discount' THEN 'Credit'/);
   assert.match(sql, /THEN 'Correction'/);
+  assert.match(
+    sql,
+    /WHEN lower\(COALESCE\(finlake_is_unused_reservation, 'false'\)\) = 'true'\s+THEN 'Unused'/,
+  );
+  assert.doesNotMatch(sql, /resource\.global_name AS STRING\) NOT LIKE '%\/instances\/%'/);
   assert.match(sql, /COALESCE\(cost_at_list_consumption_model, cost_at_list, cost\)/);
   assert.match(sql, /COALESCE\(price\.list_price_consumption_model, price\.list_price\)/);
   assert.match(sql, /COALESCE\(price\.effective_price, price\.effective_price_default\)/);

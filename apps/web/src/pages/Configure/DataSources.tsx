@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   dataSourceKeyString,
   isAwsProvider,
-  isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
   type PricingNotebookState,
