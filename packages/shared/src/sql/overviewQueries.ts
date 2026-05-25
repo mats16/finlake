@@ -1,13 +1,8 @@
-import type { DataSource } from '../schemas/dataSource.js';
 import {
   CATALOG_SETTING_KEY,
-  dataSourceKeyString,
   GOLD_USAGE_TABLES,
-  isDatabricksDefaultAccount,
-  isGcpProvider,
   MEDALLION_SCHEMA_DEFAULTS,
   medallionSchemaNamesFromSettings,
-  normalizeGcpBillingAccountId,
 } from '../schemas/dataSource.js';
 import type { SqlParam } from '../schemas/sql.js';
 import type { UsageRange } from '../schemas/usage.js';
@@ -52,33 +47,25 @@ export interface SqlStatementInput {
   params: SqlParam[];
 }
 
-export function enabledFocusSources(sources: DataSource[]): DataSource[] {
-  return sources.filter((source) => source.enabled);
-}
-
 export function buildOverviewDailyStatement(
-  sources: DataSource[],
   settings: Record<string, string | undefined>,
   range: UsageRange,
-): SqlStatementInput | null {
-  if (sources.length === 0) return null;
-  const cte = joinedBillingRowsSql(sources, usageTableName('daily', settings).sql);
-  return { query: buildDailySql(cte), params: baseParams(sources, range) };
+): SqlStatementInput {
+  const cte = rollupRowsSql(usageTableName('daily', settings).sql);
+  return { query: buildDailySql(cte), params: rangeParams(range) };
 }
 
 export function buildOverviewServicesStatement(
-  sources: DataSource[],
   settings: Record<string, string | undefined>,
   range: UsageRange,
-): SqlStatementInput | null {
-  if (sources.length === 0) return null;
-  const cte = joinedBillingRowsSql(sources, usageTableName('daily', settings).sql);
+): SqlStatementInput {
+  const cte = rollupRowsSql(usageTableName('daily', settings).sql);
   return {
     query: /* sql */ `
 ${cte}
 SELECT
   data_source_id,
-  COALESCE(ProviderName, source_provider_name) AS provider_name,
+  source_provider_name AS provider_name,
   COALESCE(ServiceName, ServiceCategory, 'Unknown') AS service_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM matched
@@ -88,23 +75,21 @@ GROUP BY 1, 2, 3
 ORDER BY 4 DESC
 LIMIT 20
 `,
-    params: baseParams(sources, range),
+    params: rangeParams(range),
   };
 }
 
 export function buildOverviewSkusStatement(
-  sources: DataSource[],
   settings: Record<string, string | undefined>,
   range: UsageRange,
-): SqlStatementInput | null {
-  if (sources.length === 0) return null;
-  const cte = joinedBillingRowsSql(sources, usageTableName('daily', settings).sql);
+): SqlStatementInput {
+  const cte = rollupRowsSql(usageTableName('daily', settings).sql);
   return {
     query: /* sql */ `
 ${cte}
 SELECT
   data_source_id,
-  COALESCE(ProviderName, source_provider_name) AS provider_name,
+  source_provider_name AS provider_name,
   COALESCE(SkuId, SkuMeter, ServiceName, 'Unknown') AS sku_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM matched
@@ -114,25 +99,15 @@ GROUP BY 1, 2, 3
 ORDER BY 4 DESC
 LIMIT 50
 `,
-    params: baseParams(sources, range),
+    params: rangeParams(range),
   };
 }
 
 export function buildOverviewCoverageStatement(
-  sources: DataSource[],
   settings: Record<string, string | undefined>,
-): SqlStatementInput | null {
-  if (sources.length === 0) return null;
-  const cte = joinedBillingRowsSql(sources, usageTableName('monthly', settings).sql);
-  return { query: buildCoverageSql(cte), params: sourceJoinParams(sources) };
-}
-
-export function baseParams(sources: DataSource[], range: UsageRange): SqlParam[] {
-  return [
-    { name: 'start_ts', value: range.start, type: 'TIMESTAMP' },
-    { name: 'end_ts', value: range.end, type: 'TIMESTAMP' },
-    ...sourceJoinParams(sources),
-  ];
+): SqlStatementInput {
+  const cte = rollupRowsSql(usageTableName('monthly', settings).sql);
+  return { query: buildCoverageSql(cte), params: [] };
 }
 
 export function rangeParams(range: UsageRange): SqlParam[] {
@@ -142,63 +117,25 @@ export function rangeParams(range: UsageRange): SqlParam[] {
   ];
 }
 
-export function sourceJoinParams(sources: DataSource[]): SqlParam[] {
-  return sources.flatMap((source, i) => [
-    { name: `data_source_id_${i}`, value: dataSourceKeyString(source), type: 'STRING' as const },
-    { name: `provider_name_${i}`, value: source.providerName, type: 'STRING' as const },
-    {
-      name: `account_id_${i}`,
-      value: billingAccountFilter(source),
-      type: 'STRING' as const,
-    },
-  ]);
-}
-
-export function requestedSourcesSql(sources: DataSource[]): string {
-  return sources
-    .map(
-      (_source, i) => `
-  SELECT
-    :data_source_id_${i} AS data_source_id,
-    :provider_name_${i} AS provider_name,
-    :account_id_${i} AS account_id`,
-    )
-    .join('\n  UNION ALL\n');
-}
-
-export function joinedBillingRowsSql(sources: DataSource[], table: string): string {
-  return /* sql */ `
-WITH requested AS (
-${requestedSourcesSql(sources)}
-),
-matched AS (
-  SELECT
-    r.data_source_id,
-    r.provider_name AS source_provider_name,
-    b.*
-  FROM ${table} b
-  JOIN requested r
-    ON (
-      r.account_id IS NOT NULL
-      AND b.BillingAccountId = r.account_id
-    )
-    OR (
-      r.account_id IS NULL
-      AND LOWER(TRIM(COALESCE(b.ProviderName, r.provider_name))) = r.provider_name
-    )
-)
-`;
-}
-
-function billingAccountFilter(source: DataSource): string | null {
-  if (isDatabricksDefaultAccount(source)) return null;
-  return isGcpProvider(source.providerName)
-    ? normalizeGcpBillingAccountId(source.accountId)
-    : source.accountId;
-}
-
 export function providerNameSql(fallback = "'Unknown'"): string {
   return `COALESCE(NULLIF(TRIM(ProviderName), ''), ${fallback}, 'Unknown')`;
+}
+
+export function rollupRowsSql(table: string): string {
+  const providerSql = providerNameSql();
+  return /* sql */ `
+WITH matched AS (
+  SELECT
+    CONCAT(
+      LOWER(${providerSql}),
+      ':',
+      COALESCE(NULLIF(TRIM(BillingAccountId), ''), 'unknown')
+    ) AS data_source_id,
+    ${providerSql} AS source_provider_name,
+    b.*
+  FROM ${table} b
+)
+`;
 }
 
 export function buildDailySql(cte: string): string {
@@ -207,7 +144,7 @@ ${cte}
 SELECT
   data_source_id,
   date_format(x_ChargeDate, 'yyyy-MM-dd') AS usage_date,
-  COALESCE(ProviderName, source_provider_name) AS provider_name,
+  source_provider_name AS provider_name,
   COALESCE(NULLIF(TRIM(ServiceCategory), ''), 'Unknown') AS service_category,
   COALESCE(NULLIF(TRIM(ServiceName), ''), 'Unknown') AS service_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
@@ -225,7 +162,7 @@ ${cte}
 , resources AS (
   SELECT
     data_source_id,
-    COALESCE(ProviderName, source_provider_name) AS provider_name,
+    source_provider_name AS provider_name,
     SubAccountId,
     MAX(SubAccountName) AS SubAccountName,
     x_BillingMonth,

@@ -6,27 +6,9 @@ import {
   buildOverviewServicesStatement,
   buildOverviewSkusStatement,
   buildDailySql,
-  joinedBillingRowsSql,
   rangeParams,
-  sourceJoinParams,
-  type DataSource,
+  rollupRowsSql,
 } from '@finlake/shared';
-
-function fakeSource(overrides: Partial<DataSource> = {}): DataSource {
-  const accountId = overrides.accountId ?? 'default';
-  return {
-    name: `source-${accountId}`,
-    providerName: 'databricks',
-    accountId,
-    tableName: 'usage',
-    focusVersion: null,
-    pipelineId: null,
-    enabled: true,
-    config: {},
-    updatedAt: new Date().toISOString(),
-    ...overrides,
-  };
-}
 
 test('rangeParams includes only the time range', () => {
   const range = { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' };
@@ -36,55 +18,42 @@ test('rangeParams includes only the time range', () => {
   assert.deepEqual(names, ['start_ts', 'end_ts']);
 });
 
-test('sourceJoinParams binds source keys and billing accounts', () => {
-  const params = sourceJoinParams([
-    fakeSource({ providerName: 'aws', accountId: '123456789012' }),
-    fakeSource({ providerName: 'gcp', accountId: 'ABCDEF_123456_ABCDEF' }),
-  ]);
-
-  assert.equal(params.find((p) => p.name === 'data_source_id_0')?.value, 'aws:123456789012');
-  assert.equal(params.find((p) => p.name === 'account_id_0')?.value, '123456789012');
-  assert.equal(params.find((p) => p.name === 'account_id_1')?.value, 'ABCDEF-123456-ABCDEF');
-});
-
-test('joinedBillingRowsSql joins requested enabled sources to the rollup table', () => {
-  const sql = joinedBillingRowsSql([fakeSource()], '`catalog`.`gold`.`usage_daily`');
+test('rollupRowsSql reads the rollup table directly without requested source filtering', () => {
+  const sql = rollupRowsSql('`catalog`.`gold`.`usage_daily`');
 
   assert.ok(sql.includes('matched AS'));
-  assert.ok(sql.includes('requested AS'));
   assert.ok(sql.includes('`catalog`.`gold`.`usage_daily`'));
-  assert.ok(sql.includes(':data_source_id_0 AS data_source_id'));
-  assert.ok(sql.includes('JOIN requested'));
-  assert.ok(sql.includes('BillingAccountId = r.account_id'));
-  assert.ok(sql.includes('r.account_id IS NULL'));
-  assert.ok(
-    sql.includes('LOWER(TRIM(COALESCE(b.ProviderName, r.provider_name))) = r.provider_name'),
-  );
+  assert.ok(sql.includes('AS data_source_id'));
+  assert.ok(sql.includes('AS source_provider_name'));
+  assert.ok(!sql.includes('requested AS'));
+  assert.ok(!sql.includes('JOIN requested'));
 });
 
-test('buildOverviewDailyStatement returns null without enabled sources', () => {
+test('buildOverviewDailyStatement reads usage_daily even without configured sources', () => {
   const statement = buildOverviewDailyStatement(
-    [],
     { catalog_name: 'finops', gold_schema_name: 'gold' },
     { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' },
   );
 
-  assert.equal(statement, null);
+  assert.deepEqual(
+    statement.params.map((param) => param.name),
+    ['start_ts', 'end_ts'],
+  );
+  assert.ok(!statement.query.includes('JOIN requested'));
 });
 
-test('overview service and SKU statements bind source join params', () => {
-  const sources = [fakeSource({ providerName: 'aws', accountId: '123456789012' })];
+test('overview service and SKU statements bind only range params', () => {
   const settings = { catalog_name: 'finops', gold_schema_name: 'gold' };
   const range = { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' };
 
   for (const buildStatement of [buildOverviewServicesStatement, buildOverviewSkusStatement]) {
-    const statement = buildStatement(sources, settings, range);
+    const statement = buildStatement(settings, range);
 
-    assert.ok(statement);
     assert.deepEqual(
       statement.params.map((param) => param.name),
-      ['start_ts', 'end_ts', 'data_source_id_0', 'provider_name_0', 'account_id_0'],
+      ['start_ts', 'end_ts'],
     );
+    assert.ok(!statement.query.includes('JOIN requested'));
   }
 });
 
