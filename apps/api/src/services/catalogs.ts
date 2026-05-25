@@ -7,7 +7,9 @@ import {
   quoteIdent,
   quotePrincipal,
   schemaGrantPrivileges,
+  type CatalogSchemaSummary,
   type CatalogSummary,
+  type CatalogTableSummary,
   type Env,
   type MedallionSchema,
   type ProvisionResult,
@@ -30,6 +32,24 @@ const HIDDEN_CATALOG_TYPES = new Set(['DELTASHARING_CATALOG']);
 interface CatalogInfoLike {
   name?: string;
   catalog_type?: string;
+  comment?: string;
+}
+
+interface SchemaInfoLike {
+  name?: string;
+  full_name?: string;
+  catalog_name?: string;
+  catalog_type?: string;
+  comment?: string;
+}
+
+interface TableInfoLike {
+  name?: string;
+  full_name?: string;
+  catalog_name?: string;
+  schema_name?: string;
+  table_type?: string;
+  data_source_format?: string;
   comment?: string;
 }
 
@@ -76,7 +96,89 @@ export async function listAccessibleCatalogs(
   return filterSelectableCatalogs(collected);
 }
 
+export async function listAccessibleSchemas(
+  env: Env,
+  userToken: string | undefined,
+  catalogName: string,
+): Promise<CatalogSchemaSummary[]> {
+  if (!userToken) throw new CatalogServiceError('OBO access token required', 401);
+  const wc = buildUserWorkspaceClient(env, userToken);
+  if (!wc) throw new CatalogServiceError('DATABRICKS_HOST not configured', 500);
+  const collected: CatalogSchemaSummary[] = [];
+  try {
+    for await (const schema of wc.schemas.list({
+      catalog_name: catalogName,
+      include_browse: true,
+    })) {
+      const s = schema as SchemaInfoLike;
+      if (!s.name) continue;
+      collected.push({
+        name: s.name,
+        fullName: s.full_name ?? null,
+        catalogName: s.catalog_name ?? null,
+        catalogType: s.catalog_type ?? null,
+        comment: s.comment ?? null,
+      });
+    }
+  } catch (err) {
+    logger.error({ err, catalogName }, 'wc.schemas.list failed');
+    throw new CatalogServiceError(
+      `Failed to list schemas in ${catalogName}: ${(err as Error).message}`,
+      isPermissionDenied(err) ? 403 : 502,
+    );
+  }
+  collected.sort((a, b) => a.name.localeCompare(b.name));
+  return collected;
+}
+
+export async function listAccessibleTables(
+  env: Env,
+  userToken: string | undefined,
+  catalogName: string,
+  schemaName: string,
+): Promise<CatalogTableSummary[]> {
+  if (!userToken) throw new CatalogServiceError('OBO access token required', 401);
+  const wc = buildUserWorkspaceClient(env, userToken);
+  if (!wc) throw new CatalogServiceError('DATABRICKS_HOST not configured', 500);
+  const collected: CatalogTableSummary[] = [];
+  try {
+    for await (const table of wc.tables.list({
+      catalog_name: catalogName,
+      schema_name: schemaName,
+      include_browse: true,
+      omit_columns: true,
+      omit_properties: true,
+      omit_username: true,
+    })) {
+      const t = table as TableInfoLike;
+      if (!t.name) continue;
+      collected.push({
+        name: t.name,
+        fullName: t.full_name ?? null,
+        catalogName: t.catalog_name ?? null,
+        schemaName: t.schema_name ?? null,
+        tableType: t.table_type ?? null,
+        dataSourceFormat: t.data_source_format ?? null,
+        comment: t.comment ?? null,
+      });
+    }
+  } catch (err) {
+    logger.error({ err, catalogName, schemaName }, 'wc.tables.list failed');
+    throw new CatalogServiceError(
+      `Failed to list tables in ${catalogName}.${schemaName}: ${(err as Error).message}`,
+      isPermissionDenied(err) ? 403 : 502,
+    );
+  }
+  collected.sort((a, b) => tableSortKey(a).localeCompare(tableSortKey(b)));
+  return collected;
+}
+
 export class CatalogServiceError extends WorkspaceServiceError {}
+
+function tableSortKey(table: CatalogTableSummary): string {
+  const recommended = table.name.startsWith('gcp_billing_export_resource_v1_') ? '0' : '1';
+  return `${recommended}:${table.name}`;
+}
 
 interface ProvisionOptions {
   createIfMissing?: boolean;

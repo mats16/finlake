@@ -20,6 +20,36 @@ export const CatalogListResponseSchema = z.object({
 });
 export type CatalogListResponse = z.infer<typeof CatalogListResponseSchema>;
 
+export const CatalogSchemaSummarySchema = z.object({
+  name: z.string().min(1),
+  fullName: z.string().nullable(),
+  catalogName: z.string().nullable(),
+  catalogType: z.string().nullable(),
+  comment: z.string().nullable(),
+});
+export type CatalogSchemaSummary = z.infer<typeof CatalogSchemaSummarySchema>;
+
+export const CatalogSchemaListResponseSchema = z.object({
+  schemas: z.array(CatalogSchemaSummarySchema),
+});
+export type CatalogSchemaListResponse = z.infer<typeof CatalogSchemaListResponseSchema>;
+
+export const CatalogTableSummarySchema = z.object({
+  name: z.string().min(1),
+  fullName: z.string().nullable(),
+  catalogName: z.string().nullable(),
+  schemaName: z.string().nullable(),
+  tableType: z.string().nullable(),
+  dataSourceFormat: z.string().nullable(),
+  comment: z.string().nullable(),
+});
+export type CatalogTableSummary = z.infer<typeof CatalogTableSummarySchema>;
+
+export const CatalogTableListResponseSchema = z.object({
+  tables: z.array(CatalogTableSummarySchema),
+});
+export type CatalogTableListResponse = z.infer<typeof CatalogTableListResponseSchema>;
+
 const SchemaEnsureStatus = z.enum(['ensured', 'error']);
 export type SchemaEnsureStatus = z.infer<typeof SchemaEnsureStatus>;
 

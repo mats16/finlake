@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { Env } from '@finlake/shared';
-import { provisionCatalogWithDeps } from '../src/services/catalogs.js';
+import { filterSelectableCatalogs, provisionCatalogWithDeps } from '../src/services/catalogs.js';
 import type { StatementExecutor } from '../src/services/statementExecution.js';
 
 class FakeExecutor {
@@ -17,6 +17,25 @@ class FakeExecutor {
 const env = {
   DATABRICKS_CLIENT_ID: 'sp-123',
 } as Env;
+
+test('filterSelectableCatalogs keeps foreign catalog entries for source pickers', () => {
+  const catalogs = filterSelectableCatalogs([
+    {
+      name: 'gcp_bigquery_catalog',
+      catalog_type: 'FOREIGN_CATALOG',
+      comment: 'Google Cloud BigQuery',
+    },
+    { name: 'system', catalog_type: 'SYSTEM_CATALOG' },
+  ]);
+
+  assert.deepEqual(catalogs, [
+    {
+      name: 'gcp_bigquery_catalog',
+      catalogType: 'FOREIGN_CATALOG',
+      comment: 'Google Cloud BigQuery',
+    },
+  ]);
+});
 
 test('provisionCatalog creates pricing schema, downloads volume, and grants', async () => {
   const executor = new FakeExecutor();

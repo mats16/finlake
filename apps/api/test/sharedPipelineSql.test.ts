@@ -4,6 +4,9 @@ import {
   awsUsageTableName,
   buildAwsFocusSilverPipelineSql,
 } from '../src/services/awsFocusTransformPipelineSql.js';
+import {
+  buildGcpFocusSilverPipelineSql,
+} from '../src/services/gcpFocusTransformPipelineSql.js';
 import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
 import {
@@ -14,9 +17,13 @@ import {
   DATABRICKS_ACCOUNT_PRICES_TABLE_DEFAULT,
   DATABRICKS_LIST_PRICES_TABLE_DEFAULT,
   DOWNLOADS_VOLUME_DEFAULT,
+  GCP_FOCUS_VERSION,
   MEDALLION_SCHEMA_DEFAULTS,
   PRICING_SCHEMA_DEFAULT,
+  gcpBillingAccountIdFromTableName,
+  gcpUsageTableName,
   medallionSchemaNamesFromSettings,
+  normalizeGcpBillingAccountId,
   quoteIdent,
 } from '@finlake/shared';
 
@@ -67,6 +74,14 @@ test('sourceSilverPipelineName follows ingest pipeline naming convention', () =>
       config: {},
     }),
     'finops-ingest-aws-123456789012-pipeline',
+  );
+  assert.equal(
+    sourceSilverPipelineName({
+      providerName: 'gcp',
+      accountId: 'ABCDEF-123456-ABCDEF',
+      config: { billingAccountId: 'ABCDEF_123456_ABCDEF' },
+    }),
+    'finops-ingest-gcp-ABCDEF-123456-ABCDEF-pipeline',
   );
 });
 
@@ -129,6 +144,91 @@ test('AWS FOCUS data export query includes AWS extension columns', () => {
   assert.match(AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT, /x_Operation/);
   assert.match(AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT, /x_ServiceCode/);
   assert.match(AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT, / FROM FOCUS_1_2_AWS$/);
+});
+
+test('gcp billing export helpers derive canonical source and target names', () => {
+  assert.equal(normalizeGcpBillingAccountId('ABCDEF_123456_ABCDEF'), 'ABCDEF-123456-ABCDEF');
+  assert.equal(
+    gcpBillingAccountIdFromTableName('gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF'),
+    'ABCDEF-123456-ABCDEF',
+  );
+  assert.equal(gcpUsageTableName('ABCDEF-123456-ABCDEF'), 'gcp_abcdef_123456_abcdef_usage');
+  assert.equal(GCP_FOCUS_VERSION, '1.2');
+});
+
+test('buildGcpFocusSilverPipelineSql maps detailed billing export into FOCUS columns', () => {
+  const sql = buildGcpFocusSilverPipelineSql({
+    tableName: 'gcp_abcdef_123456_abcdef_usage',
+    sourceCatalog: 'gcp_foreign',
+    sourceSchema: 'billing_export',
+    sourceTable: 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF',
+  });
+
+  assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `gcp_abcdef_123456_abcdef_usage`/);
+  assert.match(
+    sql,
+    /FROM `gcp_foreign`\.`billing_export`\.`gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF`/,
+  );
+  assert.match(
+    sql,
+    /replace\(CAST\(billing_account_id AS STRING\), '_', '-'\) AS BillingAccountId/,
+  );
+  assert.match(sql, /'Google Cloud' AS ProviderName/);
+  assert.match(sql, /CAST\(project\.id AS STRING\) AS SubAccountId/);
+  assert.match(
+    sql,
+    /CAST\(COALESCE\(resource\.global_name, resource\.name\) AS STRING\) AS ResourceId/,
+  );
+  assert.match(
+    sql,
+    /WHEN finlake_cost_type = 'regular'\s+THEN CAST\(usage\.amount_in_pricing_units AS DECIMAL\(30, 15\)\)/,
+  );
+  assert.match(sql, /map_from_entries\(/);
+  assert.match(sql, /WHEN 'rounding_error' THEN 'Adjustment'/);
+  assert.match(sql, /WHEN 'negotiated_discount' THEN 'Credit'/);
+  assert.match(sql, /THEN 'Correction'/);
+  assert.match(
+    sql,
+    /WHEN lower\(COALESCE\(finlake_is_unused_reservation, 'false'\)\) = 'true'\s+THEN 'Unused'/,
+  );
+  assert.doesNotMatch(sql, /resource\.global_name AS STRING\) NOT LIKE '%\/instances\/%'/);
+  assert.match(sql, /COALESCE\(cost_at_list_consumption_model, cost_at_list, cost\)/);
+  assert.match(sql, /COALESCE\(price\.list_price_consumption_model, price\.list_price\)/);
+  assert.match(sql, /COALESCE\(price\.effective_price, price\.effective_price_default\)/);
+  assert.match(sql, /to_utc_timestamp\(/);
+  assert.match(sql, /America\/Los_Angeles/);
+  assert.match(
+    sql,
+    /CAST\(COALESCE\(resource\.name, resource\.global_name\) AS STRING\) AS ResourceName/,
+  );
+  assert.match(sql, /regexp_extract\(CAST\(resource\.global_name AS STRING\)/);
+  assert.match(sql, /WHEN 'Compute Engine' THEN 'Compute'/);
+  assert.match(sql, /WHEN 'BigQuery' THEN 'Analytics'/);
+  assert.match(sql, /WHEN 'Cloud Storage' THEN 'Storage'/);
+  assert.match(sql, /compute\.googleapis\.com\/reservation_name/);
+  assert.match(sql, /compute\.googleapis\.com\/reservation_project_id/);
+  assert.match(sql, /subscription\.instance_id/);
+  assert.match(sql, /COMMITTED_USAGE_DISCOUNT/);
+  assert.match(sql, /CASE WHEN finlake_cost_type = 'regular' THEN CAST\(sku\.id AS STRING\)/);
+  assert.match(sql, /CASE WHEN finlake_cost_type = 'regular' THEN 'Standard'/);
+  assert.match(sql, /concat\('project:', CAST\(label\.key AS STRING\)\)/);
+  assert.match(sql, /concat\('system:', CAST\(label\.key AS STRING\)\)/);
+  assert.match(sql, /'tag:',\s+COALESCE\(CAST\(tag\.namespace AS STRING\), 'global'\)/);
+  assert.doesNotMatch(sql, /usage_daily/);
+  assert.doesNotMatch(sql, /gold_schema_name/);
+});
+
+test('buildGcpFocusSilverPipelineSql requires resource-level detailed billing export', () => {
+  assert.throws(
+    () =>
+      buildGcpFocusSilverPipelineSql({
+        tableName: 'gcp_usage',
+        sourceCatalog: 'gcp_foreign',
+        sourceSchema: 'billing_export',
+        sourceTable: 'gcp_billing_export_v1_ABCDEF_123456_ABCDEF',
+      }),
+    /resource-level detailed export table/,
+  );
 });
 
 test('buildFocusSilverPipelineSql keeps Databricks SkuPriceDetails as a map', () => {

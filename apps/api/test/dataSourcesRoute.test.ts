@@ -10,6 +10,7 @@ import {
   PROVIDER_AWS,
   PROVIDER_CUSTOM,
   PROVIDER_DATABRICKS,
+  PROVIDER_GCP,
   type DataSource,
   type Env,
 } from '@finlake/shared';
@@ -229,6 +230,39 @@ test('POST /configurations rejects duplicate custom table registrations', async 
     assert.equal(first.status, 201);
     assert.equal(second.status, 409);
     assert.match(second.body.error.message, /already registered/);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates Google Cloud row with source config reflected', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'gcp',
+        name: 'Google Cloud billing',
+        providerName: 'Google Cloud',
+        accountId: 'ABCDEF_123456_ABCDEF',
+        tableName: 'gcp_abcdef_123456_abcdef_usage',
+        config: {
+          billingAccountId: 'ABCDEF_123456_ABCDEF',
+          sourceCatalog: 'gcp_foreign',
+          sourceSchema: 'billing_export',
+          sourceTable: 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF',
+        },
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_GCP);
+    assert.equal(body.accountId, 'ABCDEF-123456-ABCDEF');
+    assert.equal(body.focusVersion, '1.2');
+    assert.equal(body.config.billingAccountId, 'ABCDEF-123456-ABCDEF');
+    assert.equal(body.config.sourceCatalog, 'gcp_foreign');
+    assert.equal(body.config.sourceSchema, 'billing_export');
+    assert.equal(body.config.sourceTable, 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF');
   } finally {
     await env.close();
   }

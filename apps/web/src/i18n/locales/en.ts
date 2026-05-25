@@ -1110,11 +1110,16 @@ export const en = {
       awsAccountsTitle: 'AWS accounts',
       customEmpty: 'No custom data sources have been added yet.',
       customSourcesTitle: 'Custom data sources',
+      gcpEmpty: 'No Google Cloud billing accounts match this view.',
+      gcpAccountsTitle: 'Google Cloud billing accounts',
       connectAccount: 'Connect account',
       selectedSettings: 'Settings for AWS account {account}',
       configureAccount: 'Configure AWS account {account}',
+      gcpSelectedSettings: 'Settings for Google Cloud billing account {account}',
       moreActions: 'More actions',
       openInAws: 'Open in AWS',
+      cloudBilling: 'Cloud Billing',
+      openInGcp: 'Open in Google Cloud',
       remove: 'Remove',
       connectIntro: {
         title: 'Connect Your Account',
@@ -1279,6 +1284,37 @@ export const en = {
         error: 'Failed',
       },
     },
+    gcp: {
+      title: 'BigQuery billing export',
+      description: 'Transforms Google Cloud detailed billing export tables into FOCUS format.',
+      connectTitle: 'Connect Google Cloud billing',
+      connectDescription:
+        'Use an existing Databricks Foreign Catalog for the BigQuery dataset that contains the Cloud Billing detailed export.',
+      useExistingForeignCatalog: 'Use existing Foreign Catalog',
+      modalDescription: 'Select the Google Cloud billing data table exported to BigQuery.',
+      catalog: 'Catalog',
+      schema: 'Schema (BigQuery dataset)',
+      table: 'Table',
+      sourceTable: 'Source table',
+      catalogPlaceholder: 'Select a Foreign Catalog',
+      schemaPlaceholder: 'Select a schema',
+      tablePlaceholder: 'Select gcp_billing_export_resource_v1_*',
+      noTables: 'No tables are visible in this schema.',
+      detailedExportRequired:
+        'Resource-level detailed export is required for FOCUS conversion. In Google Cloud Billing export settings, enable Detailed usage cost with Enable detailed export, then select the gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID> table.',
+      resourceProgress: 'Creation progress',
+      resourceSteps: {
+        sourceGrants: 'Foreign Catalog grants',
+        lakeflowJob: 'Lakeflow Spark Declarative Pipelines',
+      },
+      resourceStepStatus: {
+        idle: 'Waiting',
+        pending: 'Creating',
+        done: 'Created',
+        skipped: 'Skipped',
+        error: 'Failed',
+      },
+    },
     azure: {
       title: 'Configure Azure Cost Management Export',
       placeholder: 'storage account name',
@@ -1305,7 +1341,7 @@ export const en = {
         subtitle: '',
       },
       gcp: {
-        description: 'Coming soon.',
+        description: 'BigQuery detailed billing export',
         subtitle: '',
       },
       snowflake: {

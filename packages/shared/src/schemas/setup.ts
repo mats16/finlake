@@ -4,6 +4,7 @@ export const SetupStepIdSchema = z.enum([
   'systemTables',
   'permissions',
   'awsCur',
+  'gcpBilling',
   'azureExport',
   'tagging',
 ]);

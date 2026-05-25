@@ -2,6 +2,7 @@ import {
   DATA_SOURCE_TEMPLATES,
   isAwsProvider,
   isDatabricksProvider,
+  isGcpProvider,
   tableLeafName,
   type DataSource,
   type DataSourceTemplate,
@@ -63,7 +64,13 @@ export const DATA_SOURCE_TEMPLATE_REGISTRY: Record<string, DataSourceTemplateReg
     logo: { kind: 'aws' },
   },
   gcp: {
+    input: {
+      providerName: 'gcp',
+      defaultTableName: 'gcp_usage',
+      setupSteps: ['gcpBilling'],
+    },
     matches: [
+      { providerName: 'gcp', defaultTableName: 'gcp_usage' },
       { providerName: 'Google Cloud', defaultTableName: 'google_cloud_billing' },
       { providerName: 'GCP', defaultTableName: 'gcp_billing' },
     ],
@@ -128,6 +135,7 @@ export function findTemplateForRow(row: {
 export const LEGACY_TEMPLATE_NAMES: Record<string, string[]> = {
   databricks_focus13: ['Databricks System Tables'],
   aws: ['Amazon Web Services'],
+  gcp: ['Google Cloud Platform', 'GCP'],
 };
 
 export const PRICING_AWS_TEMPLATE: DataSourceTemplate = {
@@ -163,6 +171,7 @@ export function displayNameForRow(row: { name: string }, template: DataSourceTem
 export function rowMatchesTemplate(row: DataSource, template: DataSourceTemplate): boolean {
   if (template.id === 'aws') return isAwsProvider(row.providerName);
   if (template.id === 'databricks_focus13') return isDatabricksProvider(row.providerName);
+  if (template.id === 'gcp') return isGcpProvider(row.providerName);
   return findTemplateForRow(row)?.id === template.id;
 }
 

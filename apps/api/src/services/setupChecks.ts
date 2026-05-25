@@ -22,6 +22,8 @@ export async function runSetupCheck(
       return await checkPermissions(env, checkedAt, userToken, selectedWarehouseIdFromInput(input));
     case 'awsCur':
       return checkAwsCur(input, checkedAt);
+    case 'gcpBilling':
+      return checkGcpBilling(input, checkedAt);
     case 'azureExport':
       return checkAzureExport(input, checkedAt);
     case 'tagging':
@@ -183,6 +185,43 @@ function checkAwsCur(input: Record<string, unknown>, checkedAt: string): SetupCh
     status: 'ok',
     message: `Marked CUR bucket: ${bucket}. Validate the manifest exists in s3://${bucket}/cur/finlake/`,
     details: { bucket },
+    checkedAt,
+  };
+}
+
+function checkGcpBilling(input: Record<string, unknown>, checkedAt: string): SetupCheckResult {
+  const table =
+    typeof input.table === 'string' && input.table.trim().length > 0
+      ? input.table.trim()
+      : undefined;
+  if (!table) {
+    return {
+      step: 'gcpBilling',
+      status: 'warning',
+      message: 'Google Cloud billing export table not selected yet',
+      remediation: {
+        cli: 'Create a Databricks Foreign Catalog for BigQuery, then select gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>.',
+      },
+      checkedAt,
+    };
+  }
+  if (!table.startsWith('gcp_billing_export_resource_v1_')) {
+    return {
+      step: 'gcpBilling',
+      status: 'warning',
+      message: 'Google Cloud resource-level detailed export table is required',
+      remediation: {
+        cli: 'Enable Detailed usage cost with Enable detailed export in Google Cloud Billing export settings, then select gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>.',
+      },
+      details: { table },
+      checkedAt,
+    };
+  }
+  return {
+    step: 'gcpBilling',
+    status: 'ok',
+    message: `Marked Google Cloud billing export table: ${table}`,
+    details: { table },
     checkedAt,
   };
 }
