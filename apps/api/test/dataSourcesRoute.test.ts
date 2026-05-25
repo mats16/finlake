@@ -14,7 +14,9 @@ import {
   type DataSource,
   type Env,
 } from '@finlake/shared';
-import { dataSourcesRouter } from '../src/routes/dataSources.js';
+import { errorHandler } from '../src/middlewares/error.js';
+import { dataSourcesRouter, type DataSourcesRouterDeps } from '../src/routes/dataSources.js';
+import { PipelineRunPermissionError } from '../src/services/pipelinePermissions.js';
 
 interface Harness {
   db: SqliteClient;
@@ -22,12 +24,22 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-async function startServer(): Promise<Harness> {
+async function startServer(deps: DataSourcesRouterDeps = {}): Promise<Harness> {
   const db = await SqliteClient.create({ sqlitePath: ':memory:' });
   const env: Env = EnvSchema.parse({});
   const app = express();
   app.use(express.json());
-  app.use('/api/integrations', dataSourcesRouter(db, env));
+  app.use(
+    '/api/integrations',
+    dataSourcesRouter(db, env, {
+      assertPipelineCanRun: async (pipelineId) => {
+        throw new Error(`Unexpected pipeline permission check in route test: ${pipelineId}`);
+      },
+      syncSharedPipeline: async () => {},
+      ...deps,
+    }),
+  );
+  app.use(errorHandler);
   const server: Server = app.listen(0);
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
   const { port } = server.address() as AddressInfo;
@@ -50,6 +62,20 @@ async function postJson<T = unknown>(
 ): Promise<{ status: number; body: T }> {
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => null)) as T;
+  return { status: res.status, body: parsed };
+}
+
+async function patchJson<T = unknown>(
+  base: string,
+  path: string,
+  body: unknown,
+): Promise<{ status: number; body: T }> {
+  const res = await fetch(`${base}${path}`, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -130,7 +156,13 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
 });
 
 test('POST /configurations creates custom row with external pipeline id and qualified table', async () => {
-  const env = await startServer();
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async () => {},
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
   try {
     const { status, body } = await postJson<DataSource>(
       env.base,
@@ -150,6 +182,63 @@ test('POST /configurations creates custom row with external pipeline id and qual
     assert.equal(body.tableName, 'custom_schema.custom_usage');
     assert.equal(body.pipelineId, 'pipeline-123');
     assert.equal(body.enabled, true);
+    assert.equal(syncCalls, 1);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations rejects custom row when app service principal cannot run the pipeline', async () => {
+  const calls: string[] = [];
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      calls.push(pipelineId);
+      throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+    },
+  });
+  try {
+    const { status, body } = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        pipelineId: 'pipeline-123',
+        enabled: true,
+      },
+    );
+    assert.equal(status, 403);
+    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
+    assert.deepEqual(calls, ['pipeline-123']);
+    assert.deepEqual(await env.db.repos.dataSources.list(), []);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations saves disabled custom draft without checking pipeline permission', async () => {
+  const env = await startServer({
+    assertPipelineCanRun: async () => {
+      throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+    },
+  });
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        pipelineId: 'pipeline-123',
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.enabled, false);
+    assert.equal(body.pipelineId, 'pipeline-123');
   } finally {
     await env.close();
   }
@@ -177,8 +266,52 @@ test('POST /configurations creates custom row without pipelineId', async () => {
   }
 });
 
-test('POST /configurations creates distinct custom rows for the same pipeline', async () => {
+test('POST /configurations rejects enabled custom row without pipelineId', async () => {
   const env = await startServer();
+  try {
+    const { status, body } = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        enabled: true,
+      },
+    );
+    assert.equal(status, 409);
+    assert.match(body.error.message, /cannot be enabled without a pipelineId/);
+    assert.deepEqual(await env.db.repos.dataSources.list(), []);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations rejects whitespace-only custom pipelineId', async () => {
+  const env = await startServer({ assertPipelineCanRun: async () => {} });
+  try {
+    const { status, body } = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        pipelineId: '   ',
+      },
+    );
+    assert.equal(status, 400);
+    assert.equal(body.error.message, 'Invalid input');
+    assert.deepEqual(await env.db.repos.dataSources.list(), []);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates distinct custom rows for the same pipeline', async () => {
+  const env = await startServer({ assertPipelineCanRun: async () => {} });
   try {
     const first = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
       templateId: 'custom',
@@ -202,6 +335,472 @@ test('POST /configurations creates distinct custom rows for the same pipeline', 
     assert.notEqual(first.body.accountId, second.body.accountId);
     assert.equal(first.body.pipelineId, 'pipeline-123');
     assert.equal(second.body.pipelineId, 'pipeline-123');
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations validates custom pipeline run permission before saving pipeline id', async () => {
+  const env = await startServer({
+    assertPipelineCanRun: async () => {
+      throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { pipelineId: 'pipeline-123' },
+    );
+    assert.equal(status, 403);
+    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations syncs the shared pipeline when enabling a custom data source', async () => {
+  const permissionChecks: string[] = [];
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      permissionChecks.push(pipelineId);
+    },
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+    });
+    assert.equal(created.status, 201);
+    assert.equal(syncCalls, 0);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { enabled: true },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.enabled, true);
+    assert.equal(syncCalls, 1);
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations trims whitespace-only pipelineId to null', async () => {
+  const env = await startServer({ assertPipelineCanRun: async () => {} });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { pipelineId: '   ' },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.pipelineId, null);
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations rejects clearing pipelineId on an enabled custom source', async () => {
+  const env = await startServer({ assertPipelineCanRun: async () => {} });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { pipelineId: '   ' },
+    );
+    assert.equal(status, 409);
+    assert.match(body.error.message, /cannot be enabled without a pipelineId/);
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.pipelineId, 'pipeline-123');
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations skips permission check and sync for unchanged custom pipeline id', async () => {
+  const permissionChecks: string[] = [];
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      permissionChecks.push(pipelineId);
+    },
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+    assert.equal(syncCalls, 1);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { pipelineId: 'pipeline-123' },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.pipelineId, 'pipeline-123');
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+    assert.equal(syncCalls, 1);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations does not revalidate enabled custom source pipeline on name edits', async () => {
+  const calls: string[] = [];
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      calls.push(pipelineId);
+      if (calls.length > 1) {
+        throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+      }
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { name: 'Renamed feed' },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.name, 'Renamed feed');
+    assert.deepEqual(calls, ['pipeline-123']);
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.name, 'Renamed feed');
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations revalidates enabled custom source pipeline on table edits', async () => {
+  const calls: string[] = [];
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      calls.push(pipelineId);
+      if (calls.length > 1) {
+        throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+      }
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { tableName: 'custom_usage_v2' },
+    );
+    assert.equal(status, 403);
+    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
+    assert.deepEqual(calls, ['pipeline-123', 'pipeline-123']);
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.tableName, 'custom_usage');
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations skips permission check and sync for custom config-only edits', async () => {
+  const permissionChecks: string[] = [];
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      permissionChecks.push(pipelineId);
+    },
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+      enabled: true,
+      config: { owner: 'finance' },
+    });
+    assert.equal(created.status, 201);
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+    assert.equal(syncCalls, 1);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { config: { owner: 'platform' } },
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(body.config, { owner: 'platform' });
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+    assert.equal(syncCalls, 1);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations removes custom row when shared pipeline sync fails', async () => {
+  const env = await startServer({
+    assertPipelineCanRun: async () => {},
+    syncSharedPipeline: async () => {
+      throw new Error('sync failed');
+    },
+  });
+  try {
+    const { status, body } = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        pipelineId: 'pipeline-123',
+        enabled: true,
+      },
+    );
+    assert.equal(status, 500);
+    assert.equal(body.error.message, 'sync failed');
+    assert.deepEqual(await env.db.repos.dataSources.list(), []);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations restores previous row when shared pipeline sync fails', async () => {
+  const env = await startServer({
+    assertPipelineCanRun: async () => {},
+    syncSharedPipeline: async () => {
+      throw new Error('sync failed');
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { enabled: true },
+    );
+    assert.equal(status, 500);
+    assert.equal(body.error.message, 'sync failed');
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.enabled, false);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations syncs managed source disable while another source remains enabled', async () => {
+  let syncCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const databricks = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'databricks_focus13',
+      name: 'Databricks',
+      providerName: 'databricks',
+      tableName: 'databricks_usage',
+      enabled: true,
+    });
+    const aws = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'aws',
+      name: 'AWS',
+      providerName: 'aws',
+      accountId: '123456789012',
+      tableName: 'aws_usage',
+      enabled: true,
+    });
+    assert.equal(databricks.status, 201);
+    assert.equal(aws.status, 201);
+    assert.equal(syncCalls, 2);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations/aws/123456789012',
+      { enabled: false },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.enabled, false);
+    assert.equal(syncCalls, 3);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations accepts registered AWS config with equivalent object values', async () => {
+  const env = await startServer();
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'aws',
+      name: 'AWS',
+      providerName: 'aws',
+      accountId: '123456789012',
+      tableName: 'aws_usage',
+      config: {
+        awsAccountId: '123456789012',
+        externalLocationName: 'aws_ext_loc',
+        externalLocationUrl: 's3://billing/export',
+        exportName: 'cur2',
+        s3Prefix: 'cur/',
+        storageCredentialName: { b: 2, a: 1 },
+      },
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations/aws/123456789012',
+      {
+        config: {
+          awsAccountId: '123456789012',
+          externalLocationName: 'aws_ext_loc',
+          externalLocationUrl: 's3://billing/export',
+          exportName: 'cur2',
+          s3Prefix: 'cur/',
+          storageCredentialName: { a: 1, b: 2 },
+        },
+      },
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(body.config.storageCredentialName, { a: 1, b: 2 });
+  } finally {
+    await env.close();
+  }
+});
+
+test('DELETE /configurations uses injected shared pipeline sync dependency', async () => {
+  let syncCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'databricks_focus13',
+      name: 'Databricks',
+      providerName: 'databricks',
+      tableName: 'databricks_usage',
+      enabled: true,
+    });
+    await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'aws',
+      name: 'AWS',
+      providerName: 'aws',
+      accountId: '123456789012',
+      tableName: 'aws_usage',
+      enabled: true,
+    });
+    assert.equal(syncCalls, 2);
+
+    const res = await fetch(`${env.base}/api/integrations/configurations/aws/123456789012`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 204);
+    assert.equal(syncCalls, 3);
   } finally {
     await env.close();
   }

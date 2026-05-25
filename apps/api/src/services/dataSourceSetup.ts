@@ -55,9 +55,7 @@ import {
   buildAwsFocusSilverPipelineSql,
 } from './awsFocusTransformPipelineSql.js';
 import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineSql.js';
-import {
-  buildGcpFocusSilverPipelineSql,
-} from './gcpFocusTransformPipelineSql.js';
+import { buildGcpFocusSilverPipelineSql } from './gcpFocusTransformPipelineSql.js';
 import { grantStatements } from './focusPermissions.js';
 
 interface FocusConfig {

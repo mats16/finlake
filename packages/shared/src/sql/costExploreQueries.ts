@@ -2,6 +2,7 @@ import type { DataSource } from '../schemas/dataSource.js';
 import type { SqlParam } from '../schemas/sql.js';
 import type { UsageRange } from '../schemas/usage.js';
 import {
+  providerNameSql,
   baseParams,
   joinedBillingRowsSql,
   usageTableName,
@@ -60,8 +61,8 @@ interface GroupField {
 
 const GROUP_FIELDS: Record<CostExploreGroupKey, GroupField> = {
   provider: {
-    valueSql: "COALESCE(NULLIF(TRIM(ProviderName), ''), source_provider_name, 'Unknown')",
-    labelSql: "COALESCE(NULLIF(TRIM(ProviderName), ''), source_provider_name, 'Unknown')",
+    valueSql: providerNameSql('source_provider_name'),
+    labelSql: providerNameSql('source_provider_name'),
   },
   billingAccount: {
     valueSql: "COALESCE(NULLIF(TRIM(BillingAccountId), ''), 'Unknown')",

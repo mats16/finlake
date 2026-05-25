@@ -78,7 +78,7 @@ export function buildOverviewServicesStatement(
 ${cte}
 SELECT
   data_source_id,
-  COALESCE(ProviderName, source_provider_name) AS provider_name,
+  ${providerNameSql('source_provider_name')} AS provider_name,
   COALESCE(ServiceName, ServiceCategory, 'Unknown') AS service_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM matched
@@ -104,7 +104,7 @@ export function buildOverviewSkusStatement(
 ${cte}
 SELECT
   data_source_id,
-  COALESCE(ProviderName, source_provider_name) AS provider_name,
+  ${providerNameSql('source_provider_name')} AS provider_name,
   COALESCE(SkuId, SkuMeter, ServiceName, 'Unknown') AS sku_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
 FROM matched
@@ -132,6 +132,13 @@ export function baseParams(sources: DataSource[], range: UsageRange): SqlParam[]
     { name: 'start_ts', value: range.start, type: 'TIMESTAMP' },
     { name: 'end_ts', value: range.end, type: 'TIMESTAMP' },
     ...sourceJoinParams(sources),
+  ];
+}
+
+export function rangeParams(range: UsageRange): SqlParam[] {
+  return [
+    { name: 'start_ts', value: range.start, type: 'TIMESTAMP' },
+    { name: 'end_ts', value: range.end, type: 'TIMESTAMP' },
   ];
 }
 
@@ -190,13 +197,17 @@ function billingAccountFilter(source: DataSource): string | null {
     : source.accountId;
 }
 
+export function providerNameSql(fallback = "'Unknown'"): string {
+  return `COALESCE(NULLIF(TRIM(ProviderName), ''), ${fallback}, 'Unknown')`;
+}
+
 export function buildDailySql(cte: string): string {
   return /* sql */ `
 ${cte}
 SELECT
   data_source_id,
   date_format(x_ChargeDate, 'yyyy-MM-dd') AS usage_date,
-  COALESCE(ProviderName, source_provider_name) AS provider_name,
+  ${providerNameSql('source_provider_name')} AS provider_name,
   COALESCE(NULLIF(TRIM(ServiceCategory), ''), 'Unknown') AS service_category,
   COALESCE(NULLIF(TRIM(ServiceName), ''), 'Unknown') AS service_name,
   CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS cost_usd
@@ -214,7 +225,7 @@ ${cte}
 , resources AS (
   SELECT
     data_source_id,
-    COALESCE(ProviderName, source_provider_name) AS provider_name,
+    ${providerNameSql('source_provider_name')} AS provider_name,
     SubAccountId,
     MAX(SubAccountName) AS SubAccountName,
     x_BillingMonth,

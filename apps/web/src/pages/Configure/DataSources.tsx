@@ -52,7 +52,7 @@ export interface DatabricksFocusDraft {
 
 const FALLBACK_TEMPLATE: DataSourceTemplate = {
   id: 'custom',
-  name: 'Custom data source',
+  name: 'Custom',
   description: '',
   subtitle: '',
   focus_version: null,
@@ -84,7 +84,18 @@ function templateForRow(row: DataSource): DataSourceTemplate {
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {
-  return template.id === 'aws' || template.id === 'custom' || template.id === 'gcp';
+  return template.id === 'aws' || template.id === 'gcp';
+}
+
+function mergeDataSourceTemplates(
+  fallbackTemplates: DataSourceTemplate[],
+  apiTemplates: DataSourceTemplate[] | undefined,
+): DataSourceTemplate[] {
+  const templatesById = new Map(fallbackTemplates.map((template) => [template.id, template]));
+  for (const template of apiTemplates ?? []) {
+    templatesById.set(template.id, template);
+  }
+  return Array.from(templatesById.values());
 }
 
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
@@ -109,6 +120,7 @@ export function DataSources() {
   const createDs = useCreateDataSource();
 
   const rows = dataSources.data?.items ?? [];
+  const displayRows = rows;
   const pricingSummaries = useMemo(() => {
     const pricingRows = pricing.data?.items ?? [];
     return PRICING_PROVIDER_CONFIGS.map((config) => {
@@ -123,7 +135,7 @@ export function DataSources() {
   const hasRegisteredPricingData = pricingSummaries.some((summary) => summary.registered);
   const unregisteredPricingSummaries = pricingSummaries.filter((summary) => !summary.registered);
   const availableTemplates = useMemo(
-    () => templates.data?.items ?? DATA_SOURCE_TEMPLATES,
+    () => mergeDataSourceTemplates(DATA_SOURCE_TEMPLATES, templates.data?.items),
     [templates.data?.items],
   );
 
@@ -192,7 +204,7 @@ export function DataSources() {
         </div>
       </div>
 
-      {rows.length === 0 && !hasRegisteredPricingData ? (
+      {displayRows.length === 0 && !hasRegisteredPricingData ? (
         <p className="text-muted-foreground text-sm italic">{t('dataSources.empty')}</p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
@@ -206,7 +218,7 @@ export function DataSources() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => {
+              {displayRows.map((row) => {
                 const tpl = templateForRow(row);
                 const registryEntry = getTemplateRegistryEntry(tpl);
                 return (

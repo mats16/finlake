@@ -1,3 +1,4 @@
+import { Database } from 'lucide-react';
 import type { DataSourceTemplate, TemplateLogo } from './dataSourceCatalog';
 import databricksLogoUrl from '../../assets/databricks-logo.svg';
 import awsLogoUrl from '../../assets/aws-logo.svg';
@@ -14,6 +15,18 @@ export function VendorLogo({
   size?: number;
 }) {
   const imageSize = Math.round(size * 0.82);
+
+  if (logo?.kind === 'database') {
+    return (
+      <div className="grid place-items-center" style={{ width: size, height: size }} aria-hidden>
+        <Database
+          className="text-muted-foreground"
+          style={{ width: imageSize, height: imageSize }}
+          aria-hidden
+        />
+      </div>
+    );
+  }
 
   if (logo?.kind === 'databricks') {
     return (

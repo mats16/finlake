@@ -25,16 +25,6 @@ export function usageRouter(db: DatabaseClient, env: Env): Router {
 
   const routes: ReadonlyArray<RouteSpec<unknown>> = [
     {
-      path: '/daily',
-      cachePrefix: 'usage:daily',
-      fetch: (q, range) => q.daily(range),
-      format: (rows) => ({
-        rows,
-        totalUsd: (rows as { costUsd: number }[]).reduce((sum, r) => sum + r.costUsd, 0),
-        cachedAt: null,
-      }),
-    },
-    {
       path: '/by-sku',
       cachePrefix: 'usage:bySku',
       fetch: (q, range) => q.bySku(range),

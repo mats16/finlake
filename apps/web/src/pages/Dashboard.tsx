@@ -250,11 +250,11 @@ export function Dashboard() {
     enabled: sqlEnabled && coverageStatement !== null,
     requestKey: ['overview', 'coverage', sources, settings],
   });
-  const activeProviders = useMemo(() => uniqueProviders(sources), [sources]);
   const dailyRows = historyDaily.rows;
   const skuRows = currentSkus.rows;
   const serviceRows = currentServices.rows;
   const coverageRows = coverage.rows;
+  const activeProviders = useMemo(() => uniqueProviders(sources), [sources]);
 
   const overview = useMemo(() => {
     const now = new Date();

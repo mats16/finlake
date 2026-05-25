@@ -17,3 +17,16 @@ export function isPermissionDenied(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /PERMISSION_DENIED|not authorized/i.test(message);
 }
+
+export function isNotFound(err: unknown): boolean {
+  if (err != null && typeof err === 'object') {
+    const errorCode = 'errorCode' in err ? (err as { errorCode: unknown }).errorCode : undefined;
+    const status = 'status' in err ? (err as { status: unknown }).status : undefined;
+    const statusCode =
+      'statusCode' in err ? (err as { statusCode: unknown }).statusCode : undefined;
+    if (errorCode === 'RESOURCE_DOES_NOT_EXIST' || status === 404 || statusCode === 404) {
+      return true;
+    }
+  }
+  return false;
+}

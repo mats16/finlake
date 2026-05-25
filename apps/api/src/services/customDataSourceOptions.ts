@@ -42,7 +42,7 @@ export async function listCustomDataSourceOptions(
     buildAppWorkspaceClient(env);
   if (!wc) {
     throw new CustomDataSourceOptionsError(
-      'DATABRICKS_HOST and app credentials or an OBO access token are required to list custom data source resources.',
+      'DATABRICKS_HOST and app service principal credentials or an OBO access token are required to list custom data source resources. Grant the app service principal CAN_RUN on selected pipelines before enabling a custom source.',
       401,
     );
   }
