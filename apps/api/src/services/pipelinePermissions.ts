@@ -165,7 +165,7 @@ async function currentPrincipalAliases(wc: WorkspaceClient, env: Env): Promise<P
   for (const value of [env.DATABRICKS_CLIENT_ID, current.applicationId]) {
     addPrincipalAlias(aliases.servicePrincipal, value);
   }
-  addPrincipalAlias(aliases.user, current.userName);
+  addUserAlias(aliases, current.userName);
   for (const group of current.groups ?? []) {
     addPrincipalAlias(aliases.group, group.display);
   }
@@ -180,4 +180,11 @@ function aliasSetMatches(aliases: Set<string>, value: string | undefined): boole
 function addPrincipalAlias(aliases: Set<string>, value: string | undefined): void {
   const normalized = normalizePrincipal(value);
   if (normalized) aliases.add(normalized);
+}
+
+function addUserAlias(aliases: PrincipalAliases, value: string | undefined): void {
+  const normalized = normalizePrincipal(value);
+  if (normalized && !aliases.servicePrincipal.has(normalized)) {
+    aliases.user.add(normalized);
+  }
 }

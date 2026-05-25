@@ -108,7 +108,7 @@ export function dataSourcesRouter(
         });
         return;
       }
-      if (isCustomTemplate && pipelineId) {
+      if (isCustomTemplate && parsed.data.enabled === true && pipelineId) {
         await assertPipelineCanRun(pipelineId);
       }
       if (isCustomTemplate && parsed.data.enabled === true && !pipelineId) {
@@ -140,10 +140,16 @@ export function dataSourcesRouter(
         try {
           await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
         } catch (err) {
-          await db.repos.dataSources.delete({
-            providerName: created.providerName,
-            accountId: created.accountId,
-          });
+          try {
+            await db.repos.dataSources.delete({
+              providerName: created.providerName,
+              accountId: created.accountId,
+            });
+          } catch (cleanupErr) {
+            console.warn(
+              `[dataSources] Failed to delete DB row ${created.providerName}/${created.accountId} after shared pipeline sync failure: ${(cleanupErr as Error).message}`,
+            );
+          }
           throw err;
         }
       }
@@ -231,7 +237,7 @@ export function dataSourcesRouter(
           await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
         } catch (err) {
           try {
-            await restoreDataSource(db, key, existing);
+            await restoreDataSource(db, key, existing, parsed.data);
           } catch (restoreErr) {
             console.warn(
               `[dataSources] Failed to restore DB row ${key.providerName}/${key.accountId} after shared pipeline sync failure: ${(restoreErr as Error).message}`,
@@ -505,18 +511,23 @@ async function restoreDataSource(
   source: {
     name: string;
     tableName: string;
-    focusVersion: string | null;
     pipelineId: string | null;
     enabled: boolean;
     config: Record<string, unknown>;
   },
+  patch: {
+    name?: string;
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
 ): Promise<void> {
-  await db.repos.dataSources.update(key, {
-    name: source.name,
-    tableName: source.tableName,
-    focusVersion: source.focusVersion,
-    pipelineId: source.pipelineId,
-    enabled: source.enabled,
-    config: source.config,
-  });
+  const rollback: typeof patch = {};
+  if (patch.name !== undefined) rollback.name = source.name;
+  if (patch.tableName !== undefined) rollback.tableName = source.tableName;
+  if (patch.pipelineId !== undefined) rollback.pipelineId = source.pipelineId;
+  if (patch.enabled !== undefined) rollback.enabled = source.enabled;
+  if (patch.config !== undefined) rollback.config = source.config;
+  await db.repos.dataSources.update(key, rollback);
 }

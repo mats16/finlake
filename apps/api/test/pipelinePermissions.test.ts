@@ -112,6 +112,10 @@ test('assertAppServicePrincipalCanRunPipeline keeps principal types separate', a
             all_permissions: [{ permission_level: 'CAN_RUN' }],
           },
           {
+            user_name: 'application-id-123',
+            all_permissions: [{ permission_level: 'CAN_RUN' }],
+          },
+          {
             group_name: 'application-id-123',
             all_permissions: [{ permission_level: 'CAN_RUN' }],
           },

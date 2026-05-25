@@ -206,12 +206,39 @@ test('POST /configurations rejects custom row when app service principal cannot 
         providerName: 'custom',
         tableName: 'custom_usage',
         pipelineId: 'pipeline-123',
+        enabled: true,
       },
     );
     assert.equal(status, 403);
     assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
     assert.deepEqual(calls, ['pipeline-123']);
     assert.deepEqual(await env.db.repos.dataSources.list(), []);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations saves disabled custom draft without checking pipeline permission', async () => {
+  const env = await startServer({
+    assertPipelineCanRun: async () => {
+      throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+    },
+  });
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        pipelineId: 'pipeline-123',
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.enabled, false);
+    assert.equal(body.pipelineId, 'pipeline-123');
   } finally {
     await env.close();
   }
@@ -376,7 +403,7 @@ test('PATCH /configurations syncs the shared pipeline when enabling a custom dat
     assert.equal(status, 200);
     assert.equal(body.enabled, true);
     assert.equal(syncCalls, 1);
-    assert.deepEqual(permissionChecks, ['pipeline-123', 'pipeline-123']);
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
   } finally {
     await env.close();
   }

@@ -685,9 +685,9 @@ export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}
       qc.setQueryData(dataSourceQueryKey(data), data);
       if (invalidateOnSuccess) {
         qc.invalidateQueries({ queryKey: ['dataSources'] });
+        qc.invalidateQueries({ queryKey: ['appSettings'] });
+        qc.invalidateQueries({ queryKey: ['transformations'] });
       }
-      qc.invalidateQueries({ queryKey: ['appSettings'] });
-      qc.invalidateQueries({ queryKey: ['transformations'] });
     },
   });
 }
