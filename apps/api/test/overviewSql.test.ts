@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCoverageSql, buildDailySql, rangeParams, usageRollupRowsSql } from '@finlake/shared';
+import {
+  buildCoverageSql,
+  buildOverviewDailyStatement,
+  buildDailySql,
+  joinedBillingRowsSql,
+  rangeParams,
+  sourceJoinParams,
+  type DataSource,
+} from '@finlake/shared';
+
+function fakeSource(overrides: Partial<DataSource> = {}): DataSource {
+  const accountId = overrides.accountId ?? 'default';
+  return {
+    name: `source-${accountId}`,
+    providerName: 'databricks',
+    accountId,
+    tableName: 'usage',
+    focusVersion: null,
+    pipelineId: null,
+    enabled: true,
+    config: {},
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
 
 test('rangeParams includes only the time range', () => {
   const range = { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' };
@@ -10,14 +34,36 @@ test('rangeParams includes only the time range', () => {
   assert.deepEqual(names, ['start_ts', 'end_ts']);
 });
 
-test('usageRollupRowsSql directly reads the rollup table', () => {
-  const sql = usageRollupRowsSql('`catalog`.`gold`.`usage_daily`', 'usage_daily');
+test('sourceJoinParams binds source keys and billing accounts', () => {
+  const params = sourceJoinParams([
+    fakeSource({ providerName: 'aws', accountId: '123456789012' }),
+    fakeSource({ providerName: 'gcp', accountId: 'ABCDEF_123456_ABCDEF' }),
+  ]);
+
+  assert.equal(params.find((p) => p.name === 'data_source_id_0')?.value, 'aws:123456789012');
+  assert.equal(params.find((p) => p.name === 'account_id_0')?.value, '123456789012');
+  assert.equal(params.find((p) => p.name === 'account_id_1')?.value, 'ABCDEF-123456-ABCDEF');
+});
+
+test('joinedBillingRowsSql joins requested enabled sources to the rollup table', () => {
+  const sql = joinedBillingRowsSql([fakeSource()], '`catalog`.`gold`.`usage_daily`');
 
   assert.ok(sql.includes('matched AS'));
+  assert.ok(sql.includes('requested AS'));
   assert.ok(sql.includes('`catalog`.`gold`.`usage_daily`'));
-  assert.ok(sql.includes("'usage_daily' AS data_source_id"));
-  assert.ok(!sql.includes('JOIN requested'));
-  assert.ok(!sql.includes('BillingAccountId = r.account_id'));
+  assert.ok(sql.includes(':data_source_id_0 AS data_source_id'));
+  assert.ok(sql.includes('JOIN requested'));
+  assert.ok(sql.includes('BillingAccountId = r.account_id'));
+});
+
+test('buildOverviewDailyStatement returns null without enabled sources', () => {
+  const statement = buildOverviewDailyStatement(
+    [],
+    { catalog_name: 'finops', gold_schema_name: 'gold' },
+    { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' },
+  );
+
+  assert.equal(statement, null);
 });
 
 test('buildDailySql preserves all months and groups by 5 dimensions', () => {
@@ -34,19 +80,19 @@ test('buildDailySql preserves all months and groups by 5 dimensions', () => {
   );
 });
 
-test('buildCoverageSql filters by per-provider latest billing month', () => {
+test('buildCoverageSql filters by per-source latest billing month', () => {
   const sql = buildCoverageSql('-- cte --');
 
   assert.ok(sql.includes('-- cte --'));
   assert.ok(sql.includes('resources AS'));
-  assert.ok(sql.includes('latest_month_per_provider AS'));
-  assert.match(sql, /GROUP BY 1, 2, 3, 5, 6, 7\s*\)\s*, latest_month_per_provider AS/);
-  assert.ok(sql.includes('GROUP BY provider_name'));
-  assert.ok(sql.includes('JOIN latest_month_per_provider'));
-  assert.ok(sql.includes('r.provider_name = lm.provider_name'));
+  assert.ok(sql.includes('latest_month_per_source AS'));
+  assert.match(sql, /GROUP BY 1, 2, 3, 5, 6, 7\s*\)\s*, latest_month_per_source AS/);
+  assert.ok(sql.includes('GROUP BY data_source_id'));
+  assert.ok(sql.includes('JOIN latest_month_per_source'));
+  assert.ok(sql.includes('r.data_source_id = lm.data_source_id'));
   assert.ok(sql.includes('r.x_BillingMonth = lm.max_month'));
   assert.ok(
     !sql.includes('WHERE r.x_BillingMonth = (SELECT MAX(x_BillingMonth) FROM resources)'),
-    'cross-provider MAX would drop providers whose latest month lags behind',
+    'cross-source MAX would drop data sources whose latest month lags behind',
   );
 });

@@ -1,9 +1,10 @@
+import type { DataSource } from '../schemas/dataSource.js';
 import type { SqlParam } from '../schemas/sql.js';
 import type { UsageRange } from '../schemas/usage.js';
 import {
   providerNameSql,
-  rangeParams,
-  usageRollupRowsSql,
+  baseParams,
+  joinedBillingRowsSql,
   usageTableName,
   type SqlStatementInput,
 } from './overviewQueries.js';
@@ -44,6 +45,7 @@ export interface CostExploreFilterSelection {
 export type CostExploreFilters = Partial<Record<CostExploreFilterKey, CostExploreFilterSelection>>;
 
 export interface CostExploreStatementOptions {
+  sources: DataSource[];
   settings: Record<string, string | undefined>;
   range: UsageRange;
   groupBy: CostExploreGroupKey[];
@@ -59,8 +61,8 @@ interface GroupField {
 
 const GROUP_FIELDS: Record<CostExploreGroupKey, GroupField> = {
   provider: {
-    valueSql: providerNameSql(),
-    labelSql: providerNameSql(),
+    valueSql: providerNameSql('source_provider_name'),
+    labelSql: providerNameSql('source_provider_name'),
   },
   billingAccount: {
     valueSql: "COALESCE(NULLIF(TRIM(BillingAccountId), ''), 'Unknown')",
@@ -101,15 +103,17 @@ const FILTER_FIELDS: Record<CostExploreFilterKey, string> = {
 };
 
 export function buildCostExploreStatement({
+  sources,
   settings,
   range,
   groupBy,
   filters = {},
   costMetric = 'EffectiveCost',
   dateGrain = 'daily',
-}: CostExploreStatementOptions): SqlStatementInput {
+}: CostExploreStatementOptions): SqlStatementInput | null {
+  if (sources.length === 0) return null;
   assertCostMetric(costMetric);
-  const cte = usageRollupRowsSql(usageTableName('daily', settings).sql, 'usage_daily');
+  const cte = joinedBillingRowsSql(sources, usageTableName('daily', settings).sql);
   const groupKeys = normalizeGroupKeys(groupBy);
   const { whereSql, params } = buildFilterSql(filters);
   const periodSql = dateBucketSql(dateGrain);
@@ -141,15 +145,17 @@ WHERE CAST(x_ChargeDate AS TIMESTAMP) >= :start_ts
 GROUP BY ${groupByIndexes.join(', ')}
 ORDER BY 1, ${selectItems.length} DESC
 `,
-    params: [...rangeParams(range), ...params],
+    params: [...baseParams(sources, range), ...params],
   };
 }
 
 export function buildCostExploreFilterValuesStatement(
+  sources: DataSource[],
   settings: Record<string, string | undefined>,
   range: UsageRange,
-): SqlStatementInput {
-  const cte = usageRollupRowsSql(usageTableName('daily', settings).sql, 'usage_daily');
+): SqlStatementInput | null {
+  if (sources.length === 0) return null;
+  const cte = joinedBillingRowsSql(sources, usageTableName('daily', settings).sql);
   return {
     query: /* sql */ `
 ${cte}
@@ -166,7 +172,7 @@ WHERE CAST(x_ChargeDate AS TIMESTAMP) >= :start_ts
 GROUP BY 1, 2, 3, 4, 5
 ORDER BY 6 DESC
 `,
-    params: rangeParams(range),
+    params: baseParams(sources, range),
   };
 }
 

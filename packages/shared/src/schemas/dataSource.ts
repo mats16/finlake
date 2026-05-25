@@ -180,6 +180,11 @@ export const DataSourceTableNameSchema = z
     );
   }, 'must be one to three dot-separated Unity Catalog identifiers');
 
+const DataSourcePipelineIdInputSchema = z
+  .string()
+  .max(256)
+  .transform((value) => value.trim() || null);
+
 export const DataSourceSchema = z.object({
   name: z.string().min(1).max(256),
   providerName: DataSourceProviderNameSchema,
@@ -199,7 +204,7 @@ export const DataSourceCreateBodySchema = z.object({
   providerName: DataSourceProviderNameSchema,
   accountId: DataSourceAccountIdSchema.optional(),
   tableName: DataSourceTableNameSchema,
-  pipelineId: z.string().min(1).max(256).optional(),
+  pipelineId: DataSourcePipelineIdInputSchema.optional(),
   enabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
@@ -208,7 +213,7 @@ export type DataSourceCreateBody = z.infer<typeof DataSourceCreateBodySchema>;
 export const DataSourceUpdateBodySchema = z.object({
   name: z.string().min(1).max(256).optional(),
   tableName: DataSourceTableNameSchema.optional(),
-  pipelineId: z.string().min(1).max(256).nullable().optional(),
+  pipelineId: DataSourcePipelineIdInputSchema.nullable().optional(),
   enabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });

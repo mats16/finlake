@@ -28,7 +28,7 @@ import {
 } from '../services/customDataSourceOptions.js';
 import {
   PipelineRunPermissionError,
-  assertAppServicePrincipalCanRunPipeline,
+  createAppServicePrincipalPipelineRunAsserter,
 } from '../services/pipelinePermissions.js';
 
 const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
@@ -54,17 +54,16 @@ export function dataSourcesRouter(
 ): Router {
   const router = Router();
   const assertPipelineCanRun =
-    deps.assertPipelineCanRun ??
-    ((pipelineId: string) => assertAppServicePrincipalCanRunPipeline(env, pipelineId));
+    deps.assertPipelineCanRun ?? createAppServicePrincipalPipelineRunAsserter(env);
   const syncSharedPipeline = deps.syncSharedPipeline ?? (() => syncSharedFocusPipeline(env, db));
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
   });
 
-  router.get('/custom-options', async (_req, res, next) => {
+  router.get('/custom-options', async (req, res, next) => {
     try {
-      res.json(await listCustomDataSourceOptions(db, env));
+      res.json(await listCustomDataSourceOptions(db, env, req.user?.accessToken));
     } catch (err) {
       if (err instanceof CustomDataSourceOptionsError) {
         res.status(err.statusCode).json({ error: { message: err.message } });
@@ -96,7 +95,7 @@ export function dataSourcesRouter(
         return;
       }
       const isCustomTemplate = parsed.data.templateId === 'custom';
-      const pipelineId = parsed.data.pipelineId?.trim() || null;
+      const pipelineId = parsed.data.pipelineId ?? null;
       if (isCustomTemplate && (await customTableAlreadyRegistered(db, parsed.data.tableName))) {
         res.status(409).json({
           error: {
@@ -107,6 +106,12 @@ export function dataSourcesRouter(
       }
       if (isCustomTemplate && pipelineId) {
         await assertPipelineCanRun(pipelineId);
+      }
+      if (isCustomTemplate && parsed.data.enabled === true && !pipelineId) {
+        res.status(409).json({
+          error: { message: 'Custom data source must have a pipelineId before enabling.' },
+        });
+        return;
       }
       const accountId = accountIdForCreate(
         isCustomTemplate,
@@ -127,8 +132,16 @@ export function dataSourcesRouter(
         enabled: parsed.data.enabled ?? false,
         config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
       });
-      if (customSourceNeedsPipelineSync(created)) {
-        await syncSharedPipeline();
+      if (sourceNeedsPipelineSync(created)) {
+        try {
+          await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
+        } catch (err) {
+          await db.repos.dataSources.delete({
+            providerName: created.providerName,
+            accountId: created.accountId,
+          });
+          throw err;
+        }
       }
       const refreshed = await db.repos.dataSources.get({
         providerName: created.providerName,
@@ -189,13 +202,29 @@ export function dataSourcesRouter(
           return;
         }
       }
-      const pipelineIdToCheck = pipelineIdForRunPermissionCheck(existing, parsed.data);
+      const nextCandidate = { ...existing, ...parsed.data };
+      if (
+        isCustomProvider(existing.providerName) &&
+        nextCandidate.enabled &&
+        !nextCandidate.pipelineId
+      ) {
+        res.status(409).json({
+          error: { message: 'Custom data source must have a pipelineId before enabling.' },
+        });
+        return;
+      }
+      const pipelineIdToCheck = pipelineIdForRunPermissionCheck(nextCandidate);
       if (pipelineIdToCheck) {
         await assertPipelineCanRun(pipelineIdToCheck);
       }
       const updated = await db.repos.dataSources.update(key, parsed.data);
-      if (customSourceUpdateNeedsPipelineSync(existing, updated, parsed.data)) {
-        await syncSharedPipeline();
+      if (sourceUpdateNeedsPipelineSync(existing, updated, parsed.data)) {
+        try {
+          await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
+        } catch (err) {
+          await restoreDataSource(db, key, existing);
+          throw err;
+        }
       }
       res.json(updated);
     } catch (err) {
@@ -219,7 +248,7 @@ export function dataSourcesRouter(
       await db.repos.dataSources.delete(key);
       if (existing.enabled) {
         try {
-          await syncSharedFocusPipeline(env, db);
+          await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
         } catch (err) {
           console.warn(
             `[dataSources] Deleted DB row ${key.providerName}/${key.accountId} but failed to refresh the shared pipeline: ${(err as Error).message}`,
@@ -362,30 +391,70 @@ function sendPipelineRunPermissionError(err: unknown, res: Response): boolean {
   return true;
 }
 
-function pipelineIdForRunPermissionCheck(
-  source: { providerName: string; pipelineId: string | null },
-  patch: { pipelineId?: string | null; enabled?: boolean },
-): string | null {
+function pipelineIdForRunPermissionCheck(source: {
+  providerName: string;
+  pipelineId: string | null;
+  enabled: boolean;
+}): string | null {
   if (!isCustomProvider(source.providerName)) return null;
-  if (patch.pipelineId !== undefined) return patch.pipelineId?.trim() || null;
-  return patch.enabled === true ? source.pipelineId : null;
+  return source.enabled ? source.pipelineId : null;
 }
 
-function customSourceNeedsPipelineSync(source: {
+function sourceNeedsPipelineSync(source: {
   providerName: string;
   enabled: boolean;
 }): boolean {
-  return isCustomProvider(source.providerName) && source.enabled;
+  return source.enabled;
 }
 
-function customSourceUpdateNeedsPipelineSync(
+function sourceUpdateNeedsPipelineSync(
   previous: { providerName: string; enabled: boolean },
   next: { enabled: boolean },
-  patch: { tableName?: string; pipelineId?: string | null; enabled?: boolean },
+  patch: {
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
 ): boolean {
-  if (!isCustomProvider(previous.providerName)) return false;
   const enabledChanged = patch.enabled !== undefined && patch.enabled !== previous.enabled;
+  if (enabledChanged) return true;
+  if (!next.enabled) return false;
+  if (!isCustomProvider(previous.providerName)) {
+    return patch.tableName !== undefined || patch.config !== undefined;
+  }
   const activeSourceChanged =
     next.enabled && (patch.tableName !== undefined || patch.pipelineId !== undefined);
-  return enabledChanged || activeSourceChanged;
+  return activeSourceChanged;
+}
+
+async function syncSharedPipelineIfAnyEnabled(
+  db: DatabaseClient,
+  syncSharedPipeline: () => Promise<void>,
+): Promise<void> {
+  const enabledSources = (await db.repos.dataSources.list()).filter((source) => source.enabled);
+  if (enabledSources.length === 0) return;
+  await syncSharedPipeline();
+}
+
+async function restoreDataSource(
+  db: DatabaseClient,
+  key: DataSourceKey,
+  source: {
+    name: string;
+    tableName: string;
+    focusVersion: string | null;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+): Promise<void> {
+  await db.repos.dataSources.update(key, {
+    name: source.name,
+    tableName: source.tableName,
+    focusVersion: source.focusVersion,
+    pipelineId: source.pipelineId,
+    enabled: source.enabled,
+    config: source.config,
+  });
 }

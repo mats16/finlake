@@ -166,7 +166,6 @@ export const PRICING_DATABRICKS_TEMPLATE: DataSourceTemplate = {
 };
 
 export function displayNameForRow(row: { name: string }, template: DataSourceTemplate): string {
-  if (template.id === 'custom') return template.name;
   const defaultNames = [template.name, ...(LEGACY_TEMPLATE_NAMES[template.id] ?? [])];
   return defaultNames.includes(row.name) ? template.name : row.name;
 }

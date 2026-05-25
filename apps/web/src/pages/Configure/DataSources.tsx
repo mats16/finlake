@@ -100,17 +100,18 @@ function mergeDataSourceTemplates(
 }
 
 function collapseCustomRows(rows: DataSource[]): DataSource[] {
-  const hasEnabledCustomSource = rows.some(
-    (row) => isCustomProvider(row.providerName) && row.enabled,
-  );
-  let customRowAdded = false;
+  const enabledCustom = rows.find((row) => isCustomProvider(row.providerName) && row.enabled);
+  const firstCustom = rows.find((row) => isCustomProvider(row.providerName));
+  const representative = enabledCustom ?? firstCustom;
+  if (!representative) return rows;
 
-  return rows.flatMap((row) => {
-    if (!isCustomProvider(row.providerName)) return [row];
-    if (customRowAdded) return [];
-    customRowAdded = true;
-    return [{ ...row, enabled: hasEnabledCustomSource }];
-  });
+  return rows.flatMap((row) =>
+    isCustomProvider(row.providerName)
+      ? row === representative
+        ? [{ ...representative, enabled: Boolean(enabledCustom) }]
+        : []
+      : [row],
+  );
 }
 
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
@@ -250,7 +251,11 @@ export function DataSources() {
                     <TableCell>
                       <div className="flex min-w-56 items-center gap-3">
                         <VendorLogo source={tpl} logo={registryEntry?.logo} size={32} />
-                        <div className="font-medium">{displayNameForRow(row, tpl)}</div>
+                        <div className="font-medium">
+                          {isCustomProvider(row.providerName)
+                            ? tpl.name
+                            : displayNameForRow(row, tpl)}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>

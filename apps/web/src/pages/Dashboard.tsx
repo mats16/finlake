@@ -48,6 +48,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Database,
   DollarSign,
   Sparkles,
   Tags,
@@ -217,50 +218,43 @@ export function Dashboard() {
   );
   const settings = appSettings.data?.settings ?? {};
   const historyDailyStatement = useMemo(
-    () => buildOverviewDailyStatement(settings, wideRange),
-    [settings, wideRange],
+    () => buildOverviewDailyStatement(sources, settings, wideRange),
+    [settings, sources, wideRange],
   );
   const currentServicesStatement = useMemo(
-    () => buildOverviewServicesStatement(settings, activeRange),
-    [activeRange, settings],
+    () => buildOverviewServicesStatement(sources, settings, activeRange),
+    [activeRange, settings, sources],
   );
   const currentSkusStatement = useMemo(
-    () => buildOverviewSkusStatement(settings, activeRange),
-    [activeRange, settings],
+    () => buildOverviewSkusStatement(sources, settings, activeRange),
+    [activeRange, settings, sources],
   );
-  const coverageStatement = useMemo(() => buildOverviewCoverageStatement(settings), [settings]);
-  const sqlEnabled = appSettings.isSuccess;
+  const coverageStatement = useMemo(
+    () => buildOverviewCoverageStatement(sources, settings),
+    [settings, sources],
+  );
+  const sqlEnabled = dataSources.isSuccess && appSettings.isSuccess;
   const historyDaily = useSqlStatement<FocusOverviewDailyRow>(historyDailyStatement, {
-    enabled: sqlEnabled,
-    requestKey: ['overview', 'historyDaily', wideRange, settings],
+    enabled: sqlEnabled && historyDailyStatement !== null,
+    requestKey: ['overview', 'historyDaily', wideRange, sources, settings],
   });
   const currentServices = useSqlStatement<FocusOverviewServiceRow>(currentServicesStatement, {
-    enabled: sqlEnabled,
-    requestKey: ['overview', 'currentServices', activeRange, settings],
+    enabled: sqlEnabled && currentServicesStatement !== null,
+    requestKey: ['overview', 'currentServices', activeRange, sources, settings],
   });
   const currentSkus = useSqlStatement<FocusOverviewSkuRow>(currentSkusStatement, {
-    enabled: sqlEnabled,
-    requestKey: ['overview', 'currentSkus', activeRange, settings],
+    enabled: sqlEnabled && currentSkusStatement !== null,
+    requestKey: ['overview', 'currentSkus', activeRange, sources, settings],
   });
   const coverage = useSqlStatement<FocusOverviewCoverageRow>(coverageStatement, {
-    enabled: sqlEnabled,
-    requestKey: ['overview', 'coverage', settings],
+    enabled: sqlEnabled && coverageStatement !== null,
+    requestKey: ['overview', 'coverage', sources, settings],
   });
   const dailyRows = historyDaily.rows;
   const skuRows = currentSkus.rows;
   const serviceRows = currentServices.rows;
   const coverageRows = coverage.rows;
-  const activeProviders = useMemo(
-    () =>
-      uniqueProviderNames([
-        ...sources.map((source) => source.providerName),
-        ...dailyRows.map((row) => row.providerName),
-        ...serviceRows.map((row) => row.providerName),
-        ...skuRows.map((row) => row.providerName),
-        ...coverageRows.map((row) => row.providerName),
-      ]),
-    [coverageRows, dailyRows, serviceRows, skuRows, sources],
-  );
+  const activeProviders = useMemo(() => uniqueProviders(sources), [sources]);
 
   const overview = useMemo(() => {
     const now = new Date();
@@ -342,6 +336,7 @@ export function Dashboard() {
   const hasAnyCostData = dailyRows.length > 0 || skuRows.length > 0;
 
   const loading =
+    dataSources.isLoading ||
     appSettings.isLoading ||
     historyDaily.isLoading ||
     currentServices.isLoading ||
@@ -409,6 +404,13 @@ export function Dashboard() {
           </div>
         </div>
       </header>
+
+      {dataSources.isSuccess && sources.length === 0 ? (
+        <Alert className="mb-4">
+          <Database />
+          <AlertDescription>{t('dashboard.noEnabledSources')}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {costError ? (
         <Alert variant="destructive" className="mb-4">
@@ -1131,11 +1133,11 @@ function providerForSource(source: DataSource): ProviderMeta {
   return PROVIDERS[normalizeProvider(source.providerName)];
 }
 
-function uniqueProviderNames(providerNames: string[]): ProviderMeta[] {
+function uniqueProviders(sources: DataSource[]): ProviderMeta[] {
   const seen = new Set<ProviderKey>();
   const providers: ProviderMeta[] = [];
-  for (const providerName of providerNames) {
-    const provider = PROVIDERS[normalizeProvider(providerName)];
+  for (const source of sources) {
+    const provider = providerForSource(source);
     if (seen.has(provider.key)) continue;
     seen.add(provider.key);
     providers.push(provider);

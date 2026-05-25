@@ -8,6 +8,7 @@ interface CurrentPrincipalLike {
   userName?: string;
   displayName?: string;
   externalId?: string;
+  applicationId?: string;
 }
 
 export async function currentServicePrincipalOwnerAliases(
@@ -29,7 +30,7 @@ export async function currentServicePrincipalOwnerAliases(
 export function requireAppWorkspaceClient(env: Env, ErrorClass: ServiceErrorCtor): WorkspaceClient {
   const wc = buildAppWorkspaceClient(env);
   if (!wc) {
-    throw new ErrorClass('Databricks app service principal credentials not configured', 500);
+    throw new ErrorClass('Databricks app service principal credentials not configured', 412);
   }
   return wc;
 }
@@ -65,5 +66,5 @@ function addOwnerAlias(aliases: Set<string>, value: string | undefined): void {
 
 function normalizeOwner(value: string | undefined): string | null {
   const trimmed = value?.trim();
-  return trimmed ? trimmed.toLocaleLowerCase() : null;
+  return trimmed ? trimmed.toLowerCase() : null;
 }
