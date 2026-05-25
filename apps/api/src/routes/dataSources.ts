@@ -213,7 +213,11 @@ export function dataSourcesRouter(
         });
         return;
       }
-      const pipelineIdToCheck = pipelineIdForRunPermissionCheck(nextCandidate);
+      const pipelineIdToCheck = pipelineIdForRunPermissionCheck(
+        existing,
+        nextCandidate,
+        parsed.data,
+      );
       if (pipelineIdToCheck) {
         await assertPipelineCanRun(pipelineIdToCheck);
       }
@@ -391,13 +395,24 @@ function sendPipelineRunPermissionError(err: unknown, res: Response): boolean {
   return true;
 }
 
-function pipelineIdForRunPermissionCheck(source: {
-  providerName: string;
-  pipelineId: string | null;
-  enabled: boolean;
-}): string | null {
-  if (!isCustomProvider(source.providerName)) return null;
-  return source.enabled ? source.pipelineId : null;
+function pipelineIdForRunPermissionCheck(
+  previous: {
+    providerName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+  },
+  next: {
+    pipelineId: string | null;
+    enabled: boolean;
+  },
+  patch: {
+    pipelineId?: string | null;
+    enabled?: boolean;
+  },
+): string | null {
+  if (!isCustomProvider(previous.providerName) || !next.pipelineId) return null;
+  const pipelineChanged = patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+  return next.enabled || pipelineChanged ? next.pipelineId : null;
 }
 
 function sourceNeedsPipelineSync(source: { providerName: string; enabled: boolean }): boolean {
