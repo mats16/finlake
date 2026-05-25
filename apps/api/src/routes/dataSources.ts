@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import type { DatabaseClient } from '@finlake/db';
 import { randomUUID } from 'node:crypto';
 import {
@@ -26,6 +26,10 @@ import {
   CustomDataSourceOptionsError,
   listCustomDataSourceOptions,
 } from '../services/customDataSourceOptions.js';
+import {
+  PipelineRunPermissionError,
+  assertAppServicePrincipalCanRunPipeline,
+} from '../services/pipelinePermissions.js';
 
 const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   'awsAccountId',
@@ -38,16 +42,27 @@ const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   's3Region',
 ];
 
-export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
+export interface DataSourcesRouterDeps {
+  assertPipelineCanRun?: (pipelineId: string) => Promise<void>;
+}
+
+export function dataSourcesRouter(
+  db: DatabaseClient,
+  env: Env,
+  deps: DataSourcesRouterDeps = {},
+): Router {
   const router = Router();
+  const assertPipelineCanRun =
+    deps.assertPipelineCanRun ??
+    ((pipelineId: string) => assertAppServicePrincipalCanRunPipeline(env, pipelineId));
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
   });
 
-  router.get('/custom-options', async (req, res, next) => {
+  router.get('/custom-options', async (_req, res, next) => {
     try {
-      res.json(await listCustomDataSourceOptions(db, env, req.user?.accessToken));
+      res.json(await listCustomDataSourceOptions(db, env));
     } catch (err) {
       if (err instanceof CustomDataSourceOptionsError) {
         res.status(err.statusCode).json({ error: { message: err.message } });
@@ -88,6 +103,9 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         });
         return;
       }
+      if (isCustomTemplate && pipelineId) {
+        await assertPipelineCanRun(pipelineId);
+      }
       const accountId = accountIdForCreate(
         isCustomTemplate,
         parsed.data.providerName,
@@ -109,6 +127,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       });
       res.status(201).json(created);
     } catch (err) {
+      if (sendPipelineRunPermissionError(err, res)) return;
       next(err);
     }
   });
@@ -161,9 +180,14 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
           return;
         }
       }
+      const pipelineIdToCheck = pipelineIdForRunPermissionCheck(existing, parsed.data);
+      if (pipelineIdToCheck) {
+        await assertPipelineCanRun(pipelineIdToCheck);
+      }
       const updated = await db.repos.dataSources.update(key, parsed.data);
       res.json(updated);
     } catch (err) {
+      if (sendPipelineRunPermissionError(err, res)) return;
       next(err);
     }
   });
@@ -318,4 +342,19 @@ function normalizeTableNameForComparison(tableName: string): string {
     .split('.')
     .map((part) => part.trim().toLowerCase())
     .join('.');
+}
+
+function sendPipelineRunPermissionError(err: unknown, res: Response): boolean {
+  if (!(err instanceof PipelineRunPermissionError)) return false;
+  res.status(err.statusCode).json({ error: { message: err.message } });
+  return true;
+}
+
+function pipelineIdForRunPermissionCheck(
+  source: { providerName: string; pipelineId: string | null },
+  patch: { pipelineId?: string | null; enabled?: boolean },
+): string | null {
+  if (!isCustomProvider(source.providerName)) return null;
+  if (patch.pipelineId !== undefined) return patch.pipelineId?.trim() || null;
+  return patch.enabled === true ? source.pipelineId : null;
 }

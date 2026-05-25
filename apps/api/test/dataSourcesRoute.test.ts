@@ -14,7 +14,9 @@ import {
   type DataSource,
   type Env,
 } from '@finlake/shared';
-import { dataSourcesRouter } from '../src/routes/dataSources.js';
+import { errorHandler } from '../src/middlewares/error.js';
+import { dataSourcesRouter, type DataSourcesRouterDeps } from '../src/routes/dataSources.js';
+import { PipelineRunPermissionError } from '../src/services/pipelinePermissions.js';
 
 interface Harness {
   db: SqliteClient;
@@ -22,12 +24,13 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-async function startServer(): Promise<Harness> {
+async function startServer(deps: DataSourcesRouterDeps = {}): Promise<Harness> {
   const db = await SqliteClient.create({ sqlitePath: ':memory:' });
   const env: Env = EnvSchema.parse({});
   const app = express();
   app.use(express.json());
-  app.use('/api/integrations', dataSourcesRouter(db, env));
+  app.use('/api/integrations', dataSourcesRouter(db, env, deps));
+  app.use(errorHandler);
   const server: Server = app.listen(0);
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
   const { port } = server.address() as AddressInfo;
@@ -50,6 +53,20 @@ async function postJson<T = unknown>(
 ): Promise<{ status: number; body: T }> {
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => null)) as T;
+  return { status: res.status, body: parsed };
+}
+
+async function patchJson<T = unknown>(
+  base: string,
+  path: string,
+  body: unknown,
+): Promise<{ status: number; body: T }> {
+  const res = await fetch(`${base}${path}`, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -130,7 +147,7 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
 });
 
 test('POST /configurations creates custom row with external pipeline id and qualified table', async () => {
-  const env = await startServer();
+  const env = await startServer({ assertPipelineCanRun: async () => {} });
   try {
     const { status, body } = await postJson<DataSource>(
       env.base,
@@ -150,6 +167,35 @@ test('POST /configurations creates custom row with external pipeline id and qual
     assert.equal(body.tableName, 'custom_schema.custom_usage');
     assert.equal(body.pipelineId, 'pipeline-123');
     assert.equal(body.enabled, true);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations rejects custom row when app service principal cannot run the pipeline', async () => {
+  const calls: string[] = [];
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      calls.push(pipelineId);
+      throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+    },
+  });
+  try {
+    const { status, body } = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        pipelineId: 'pipeline-123',
+      },
+    );
+    assert.equal(status, 403);
+    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
+    assert.deepEqual(calls, ['pipeline-123']);
+    assert.deepEqual(await env.db.repos.dataSources.list(), []);
   } finally {
     await env.close();
   }
@@ -178,7 +224,7 @@ test('POST /configurations creates custom row without pipelineId', async () => {
 });
 
 test('POST /configurations creates distinct custom rows for the same pipeline', async () => {
-  const env = await startServer();
+  const env = await startServer({ assertPipelineCanRun: async () => {} });
   try {
     const first = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
       templateId: 'custom',
@@ -202,6 +248,39 @@ test('POST /configurations creates distinct custom rows for the same pipeline', 
     assert.notEqual(first.body.accountId, second.body.accountId);
     assert.equal(first.body.pipelineId, 'pipeline-123');
     assert.equal(second.body.pipelineId, 'pipeline-123');
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations validates custom pipeline run permission before saving pipeline id', async () => {
+  const env = await startServer({
+    assertPipelineCanRun: async () => {
+      throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { pipelineId: 'pipeline-123' },
+    );
+    assert.equal(status, 403);
+    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId: created.body.accountId,
+    });
+    assert.equal(stored?.pipelineId, null);
   } finally {
     await env.close();
   }

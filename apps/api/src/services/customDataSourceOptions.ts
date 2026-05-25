@@ -7,7 +7,7 @@ import {
   type CustomDataSourceTableOption,
   type Env,
 } from '@finlake/shared';
-import { buildAppWorkspaceClient, buildUserWorkspaceClient } from './statementExecution.js';
+import { buildAppWorkspaceClient } from './statementExecution.js';
 import { WorkspaceServiceError, isPermissionDenied } from './workspaceClientErrors.js';
 
 export class CustomDataSourceOptionsError extends WorkspaceServiceError {}
@@ -35,14 +35,11 @@ interface TableListResponse {
 export async function listCustomDataSourceOptions(
   db: DatabaseClient,
   env: Env,
-  userToken: string | undefined,
 ): Promise<CustomDataSourceOptionsResponse> {
-  const wc =
-    (userToken ? buildUserWorkspaceClient(env, userToken) : undefined) ??
-    buildAppWorkspaceClient(env);
+  const wc = buildAppWorkspaceClient(env);
   if (!wc) {
     throw new CustomDataSourceOptionsError(
-      'DATABRICKS_HOST and app credentials or an OBO access token are required to list custom data source resources.',
+      'DATABRICKS_HOST and app service principal credentials are required to list custom data source resources.',
       401,
     );
   }
