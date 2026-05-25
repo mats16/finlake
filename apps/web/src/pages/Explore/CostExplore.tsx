@@ -44,6 +44,7 @@ import {
   BarChart3,
   CalendarDays,
   ChartLine,
+  Database,
   DollarSign,
   Filter,
   Grid2X2,
@@ -66,7 +67,7 @@ import {
 } from '@finlake/shared';
 import { PageHeader } from '../../components/PageHeader';
 import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
-import { useAppSettings, useSqlStatement } from '../../api/hooks';
+import { useAppSettings, useDataSources, useSqlStatement } from '../../api/hooks';
 import { useCurrencyUsd, useI18n, type TFunction } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
 
@@ -163,12 +164,14 @@ export function CostExplore() {
   const [costMetric, setCostMetric] = useState<CostExploreCostMetric>('EffectiveCost');
 
   const appSettings = useAppSettings();
+  const dataSources = useDataSources();
   const settings = useMemo(() => appSettings.data?.settings ?? {}, [appSettings.data?.settings]);
+  const hasEnabledSource = (dataSources.data?.items ?? []).some((source) => source.enabled);
   const presetRanges = useMemo(() => rangeForPreset(datePreset), [datePreset]);
   const range = presetRanges.current;
   const previous = presetRanges.previous;
   const sqlGrain: CostExploreDateGrain = aggregation === 'cumulative' ? 'daily' : aggregation;
-  const sqlEnabled = appSettings.isSuccess;
+  const sqlEnabled = appSettings.isSuccess && dataSources.isSuccess && hasEnabledSource;
 
   const currentStatement = useMemo(
     () =>
@@ -255,6 +258,7 @@ export function CostExplore() {
   const previousCost = summaryRows.reduce((sum, row) => sum + row.previousCost, 0);
   const changePct = previousCost > 0 ? ((totalCost - previousCost) / previousCost) * 100 : null;
   const loading =
+    dataSources.isLoading ||
     appSettings.isLoading ||
     current.isLoading ||
     previousData.isLoading ||
@@ -309,6 +313,13 @@ export function CostExplore() {
           </Select>
         </div>
       </div>
+
+      {dataSources.isSuccess && !hasEnabledSource ? (
+        <Alert className="mb-4">
+          <Database />
+          <AlertDescription>{t('dashboard.noEnabledSources')}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert variant="destructive" className="mb-4">

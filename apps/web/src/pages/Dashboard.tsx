@@ -48,6 +48,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Database,
   DollarSign,
   Sparkles,
   Tags,
@@ -211,6 +212,7 @@ export function Dashboard() {
   const budgets = useBudgets();
 
   const configuredSources = dataSources.data?.items ?? [];
+  const hasEnabledSource = configuredSources.some((source) => source.enabled);
   const settings = appSettings.data?.settings ?? {};
   const historyDailyStatement = useMemo(
     () => buildOverviewDailyStatement(settings, wideRange),
@@ -225,7 +227,7 @@ export function Dashboard() {
     [activeRange, settings],
   );
   const coverageStatement = useMemo(() => buildOverviewCoverageStatement(settings), [settings]);
-  const sqlEnabled = appSettings.isSuccess;
+  const sqlEnabled = appSettings.isSuccess && dataSources.isSuccess && hasEnabledSource;
   const historyDaily = useSqlStatement<FocusOverviewDailyRow>(historyDailyStatement, {
     enabled: sqlEnabled,
     requestKey: ['overview', 'historyDaily', wideRange, settings],
@@ -337,6 +339,7 @@ export function Dashboard() {
   const hasAnyCostData = dailyRows.length > 0 || skuRows.length > 0;
 
   const loading =
+    dataSources.isLoading ||
     appSettings.isLoading ||
     historyDaily.isLoading ||
     currentServices.isLoading ||
@@ -404,6 +407,13 @@ export function Dashboard() {
           </div>
         </div>
       </header>
+
+      {dataSources.isSuccess && !hasEnabledSource ? (
+        <Alert className="mb-4">
+          <Database />
+          <AlertDescription>{t('dashboard.noEnabledSources')}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {costError ? (
         <Alert variant="destructive" className="mb-4">
