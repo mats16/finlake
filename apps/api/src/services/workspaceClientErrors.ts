@@ -20,8 +20,7 @@ export function isPermissionDenied(err: unknown): boolean {
 
 export function isNotFound(err: unknown): boolean {
   if (err != null && typeof err === 'object') {
-    const errorCode =
-      'errorCode' in err ? (err as { errorCode: unknown }).errorCode : undefined;
+    const errorCode = 'errorCode' in err ? (err as { errorCode: unknown }).errorCode : undefined;
     const status = 'status' in err ? (err as { status: unknown }).status : undefined;
     const statusCode =
       'statusCode' in err ? (err as { statusCode: unknown }).statusCode : undefined;

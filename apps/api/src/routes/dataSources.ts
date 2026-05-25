@@ -400,10 +400,7 @@ function pipelineIdForRunPermissionCheck(source: {
   return source.enabled ? source.pipelineId : null;
 }
 
-function sourceNeedsPipelineSync(source: {
-  providerName: string;
-  enabled: boolean;
-}): boolean {
+function sourceNeedsPipelineSync(source: { providerName: string; enabled: boolean }): boolean {
   return source.enabled;
 }
 
