@@ -1193,10 +1193,6 @@ function gcpErrorStep(message: string): GcpSetupStepId {
   return 'lakeflowJob';
 }
 
-function isRequiredGcpDetailedBillingTable(tableName: string): boolean {
-  return isGcpDetailedBillingExportTable(tableName);
-}
-
 function isForeignCatalog(catalog: GcpCatalogOption): boolean {
   return (catalog.catalogType ?? '').toUpperCase() === 'FOREIGN_CATALOG';
 }
@@ -1263,7 +1259,7 @@ export function GcpFocusSection({
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const isSetup = Boolean(row?.enabled || result);
   const hasRequiredDetailedExport = sourceTable
-    ? isRequiredGcpDetailedBillingTable(sourceTable)
+    ? isGcpDetailedBillingExportTable(sourceTable)
     : false;
   const setupBusy = setupInFlight || createDs.isPending || setupDs.isPending;
   const setupDisabled =

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import {
   GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX,
   IDENT_RE,
-  isGcpDetailedBillingExportTable as sharedIsGcpDetailedBillingExportTable,
+  isGcpDetailedBillingExportTable,
   quoteIdent,
 } from '@finlake/shared';
 
@@ -15,7 +15,7 @@ export function buildGcpFocusSilverPipelineSql(opts: {
   if (!IDENT_RE.test(opts.tableName)) {
     throw new Error(`Invalid table identifier "${opts.tableName}"`);
   }
-  if (!sharedIsGcpDetailedBillingExportTable(opts.sourceTable)) {
+  if (!isGcpDetailedBillingExportTable(opts.sourceTable)) {
     throw new Error(
       `Google Cloud source table must be the resource-level detailed export table matching ${GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX}<BILLING_ACCOUNT_ID>`,
     );
