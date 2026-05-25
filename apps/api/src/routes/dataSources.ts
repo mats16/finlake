@@ -673,21 +673,45 @@ async function restoreDataSource(
 ): Promise<void> {
   const current = await db.repos.dataSources.get(key);
   if (!current) return;
+  if (!patchStillMatchesUpdated(current, updated, patch)) return;
   const rollback: typeof patch = {};
-  if (patch.name !== undefined && current.name === updated.name) rollback.name = source.name;
-  if (patch.tableName !== undefined && current.tableName === updated.tableName) {
-    rollback.tableName = source.tableName;
-  }
-  if (patch.pipelineId !== undefined && current.pipelineId === updated.pipelineId) {
-    rollback.pipelineId = source.pipelineId;
-  }
-  if (patch.enabled !== undefined && current.enabled === updated.enabled) {
-    rollback.enabled = source.enabled;
-  }
-  if (patch.config !== undefined && sameJsonValue(current.config, updated.config)) {
-    rollback.config = source.config;
-  }
+  if (patch.name !== undefined) rollback.name = source.name;
+  if (patch.tableName !== undefined) rollback.tableName = source.tableName;
+  if (patch.pipelineId !== undefined) rollback.pipelineId = source.pipelineId;
+  if (patch.enabled !== undefined) rollback.enabled = source.enabled;
+  if (patch.config !== undefined) rollback.config = source.config;
   if (Object.keys(rollback).length > 0) {
     await db.repos.dataSources.update(key, rollback);
   }
+}
+
+function patchStillMatchesUpdated(
+  current: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  updated: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  patch: {
+    name?: string;
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
+): boolean {
+  if (patch.name !== undefined && current.name !== updated.name) return false;
+  if (patch.tableName !== undefined && current.tableName !== updated.tableName) return false;
+  if (patch.pipelineId !== undefined && current.pipelineId !== updated.pipelineId) return false;
+  if (patch.enabled !== undefined && current.enabled !== updated.enabled) return false;
+  if (patch.config !== undefined && !sameJsonValue(current.config, updated.config)) return false;
+  return true;
 }

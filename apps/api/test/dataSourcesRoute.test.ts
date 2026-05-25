@@ -726,6 +726,51 @@ test('PATCH /configurations restores previous row when shared pipeline sync fail
   }
 });
 
+test('PATCH /configurations does not partially restore over concurrent updates', async () => {
+  let db: SqliteClient | null = null;
+  let accountId = '';
+  const env = await startServer({
+    assertPipelineCanRun: async () => {},
+    syncSharedPipeline: async () => {
+      if (!db) throw new Error('missing db');
+      await db.repos.dataSources.update(
+        { providerName: PROVIDER_CUSTOM, accountId },
+        { tableName: 'custom_usage_concurrent' },
+      );
+      throw new Error('sync failed');
+    },
+  });
+  db = env.db;
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+    });
+    assert.equal(created.status, 201);
+    accountId = created.body.accountId;
+
+    const { status, body } = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(accountId)}`,
+      { enabled: true, tableName: 'custom_usage_v2' },
+    );
+    assert.equal(status, 500);
+    assert.equal(body.error.message, 'sync failed');
+
+    const stored = await env.db.repos.dataSources.get({
+      providerName: PROVIDER_CUSTOM,
+      accountId,
+    });
+    assert.equal(stored?.enabled, true);
+    assert.equal(stored?.tableName, 'custom_usage_concurrent');
+  } finally {
+    await env.close();
+  }
+});
+
 test('PATCH /configurations syncs managed source disable while another source remains enabled', async () => {
   let syncCalls = 0;
   const env = await startServer({
