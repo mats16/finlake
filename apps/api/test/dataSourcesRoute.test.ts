@@ -318,10 +318,10 @@ test('POST /configurations rejects enabled custom row without pipelineId', async
   }
 });
 
-test('POST /configurations treats whitespace-only custom pipelineId as null', async () => {
+test('POST /configurations rejects whitespace-only custom pipelineId', async () => {
   const env = await startServer({ assertPipelineCanRun: async () => {} });
   try {
-    const { status, body } = await postJson<DataSource>(
+    const { status, body } = await postJson<{ error: { message: string } }>(
       env.base,
       '/api/integrations/configurations',
       {
@@ -332,8 +332,8 @@ test('POST /configurations treats whitespace-only custom pipelineId as null', as
         pipelineId: '   ',
       },
     );
-    assert.equal(status, 201);
-    assert.equal(body.pipelineId, null);
+    assert.equal(status, 400);
+    assert.equal(body.error.message, 'Invalid input');
   } finally {
     await env.close();
   }
@@ -438,7 +438,7 @@ test('PATCH /configurations syncs the shared pipeline when enabling a custom dat
   }
 });
 
-test('PATCH /configurations trims whitespace-only pipelineId to null', async () => {
+test('PATCH /configurations rejects whitespace-only pipelineId', async () => {
   const env = await startServer({ assertPipelineCanRun: async () => {} });
   try {
     const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
@@ -450,19 +450,19 @@ test('PATCH /configurations trims whitespace-only pipelineId to null', async () 
     });
     assert.equal(created.status, 201);
 
-    const { status, body } = await patchJson<DataSource>(
+    const { status, body } = await patchJson<{ error: { message: string } }>(
       env.base,
       `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
       { pipelineId: '   ' },
     );
-    assert.equal(status, 200);
-    assert.equal(body.pipelineId, null);
+    assert.equal(status, 400);
+    assert.equal(body.error.message, 'Invalid input');
 
     const stored = await env.db.repos.dataSources.get({
       providerName: PROVIDER_CUSTOM,
       accountId: created.body.accountId,
     });
-    assert.equal(stored?.pipelineId, null);
+    assert.equal(stored?.pipelineId, 'pipeline-123');
   } finally {
     await env.close();
   }
@@ -486,8 +486,8 @@ test('PATCH /configurations rejects clearing pipelineId on an enabled custom sou
       `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
       { pipelineId: '   ' },
     );
-    assert.equal(status, 409);
-    assert.match(body.error.message, /cannot be enabled without a pipelineId/);
+    assert.equal(status, 400);
+    assert.equal(body.error.message, 'Invalid input');
 
     const stored = await env.db.repos.dataSources.get({
       providerName: PROVIDER_CUSTOM,
@@ -766,6 +766,42 @@ test('PATCH /configurations syncs managed source disable while another source re
   }
 });
 
+test('PATCH /configurations cleans up shared pipeline when disabling the last enabled source', async () => {
+  let syncCalls = 0;
+  let cleanupCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+    cleanupSharedPipeline: async () => {
+      cleanupCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'databricks_focus13',
+      name: 'Databricks',
+      providerName: 'databricks',
+      tableName: 'databricks_usage',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+    assert.equal(syncCalls, 1);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations/databricks/default',
+      { enabled: false },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.enabled, false);
+    assert.equal(syncCalls, 1);
+    assert.equal(cleanupCalls, 1);
+  } finally {
+    await env.close();
+  }
+});
+
 test('PATCH /configurations syncs enabled managed source pipeline id changes', async () => {
   let syncCalls = 0;
   const env = await startServer({
@@ -840,6 +876,40 @@ test('PATCH /configurations accepts registered AWS config with equivalent object
   }
 });
 
+test('PATCH /configurations accepts registered AWS partial config without clearing locked keys', async () => {
+  const env = await startServer();
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'aws',
+      name: 'AWS',
+      providerName: 'aws',
+      accountId: '123456789012',
+      tableName: 'aws_usage',
+      config: {
+        awsAccountId: '123456789012',
+        externalLocationName: 'aws_ext_loc',
+        externalLocationUrl: 's3://billing/export',
+        exportName: 'cur2',
+        s3Prefix: 'cur/',
+        owner: 'finance',
+      },
+    });
+    assert.equal(created.status, 201);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations/aws/123456789012',
+      { config: { owner: 'platform' } },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.config.awsAccountId, '123456789012');
+    assert.equal(body.config.externalLocationName, 'aws_ext_loc');
+    assert.equal(body.config.owner, 'platform');
+  } finally {
+    await env.close();
+  }
+});
+
 test('DELETE /configurations uses injected shared pipeline sync dependency', async () => {
   let syncCalls = 0;
   const env = await startServer({
@@ -870,6 +940,38 @@ test('DELETE /configurations uses injected shared pipeline sync dependency', asy
     });
     assert.equal(res.status, 204);
     assert.equal(syncCalls, 3);
+  } finally {
+    await env.close();
+  }
+});
+
+test('DELETE /configurations cleans up shared pipeline when deleting the last enabled source', async () => {
+  let syncCalls = 0;
+  let cleanupCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+    cleanupSharedPipeline: async () => {
+      cleanupCalls += 1;
+    },
+  });
+  try {
+    await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'databricks_focus13',
+      name: 'Databricks',
+      providerName: 'databricks',
+      tableName: 'databricks_usage',
+      enabled: true,
+    });
+    assert.equal(syncCalls, 1);
+
+    const res = await fetch(`${env.base}/api/integrations/configurations/databricks/default`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 204);
+    assert.equal(syncCalls, 1);
+    assert.equal(cleanupCalls, 1);
   } finally {
     await env.close();
   }

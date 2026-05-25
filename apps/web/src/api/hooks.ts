@@ -692,6 +692,10 @@ export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}
   });
 }
 
+function dataSourcePatchAffectsSharedPipeline(body: DataSourceUpdateBody): boolean {
+  return body.enabled !== undefined || body.pipelineId !== undefined || body.tableName !== undefined;
+}
+
 export function useUpdateDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
   const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
@@ -701,12 +705,14 @@ export function useUpdateDataSource(opts: { invalidateOnSuccess?: boolean } = {}
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       qc.setQueryData(dataSourceQueryKey(data), data);
       if (invalidateOnSuccess) {
         qc.invalidateQueries({ queryKey: ['dataSources'] });
-        qc.invalidateQueries({ queryKey: ['appSettings'] });
-        qc.invalidateQueries({ queryKey: ['transformations'] });
+        if (dataSourcePatchAffectsSharedPipeline(variables.body)) {
+          qc.invalidateQueries({ queryKey: ['appSettings'] });
+          qc.invalidateQueries({ queryKey: ['transformations'] });
+        }
       }
     },
   });

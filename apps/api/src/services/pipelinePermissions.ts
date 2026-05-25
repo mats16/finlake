@@ -66,14 +66,7 @@ export function createAppServicePrincipalPipelineRunAsserter(
       aliasesCache = null;
     }
     if (!aliasesCache || currentTime >= aliasesCache.expiresAt) {
-      const aliasesPromise = currentPrincipalAliases(wcCache.client, env).catch((err) => {
-        if (aliasesCache?.promise === aliasesPromise) {
-          aliasesCache = null;
-          wcCache = null;
-        }
-        throw err;
-      });
-      aliasesCache = { promise: aliasesPromise, expiresAt: currentTime + cacheTtlMs };
+      aliasesCache = cachePrincipalAliases(wcCache.client, currentTime + cacheTtlMs);
     }
     try {
       await assertAppServicePrincipalCanRunPipeline(
@@ -83,19 +76,29 @@ export function createAppServicePrincipalPipelineRunAsserter(
         aliasesCache.promise,
       );
     } catch (err) {
-      if (!(err instanceof PipelineRunPermissionError) || err.statusCode !== 403 || !wcCache) {
+      if (!shouldRefreshAliasesAfterDenial(err) || !wcCache) {
         throw err;
       }
-      const refreshedAliases = currentPrincipalAliases(wcCache.client, env);
-      aliasesCache = { promise: refreshedAliases, expiresAt: now() + cacheTtlMs };
+      aliasesCache = cachePrincipalAliases(wcCache.client, now() + cacheTtlMs);
       await assertAppServicePrincipalCanRunPipeline(
         env,
         pipelineId,
         wcCache.client,
-        refreshedAliases,
+        aliasesCache.promise,
       );
     }
   };
+
+  function cachePrincipalAliases(client: WorkspaceClient, expiresAt: number) {
+    const aliasesPromise = currentPrincipalAliases(client, env).catch((err) => {
+      if (aliasesCache?.promise === aliasesPromise) {
+        aliasesCache = null;
+        wcCache = null;
+      }
+      throw err;
+    });
+    return { promise: aliasesPromise, expiresAt };
+  }
 }
 
 export async function assertAppServicePrincipalCanRunPipeline(
@@ -130,6 +133,14 @@ export async function assertAppServicePrincipalCanRunPipeline(
   throw new PipelineRunPermissionError(
     `The app service principal (${servicePrincipal}) needs CAN_RUN, CAN_MANAGE, or IS_OWNER on Lakeflow pipeline ${pipelineId}.`,
     403,
+  );
+}
+
+function shouldRefreshAliasesAfterDenial(err: unknown): boolean {
+  return (
+    err instanceof PipelineRunPermissionError &&
+    err.statusCode === 403 &&
+    !err.message.startsWith('Failed to read permissions for Lakeflow pipeline')
   );
 }
 
@@ -209,7 +220,5 @@ function addPrincipalAlias(aliases: Set<string>, value: string | undefined): voi
 
 function addUserAlias(aliases: PrincipalAliases, value: string | undefined): void {
   const normalized = normalizePrincipal(value);
-  if (normalized && !aliases.servicePrincipal.has(normalized)) {
-    aliases.user.add(normalized);
-  }
+  if (normalized) aliases.user.add(normalized);
 }

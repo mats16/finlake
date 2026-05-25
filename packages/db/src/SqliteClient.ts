@@ -183,6 +183,11 @@ export class SqliteClient implements DatabaseClient {
     );
     await this.dropColumnIfExists('data_sources', 'job_id');
     await this.addColumnIfMissing('data_sources', 'pipeline_id', 'TEXT');
+    await this.raw.execute(`
+      CREATE UNIQUE INDEX IF NOT EXISTS data_sources_custom_table_unique
+      ON data_sources (lower(table_name))
+      WHERE provider_name = 'custom'
+    `);
     await this.migrateWorkspacesDomainColumn();
     await this.migrateLegacyGenieSpace();
     await this.migrateAppSettingKey('focus_pipeline_job_id', 'lakeflow_pipeline_job_id');

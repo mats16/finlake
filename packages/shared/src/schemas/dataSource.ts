@@ -183,7 +183,8 @@ export const DataSourceTableNameSchema = z
 const DataSourcePipelineIdInputSchema = z
   .string()
   .max(256)
-  .transform((value) => value.trim() || null);
+  .transform((value) => value.trim())
+  .refine((value) => value.length > 0, 'must be non-empty');
 
 export const DataSourceSchema = z.object({
   name: z.string().min(1).max(256),

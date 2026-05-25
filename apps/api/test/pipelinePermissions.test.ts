@@ -91,7 +91,7 @@ test('assertAppServicePrincipalCanRunPipeline does not match group SCIM value', 
   );
 });
 
-test('assertAppServicePrincipalCanRunPipeline keeps user and group aliases type-separated', async () => {
+test('assertAppServicePrincipalCanRunPipeline keeps service principal and group aliases type-separated', async () => {
   const env = EnvSchema.parse({ DATABRICKS_CLIENT_ID: 'app-client-id' });
   const wc = {
     currentUser: {
@@ -112,10 +112,6 @@ test('assertAppServicePrincipalCanRunPipeline keeps user and group aliases type-
             all_permissions: [{ permission_level: 'CAN_RUN' }],
           },
           {
-            user_name: 'application-id-123',
-            all_permissions: [{ permission_level: 'CAN_RUN' }],
-          },
-          {
             group_name: 'application-id-123',
             all_permissions: [{ permission_level: 'CAN_RUN' }],
           },
@@ -128,6 +124,30 @@ test('assertAppServicePrincipalCanRunPipeline keeps user and group aliases type-
     () => assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never),
     (err) => err instanceof PipelineRunPermissionError && err.statusCode === 403,
   );
+});
+
+test('assertAppServicePrincipalCanRunPipeline accepts service principal userName ACL entries', async () => {
+  const env = EnvSchema.parse({ DATABRICKS_CLIENT_ID: 'app-client-id' });
+  const wc = {
+    currentUser: {
+      me: async () => ({
+        userName: 'app-client-id',
+        applicationId: 'app-client-id',
+      }),
+    },
+    apiClient: {
+      request: async () => ({
+        access_control_list: [
+          {
+            user_name: 'app-client-id',
+            all_permissions: [{ permission_level: 'CAN_RUN' }],
+          },
+        ],
+      }),
+    },
+  };
+
+  await assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never);
 });
 
 test('assertAppServicePrincipalCanRunPipeline accepts SCIM id as service principal ACL name', async () => {
@@ -366,6 +386,82 @@ test('createAppServicePrincipalPipelineRunAsserter refreshes aliases after permi
   await assertCanRun('pipeline-123');
 
   assert.equal(identityCalls, 2);
+  assert.equal(permissionCalls, 2);
+});
+
+test('createAppServicePrincipalPipelineRunAsserter does not retry permission-read 403s', async () => {
+  const env = EnvSchema.parse({});
+  let identityCalls = 0;
+  let permissionCalls = 0;
+  const wc = {
+    currentUser: {
+      me: async () => {
+        identityCalls += 1;
+        return { applicationId: 'application-id-123' };
+      },
+    },
+    apiClient: {
+      request: async () => {
+        permissionCalls += 1;
+        throw { errorCode: 'PERMISSION_DENIED', message: 'denied' };
+      },
+    },
+  };
+  const assertCanRun = createAppServicePrincipalPipelineRunAsserter(env, {
+    workspaceClientFactory: () => wc as never,
+  });
+
+  await assert.rejects(
+    () => assertCanRun('pipeline-123'),
+    (err) => err instanceof PipelineRunPermissionError && err.statusCode === 403,
+  );
+
+  assert.equal(identityCalls, 1);
+  assert.equal(permissionCalls, 1);
+});
+
+test('createAppServicePrincipalPipelineRunAsserter clears retry alias cache after a rejection', async () => {
+  const env = EnvSchema.parse({});
+  let identityCalls = 0;
+  let permissionCalls = 0;
+  const wc = {
+    currentUser: {
+      me: async () => {
+        identityCalls += 1;
+        if (identityCalls === 2) {
+          throw new Error('transient retry identity failure');
+        }
+        return {
+          applicationId: 'application-id-123',
+          groups: identityCalls === 1 ? [] : [{ display: 'finlake-runners' }],
+        };
+      },
+    },
+    apiClient: {
+      request: async () => {
+        permissionCalls += 1;
+        return {
+          access_control_list: [
+            {
+              group_name: 'finlake-runners',
+              all_permissions: [{ permission_level: 'CAN_RUN' }],
+            },
+          ],
+        };
+      },
+    },
+  };
+  const assertCanRun = createAppServicePrincipalPipelineRunAsserter(env, {
+    workspaceClientFactory: () => wc as never,
+  });
+
+  await assert.rejects(
+    () => assertCanRun('pipeline-123'),
+    (err) => err instanceof PipelineRunPermissionError && err.statusCode === 502,
+  );
+  await assertCanRun('pipeline-123');
+
+  assert.equal(identityCalls, 3);
   assert.equal(permissionCalls, 2);
 });
 
