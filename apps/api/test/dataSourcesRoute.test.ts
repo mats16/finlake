@@ -31,7 +31,13 @@ async function startServer(deps: DataSourcesRouterDeps = {}): Promise<Harness> {
   app.use(express.json());
   app.use(
     '/api/integrations',
-    dataSourcesRouter(db, env, { syncSharedPipeline: async () => {}, ...deps }),
+    dataSourcesRouter(db, env, {
+      assertPipelineCanRun: async (pipelineId) => {
+        throw new Error(`Unexpected pipeline permission check in route test: ${pipelineId}`);
+      },
+      syncSharedPipeline: async () => {},
+      ...deps,
+    }),
   );
   app.use(errorHandler);
   const server: Server = app.listen(0);
