@@ -135,6 +135,13 @@ export function baseParams(sources: DataSource[], range: UsageRange): SqlParam[]
   ];
 }
 
+export function rangeParams(range: UsageRange): SqlParam[] {
+  return [
+    { name: 'start_ts', value: range.start, type: 'TIMESTAMP' },
+    { name: 'end_ts', value: range.end, type: 'TIMESTAMP' },
+  ];
+}
+
 export function sourceJoinParams(sources: DataSource[]): SqlParam[] {
   return sources.flatMap((source, i) => [
     { name: `data_source_id_${i}`, value: dataSourceKeyString(source), type: 'STRING' as const },
@@ -188,6 +195,10 @@ function billingAccountFilter(source: DataSource): string | null {
   return isGcpProvider(source.providerName)
     ? normalizeGcpBillingAccountId(source.accountId)
     : source.accountId;
+}
+
+export function providerNameSql(fallback = "'Unknown'"): string {
+  return `COALESCE(NULLIF(TRIM(ProviderName), ''), ${fallback}, 'Unknown')`;
 }
 
 export function buildDailySql(cte: string): string {

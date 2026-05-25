@@ -44,6 +44,7 @@ import {
   BarChart3,
   CalendarDays,
   ChartLine,
+  Database,
   DollarSign,
   Filter,
   Grid2X2,
@@ -163,18 +164,18 @@ export function CostExplore() {
   const [filters, setFilters] = useState<CostExploreFilters>({});
   const [costMetric, setCostMetric] = useState<CostExploreCostMetric>('EffectiveCost');
 
-  const dataSources = useDataSources();
   const appSettings = useAppSettings();
+  const dataSources = useDataSources();
+  const settings = useMemo(() => appSettings.data?.settings ?? {}, [appSettings.data?.settings]);
   const sources = useMemo(
     () => enabledFocusSources(dataSources.data?.items ?? []),
     [dataSources.data?.items],
   );
-  const settings = useMemo(() => appSettings.data?.settings ?? {}, [appSettings.data?.settings]);
   const presetRanges = useMemo(() => rangeForPreset(datePreset), [datePreset]);
   const range = presetRanges.current;
   const previous = presetRanges.previous;
   const sqlGrain: CostExploreDateGrain = aggregation === 'cumulative' ? 'daily' : aggregation;
-  const sqlEnabled = dataSources.isSuccess && appSettings.isSuccess;
+  const sqlEnabled = appSettings.isSuccess && dataSources.isSuccess;
 
   const currentStatement = useMemo(
     () =>
@@ -222,7 +223,17 @@ export function CostExplore() {
 
   const current = useSqlStatement<CostExploreRow>(currentStatement, {
     enabled: sqlEnabled && currentStatement !== null,
-    requestKey: ['costExplore', 'current', range, groupBy, filters, costMetric, sqlGrain, sources],
+    requestKey: [
+      'costExplore',
+      'current',
+      range,
+      groupBy,
+      filters,
+      costMetric,
+      sqlGrain,
+      sources,
+      settings,
+    ],
   });
   const previousData = useSqlStatement<CostExploreRow>(previousStatement, {
     enabled: sqlEnabled && previousStatement !== null,
@@ -235,19 +246,29 @@ export function CostExplore() {
       costMetric,
       sqlGrain,
       sources,
+      settings,
     ],
   });
   const filterValues = useSqlStatement<FilterValueRow>(filterValuesStatement, {
     enabled: sqlEnabled && filterValuesStatement !== null,
-    requestKey: ['costExplore', 'filterValues', range, sources],
+    requestKey: ['costExplore', 'filterValues', range, sources, settings],
   });
   const currentDaily = useSqlStatement<CostExploreRow>(currentDailyStatement, {
     enabled:
       sqlEnabled &&
+      currentDailyStatement !== null &&
       tableView === 'byDate' &&
-      sqlGrain !== 'daily' &&
-      currentDailyStatement !== null,
-    requestKey: ['costExplore', 'currentDaily', range, groupBy, filters, costMetric, sources],
+      sqlGrain !== 'daily',
+    requestKey: [
+      'costExplore',
+      'currentDaily',
+      range,
+      groupBy,
+      filters,
+      costMetric,
+      sources,
+      settings,
+    ],
   });
 
   const filterOptions = useMemo(() => buildFilterOptions(filterValues.rows), [filterValues.rows]);
@@ -324,9 +345,9 @@ export function CostExplore() {
         </div>
       </div>
 
-      {sources.length === 0 && dataSources.isSuccess ? (
+      {dataSources.isSuccess && sources.length === 0 ? (
         <Alert className="mb-4">
-          <AlertCircle />
+          <Database />
           <AlertDescription>{t('dashboard.noEnabledSources')}</AlertDescription>
         </Alert>
       ) : null}

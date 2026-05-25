@@ -1,12 +1,9 @@
 import {
   UsageBySkuRowSchema,
-  UsageDailyRowSchema,
   UsageTopWorkloadRowSchema,
   usageBySkuSql,
-  usageDailySql,
   usageTopWorkloadsSql,
   type UsageBySkuRow,
-  type UsageDailyRow,
   type UsageRange,
   type UsageTopWorkloadRow,
 } from '@finlake/shared';
@@ -14,10 +11,6 @@ import type { StatementExecutor } from './statementExecution.js';
 
 export class UsageQueries {
   constructor(private executor: StatementExecutor) {}
-
-  async daily(range: UsageRange): Promise<UsageDailyRow[]> {
-    return this.executor.run(usageDailySql, this.rangeParams(range), UsageDailyRowSchema);
-  }
 
   async bySku(range: UsageRange): Promise<UsageBySkuRow[]> {
     return this.executor.run(usageBySkuSql, this.rangeParams(range), UsageBySkuRowSchema);

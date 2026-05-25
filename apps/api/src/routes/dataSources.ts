@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import type { DatabaseClient } from '@finlake/db';
+import { Router, type Response } from 'express';
+import { settingsToRecord, type DatabaseClient } from '@finlake/db';
 import { randomUUID } from 'node:crypto';
 import {
   DATA_SOURCE_TEMPLATES,
@@ -13,19 +13,27 @@ import {
   isDatabricksProvider,
   isGcpProvider,
   normalizeGcpBillingAccountId,
+  toDataSourceKey,
   type DataSourceKey,
   type Env,
 } from '@finlake/shared';
 import {
+  LEGACY_SHARED_PIPELINE_SETTING_KEYS,
+  SHARED_PIPELINE_SETTING_KEYS,
   runDataSourceJob,
   setupFocusDataSource,
   syncSharedFocusPipeline,
 } from '../services/dataSourceSetup.js';
+import { buildAppWorkspaceClient } from '../services/statementExecution.js';
 import { DataSourceSetupError } from '../services/dataSourceErrors.js';
 import {
   CustomDataSourceOptionsError,
   listCustomDataSourceOptions,
 } from '../services/customDataSourceOptions.js';
+import {
+  PipelineRunPermissionError,
+  createAppServicePrincipalPipelineRunAsserter,
+} from '../services/pipelinePermissions.js';
 
 const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   'awsAccountId',
@@ -38,16 +46,38 @@ const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   's3Region',
 ];
 
-export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
+export interface DataSourcesRouterDeps {
+  assertPipelineCanRun?: (pipelineId: string) => Promise<void>;
+  syncSharedPipeline?: () => Promise<void>;
+  cleanupSharedPipeline?: () => Promise<void>;
+}
+
+export function dataSourcesRouter(
+  db: DatabaseClient,
+  env: Env,
+  deps: DataSourcesRouterDeps = {},
+): Router {
   const router = Router();
+  const assertPipelineCanRun =
+    deps.assertPipelineCanRun ?? createAppServicePrincipalPipelineRunAsserter(env);
+  const syncSharedPipeline: () => Promise<void> =
+    deps.syncSharedPipeline ??
+    (async () => {
+      await syncSharedFocusPipeline(env, db);
+    });
+  const cleanupSharedPipeline: () => Promise<void> =
+    deps.cleanupSharedPipeline ??
+    (async () => {
+      await cleanupSharedPipelineAssets(env, db);
+    });
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
   });
 
-  router.get('/custom-options', async (req, res, next) => {
+  router.get('/custom-options', async (_req, res, next) => {
     try {
-      res.json(await listCustomDataSourceOptions(db, env, req.user?.accessToken));
+      res.json(await listCustomDataSourceOptions(db, env));
     } catch (err) {
       if (err instanceof CustomDataSourceOptionsError) {
         res.status(err.statusCode).json({ error: { message: err.message } });
@@ -79,12 +109,21 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         return;
       }
       const isCustomTemplate = parsed.data.templateId === 'custom';
-      const pipelineId = parsed.data.pipelineId?.trim() || null;
+      const pipelineId = parsed.data.pipelineId ?? null;
       if (isCustomTemplate && (await customTableAlreadyRegistered(db, parsed.data.tableName))) {
         res.status(409).json({
           error: {
             message: `Custom data source table is already registered: ${parsed.data.tableName}`,
           },
+        });
+        return;
+      }
+      if (isCustomTemplate && parsed.data.enabled === true && pipelineId) {
+        await assertPipelineCanRun(pipelineId);
+      }
+      if (isCustomTemplate && parsed.data.enabled === true && !pipelineId) {
+        res.status(409).json({
+          error: { message: 'Custom data source cannot be enabled without a pipelineId.' },
         });
         return;
       }
@@ -97,18 +136,67 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         res.status(400).json({ error: { message: 'accountId is required' } });
         return;
       }
-      const created = await db.repos.dataSources.create({
-        name: parsed.data.name,
-        providerName: parsed.data.providerName,
-        accountId,
-        tableName: parsed.data.tableName,
-        focusVersion: template.focus_version,
-        pipelineId,
-        enabled: parsed.data.enabled ?? false,
-        config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
+      let created;
+      try {
+        created = await db.repos.dataSources.create({
+          name: parsed.data.name,
+          providerName: parsed.data.providerName,
+          accountId,
+          tableName: parsed.data.tableName,
+          focusVersion: template.focus_version,
+          pipelineId,
+          enabled: parsed.data.enabled ?? false,
+          config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
+        });
+      } catch (err) {
+        if (isCustomTableUniqueViolation(err)) {
+          res.status(409).json({
+            error: {
+              message: `Custom data source table is already registered: ${parsed.data.tableName}`,
+            },
+          });
+          return;
+        }
+        throw err;
+      }
+      const needsPipelineSync = sourceNeedsPipelineSync(created);
+      if (needsPipelineSync) {
+        try {
+          await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline, cleanupSharedPipeline);
+        } catch (err) {
+          try {
+            await db.repos.dataSources.delete({
+              providerName: created.providerName,
+              accountId: created.accountId,
+            });
+          } catch (cleanupErr) {
+            console.warn(
+              `[dataSources] Failed to delete DB row ${created.providerName}/${created.accountId} after shared pipeline sync failure: ${(cleanupErr as Error).message}`,
+            );
+          }
+          throw err;
+        }
+      }
+      if (!needsPipelineSync) {
+        res.status(201).json(created);
+        return;
+      }
+      const refreshed = await db.repos.dataSources.get({
+        providerName: created.providerName,
+        accountId: created.accountId,
       });
-      res.status(201).json(created);
+      if (!refreshed) {
+        res.status(409).json({
+          error: {
+            message:
+              'Data source was deleted after pipeline synchronization completed. Generated Lakeflow assets may require cleanup.',
+          },
+        });
+        return;
+      }
+      res.status(201).json(refreshed);
     } catch (err) {
+      if (sendPipelineRunPermissionError(err, res)) return;
       next(err);
     }
   });
@@ -150,7 +238,9 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       }
       if (parsed.data.config && isRegisteredAwsSource(existing)) {
         const changedKeys = AWS_SOURCE_LOCKED_CONFIG_KEYS.filter(
-          (key) => !sameJsonValue(existing.config[key], parsed.data.config?.[key]),
+          (key) =>
+            parsed.data.config?.[key] !== undefined &&
+            !sameJsonValue(existing.config[key], parsed.data.config[key]),
         );
         if (changedKeys.length > 0) {
           res.status(409).json({
@@ -161,9 +251,60 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
           return;
         }
       }
-      const updated = await db.repos.dataSources.update(key, parsed.data);
+      const updatePatch =
+        parsed.data.config && isRegisteredAwsSource(existing)
+          ? { ...parsed.data, config: { ...existing.config, ...parsed.data.config } }
+          : parsed.data;
+      const nextCandidate = { ...existing, ...updatePatch };
+      if (
+        isCustomProvider(existing.providerName) &&
+        updatePatch.tableName !== undefined &&
+        updatePatch.tableName !== existing.tableName &&
+        (await customTableAlreadyRegistered(db, updatePatch.tableName, key))
+      ) {
+        res.status(409).json({
+          error: {
+            message: `Custom data source table is already registered: ${updatePatch.tableName}`,
+          },
+        });
+        return;
+      }
+      if (
+        isCustomProvider(existing.providerName) &&
+        nextCandidate.enabled &&
+        !nextCandidate.pipelineId
+      ) {
+        res.status(409).json({
+          error: { message: 'Custom data source cannot be enabled without a pipelineId.' },
+        });
+        return;
+      }
+      const pipelineIdToCheck = pipelineIdForRunPermissionCheck(
+        existing,
+        nextCandidate,
+        updatePatch,
+      );
+      if (pipelineIdToCheck) {
+        await assertPipelineCanRun(pipelineIdToCheck);
+      }
+      const updated = await db.repos.dataSources.update(key, updatePatch);
+      if (sourceUpdateNeedsPipelineSync(existing, updated, updatePatch)) {
+        try {
+          await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline, cleanupSharedPipeline);
+        } catch (err) {
+          try {
+            await restoreDataSource(db, key, existing, updated, updatePatch);
+          } catch (restoreErr) {
+            console.warn(
+              `[dataSources] Failed to restore DB row ${key.providerName}/${key.accountId} after shared pipeline sync failure: ${(restoreErr as Error).message}`,
+            );
+          }
+          throw err;
+        }
+      }
       res.json(updated);
     } catch (err) {
+      if (sendPipelineRunPermissionError(err, res)) return;
       next(err);
     }
   });
@@ -183,7 +324,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
       await db.repos.dataSources.delete(key);
       if (existing.enabled) {
         try {
-          await syncSharedFocusPipeline(env, db);
+          await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline, cleanupSharedPipeline);
         } catch (err) {
           console.warn(
             `[dataSources] Deleted DB row ${key.providerName}/${key.accountId} but failed to refresh the shared pipeline: ${(err as Error).message}`,
@@ -296,19 +437,58 @@ function isRegisteredAwsSource(source: {
   });
 }
 
+function isCustomTableUniqueViolation(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('data_sources_custom_table_unique');
+}
+
 function sameJsonValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  if (!isJsonComparable(left) || !isJsonComparable(right)) return Object.is(left, right);
+  return JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJsonValue);
+  }
+  if (isPlainRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([leftKey], [rightKey]) => (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0))
+        .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]),
+    );
+  }
+  return value;
+}
+
+function isJsonComparable(value: unknown): boolean {
+  if (value === null) return true;
+  if (Array.isArray(value)) return value.every(isJsonComparable);
+  if (isPlainRecord(value)) return Object.values(value).every(isJsonComparable);
+  return ['boolean', 'number', 'string'].includes(typeof value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 async function customTableAlreadyRegistered(
   db: DatabaseClient,
   tableName: string,
+  exceptKey?: DataSourceKey,
 ): Promise<boolean> {
   const normalizedTableName = normalizeTableNameForComparison(tableName);
   const existingSources = await db.repos.dataSources.list();
   return existingSources.some(
     (source) =>
       isCustomProvider(source.providerName) &&
+      !(
+        exceptKey &&
+        source.providerName === exceptKey.providerName &&
+        source.accountId === exceptKey.accountId
+      ) &&
       normalizeTableNameForComparison(source.tableName) === normalizedTableName,
   );
 }
@@ -318,4 +498,220 @@ function normalizeTableNameForComparison(tableName: string): string {
     .split('.')
     .map((part) => part.trim().toLowerCase())
     .join('.');
+}
+
+function sendPipelineRunPermissionError(err: unknown, res: Response): boolean {
+  if (!(err instanceof PipelineRunPermissionError)) return false;
+  res.status(err.statusCode).json({ error: { message: err.message } });
+  return true;
+}
+
+function pipelineIdForRunPermissionCheck(
+  previous: {
+    providerName: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+  },
+  next: {
+    pipelineId: string | null;
+    enabled: boolean;
+  },
+  patch: {
+    name?: string;
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
+): string | null {
+  if (!isCustomProvider(previous.providerName) || !next.pipelineId) return null;
+  if (!next.enabled) return null;
+  const pipelineChanged =
+    patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+  if (pipelineChanged) return next.pipelineId;
+
+  const enabling = patch.enabled === true && !previous.enabled;
+  return enabling ? next.pipelineId : null;
+}
+
+function sourceNeedsPipelineSync(source: { providerName: string; enabled: boolean }): boolean {
+  return source.enabled;
+}
+
+function sourceUpdateNeedsPipelineSync(
+  previous: {
+    providerName: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  next: { enabled: boolean },
+  patch: {
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
+): boolean {
+  const enabledChanged = patch.enabled !== undefined && patch.enabled !== previous.enabled;
+  if (enabledChanged) return true;
+  if (!next.enabled) return false;
+
+  const tableNameChanged = patch.tableName !== undefined && patch.tableName !== previous.tableName;
+  if (!isCustomProvider(previous.providerName)) {
+    const configChanged =
+      patch.config !== undefined && !sameJsonValue(patch.config, previous.config);
+    const pipelineChanged =
+      patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+    return tableNameChanged || configChanged || pipelineChanged;
+  }
+  const pipelineChanged =
+    patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+  return tableNameChanged || pipelineChanged;
+}
+
+async function syncSharedPipelineIfAnyEnabled(
+  db: DatabaseClient,
+  syncSharedPipeline: () => Promise<void>,
+  cleanupSharedPipeline: () => Promise<void>,
+): Promise<void> {
+  const enabledSources = (await db.repos.dataSources.list()).filter((source) => source.enabled);
+  if (enabledSources.length === 0) {
+    await cleanupSharedPipeline();
+    return;
+  }
+  await syncSharedPipeline();
+}
+
+async function cleanupSharedPipelineAssets(env: Env, db: DatabaseClient): Promise<void> {
+  const [settingsRows, sources] = await Promise.all([
+    db.repos.appSettings.list(),
+    db.repos.dataSources.list(),
+  ]);
+  const settings = settingsToRecord(settingsRows);
+  const jobId = numberSetting(
+    settings[SHARED_PIPELINE_SETTING_KEYS.jobId] ??
+      settings[LEGACY_SHARED_PIPELINE_SETTING_KEYS.jobId],
+  );
+  const pipelineIds = new Set<string>();
+  addPipelineId(
+    pipelineIds,
+    settings[SHARED_PIPELINE_SETTING_KEYS.pipelineId] ??
+      settings[LEGACY_SHARED_PIPELINE_SETTING_KEYS.pipelineId],
+  );
+  for (const source of sources) {
+    if (!isCustomProvider(source.providerName)) addPipelineId(pipelineIds, source.pipelineId);
+  }
+  const workspaceRoot = settings[SHARED_PIPELINE_SETTING_KEYS.workspaceRoot]?.trim();
+  const ops: Promise<unknown>[] = [];
+  const needsWorkspaceClient = jobId !== null || pipelineIds.size > 0 || Boolean(workspaceRoot);
+  if (needsWorkspaceClient) {
+    const wc = buildAppWorkspaceClient(env);
+    if (!wc) {
+      throw new Error(
+        'Failed to build Databricks app service principal workspace client for shared pipeline cleanup.',
+      );
+    }
+    if (jobId !== null) ops.push(wc.jobs.delete({ job_id: jobId }).catch(() => {}));
+    for (const pipelineId of pipelineIds) {
+      ops.push(wc.pipelines.delete({ pipeline_id: pipelineId }).catch(() => {}));
+    }
+    if (workspaceRoot) {
+      ops.push(wc.workspace.delete({ path: workspaceRoot, recursive: true }).catch(() => {}));
+    }
+  }
+  await Promise.allSettled(ops);
+  await Promise.all([
+    db.repos.appSettings.delete(SHARED_PIPELINE_SETTING_KEYS.jobId),
+    db.repos.appSettings.delete(SHARED_PIPELINE_SETTING_KEYS.pipelineId),
+    db.repos.appSettings.delete(SHARED_PIPELINE_SETTING_KEYS.workspaceRoot),
+    db.repos.appSettings.delete(LEGACY_SHARED_PIPELINE_SETTING_KEYS.jobId),
+    db.repos.appSettings.delete(LEGACY_SHARED_PIPELINE_SETTING_KEYS.pipelineId),
+    ...sources
+      .filter((source) => !isCustomProvider(source.providerName) && source.pipelineId)
+      .map((source) => db.repos.dataSources.update(toDataSourceKey(source), { pipelineId: null })),
+  ]);
+}
+
+function addPipelineId(target: Set<string>, value: string | null | undefined): void {
+  const trimmed = value?.trim();
+  if (trimmed) target.add(trimmed);
+}
+
+function numberSetting(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function restoreDataSource(
+  db: DatabaseClient,
+  key: DataSourceKey,
+  source: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  updated: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  patch: {
+    name?: string;
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
+): Promise<void> {
+  const current = await db.repos.dataSources.get(key);
+  if (!current) return;
+  if (!patchStillMatchesUpdated(current, updated, patch)) return;
+  const rollback: typeof patch = {};
+  if (patch.name !== undefined) rollback.name = source.name;
+  if (patch.tableName !== undefined) rollback.tableName = source.tableName;
+  if (patch.pipelineId !== undefined) rollback.pipelineId = source.pipelineId;
+  if (patch.enabled !== undefined) rollback.enabled = source.enabled;
+  if (patch.config !== undefined) rollback.config = source.config;
+  if (Object.keys(rollback).length > 0) {
+    await db.repos.dataSources.update(key, rollback);
+  }
+}
+
+function patchStillMatchesUpdated(
+  current: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  updated: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
+  patch: {
+    name?: string;
+    tableName?: string;
+    pipelineId?: string | null;
+    enabled?: boolean;
+    config?: Record<string, unknown>;
+  },
+): boolean {
+  if (patch.name !== undefined && current.name !== updated.name) return false;
+  if (patch.tableName !== undefined && current.tableName !== updated.tableName) return false;
+  if (patch.pipelineId !== undefined && current.pipelineId !== updated.pipelineId) return false;
+  if (patch.enabled !== undefined && current.enabled !== updated.enabled) return false;
+  if (patch.config !== undefined && !sameJsonValue(current.config, updated.config)) return false;
+  return true;
 }

@@ -4,9 +4,7 @@ import {
   awsUsageTableName,
   buildAwsFocusSilverPipelineSql,
 } from '../src/services/awsFocusTransformPipelineSql.js';
-import {
-  buildGcpFocusSilverPipelineSql,
-} from '../src/services/gcpFocusTransformPipelineSql.js';
+import { buildGcpFocusSilverPipelineSql } from '../src/services/gcpFocusTransformPipelineSql.js';
 import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
 import {
@@ -124,6 +122,19 @@ test('buildUsageGoldSql can read a source table outside the default silver schem
   });
 
   assert.match(sql, /FROM `external_catalog`\.`silver`\.`custom_usage`/);
+});
+
+test('buildUsageGoldSql resolves table-only custom sources to the default silver schema', () => {
+  const sql = buildUsageGoldSql({
+    catalog: 'finops',
+    silverSchema: 'focus',
+    goldSchema: 'analytics',
+    sources: [{ tableName: 'custom_usage', providerName: 'custom' }],
+  });
+
+  assert.match(sql, /FROM `finops`\.`focus`\.`custom_usage`/);
+  assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `analytics`\.`usage_daily`/);
+  assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `analytics`\.`usage_monthly`/);
 });
 
 test('data source table schemas allow numeric-prefixed Unity Catalog identifiers', () => {

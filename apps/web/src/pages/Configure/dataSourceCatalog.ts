@@ -17,6 +17,7 @@ export type TemplateLogo =
   | { kind: 'aws' }
   | { kind: 'google-cloud' }
   | { kind: 'snowflake' }
+  | { kind: 'database' }
   | { kind: 'abbr'; label: string };
 
 export interface DataSourceTemplateMatchRule {
@@ -87,7 +88,7 @@ export const DATA_SOURCE_TEMPLATE_REGISTRY: Record<string, DataSourceTemplateReg
       setupSteps: [],
     },
     matches: [{ providerName: 'custom', defaultTableName: 'custom_usage' }],
-    logo: { kind: 'abbr', label: 'src' },
+    logo: { kind: 'database' },
   },
 };
 
@@ -135,6 +136,7 @@ export function findTemplateForRow(row: {
 export const LEGACY_TEMPLATE_NAMES: Record<string, string[]> = {
   databricks_focus13: ['Databricks System Tables'],
   aws: ['Amazon Web Services'],
+  custom: ['Custom data source'],
   gcp: ['Google Cloud Platform', 'GCP'],
 };
 

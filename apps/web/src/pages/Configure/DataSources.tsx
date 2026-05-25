@@ -52,7 +52,7 @@ export interface DatabricksFocusDraft {
 
 const FALLBACK_TEMPLATE: DataSourceTemplate = {
   id: 'custom',
-  name: 'Custom data source',
+  name: 'Custom',
   description: '',
   subtitle: '',
   focus_version: null,
@@ -84,7 +84,19 @@ function templateForRow(row: DataSource): DataSourceTemplate {
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {
-  return template.id === 'aws' || template.id === 'custom' || template.id === 'gcp';
+  return template.id === 'aws' || template.id === 'gcp' || template.id === 'custom';
+}
+
+function mergeDataSourceTemplates(
+  fallbackTemplates: DataSourceTemplate[],
+  apiTemplates: DataSourceTemplate[] | undefined,
+): DataSourceTemplate[] {
+  if (!apiTemplates) return fallbackTemplates;
+  const apiTemplateIds = new Set(apiTemplates.map((template) => template.id));
+  return [
+    ...apiTemplates,
+    ...fallbackTemplates.filter((template) => !apiTemplateIds.has(template.id)),
+  ];
 }
 
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
@@ -123,7 +135,7 @@ export function DataSources() {
   const hasRegisteredPricingData = pricingSummaries.some((summary) => summary.registered);
   const unregisteredPricingSummaries = pricingSummaries.filter((summary) => !summary.registered);
   const availableTemplates = useMemo(
-    () => templates.data?.items ?? DATA_SOURCE_TEMPLATES,
+    () => mergeDataSourceTemplates(DATA_SOURCE_TEMPLATES, templates.data?.items),
     [templates.data?.items],
   );
 

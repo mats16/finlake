@@ -220,6 +220,11 @@ export class LakebaseClient implements DatabaseClient {
     await this.migrateWorkspacesDomainColumn();
     await this.migrateLegacyGenieSpace();
     await this.addColumnIfMissing('data_sources', 'pipeline_id', 'text');
+    await this.db.execute(sql`
+      create unique index if not exists data_sources_custom_table_unique
+      on data_sources (lower(table_name))
+      where provider_name = 'custom'
+    `);
     await this.dropColumnIfExists('data_sources', 'job_id');
     await this.migrateAppSettingKey('focus_pipeline_job_id', 'lakeflow_pipeline_job_id');
     await this.migrateAppSettingKey('focus_pipeline_id', 'lakeflow_pipeline_id');
