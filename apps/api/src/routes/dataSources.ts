@@ -55,7 +55,11 @@ export function dataSourcesRouter(
   const router = Router();
   const assertPipelineCanRun =
     deps.assertPipelineCanRun ?? createAppServicePrincipalPipelineRunAsserter(env);
-  const syncSharedPipeline = deps.syncSharedPipeline ?? (() => syncSharedFocusPipeline(env, db));
+  const syncSharedPipeline: () => Promise<void> =
+    deps.syncSharedPipeline ??
+    (async () => {
+      await syncSharedFocusPipeline(env, db);
+    });
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
@@ -406,13 +410,24 @@ function pipelineIdForRunPermissionCheck(
     enabled: boolean;
   },
   patch: {
+    name?: string;
+    tableName?: string;
     pipelineId?: string | null;
     enabled?: boolean;
+    config?: Record<string, unknown>;
   },
 ): string | null {
   if (!isCustomProvider(previous.providerName) || !next.pipelineId) return null;
   const pipelineChanged = patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
-  return next.enabled || pipelineChanged ? next.pipelineId : null;
+  if (pipelineChanged) return next.pipelineId;
+
+  const enabling = patch.enabled === true && !previous.enabled;
+  if (enabling) return next.pipelineId;
+
+  const enabledSourceChanged =
+    previous.enabled &&
+    (patch.name !== undefined || patch.tableName !== undefined || patch.config !== undefined);
+  return enabledSourceChanged ? next.pipelineId : null;
 }
 
 function sourceNeedsPipelineSync(source: { providerName: string; enabled: boolean }): boolean {
@@ -420,7 +435,13 @@ function sourceNeedsPipelineSync(source: { providerName: string; enabled: boolea
 }
 
 function sourceUpdateNeedsPipelineSync(
-  previous: { providerName: string; enabled: boolean },
+  previous: {
+    providerName: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
   next: { enabled: boolean },
   patch: {
     tableName?: string;
@@ -432,12 +453,14 @@ function sourceUpdateNeedsPipelineSync(
   const enabledChanged = patch.enabled !== undefined && patch.enabled !== previous.enabled;
   if (enabledChanged) return true;
   if (!next.enabled) return false;
+
+  const tableNameChanged = patch.tableName !== undefined && patch.tableName !== previous.tableName;
+  const configChanged = patch.config !== undefined && !sameJsonValue(patch.config, previous.config);
   if (!isCustomProvider(previous.providerName)) {
-    return patch.tableName !== undefined || patch.config !== undefined;
+    return tableNameChanged || configChanged;
   }
-  const activeSourceChanged =
-    next.enabled && (patch.tableName !== undefined || patch.pipelineId !== undefined);
-  return activeSourceChanged;
+  const pipelineChanged = patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+  return tableNameChanged || pipelineChanged;
 }
 
 async function syncSharedPipelineIfAnyEnabled(

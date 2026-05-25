@@ -384,6 +384,44 @@ test('PATCH /configurations trims whitespace-only pipelineId to null', async () 
   }
 });
 
+test('PATCH /configurations skips permission check and sync for unchanged custom pipeline id', async () => {
+  const permissionChecks: string[] = [];
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async (pipelineId) => {
+      permissionChecks.push(pipelineId);
+    },
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+      pipelineId: 'pipeline-123',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+    assert.equal(syncCalls, 1);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { pipelineId: 'pipeline-123' },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.pipelineId, 'pipeline-123');
+    assert.deepEqual(permissionChecks, ['pipeline-123']);
+    assert.equal(syncCalls, 1);
+  } finally {
+    await env.close();
+  }
+});
+
 test('PATCH /configurations revalidates enabled custom source pipeline on metadata edits', async () => {
   const calls: string[] = [];
   const env = await startServer({
