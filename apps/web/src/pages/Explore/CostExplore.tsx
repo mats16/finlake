@@ -58,7 +58,6 @@ import {
   COST_EXPLORE_GROUP_KEYS,
   buildCostExploreFilterValuesStatement,
   buildCostExploreStatement,
-  enabledFocusSources,
   type CostExploreCostMetric,
   type CostExploreDateGrain,
   type CostExploreFilterKey,
@@ -67,7 +66,7 @@ import {
 } from '@finlake/shared';
 import { PageHeader } from '../../components/PageHeader';
 import { SqlWarehouseSelector } from '../../components/SqlWarehouseSelector';
-import { useAppSettings, useDataSources, useSqlStatement } from '../../api/hooks';
+import { useAppSettings, useSqlStatement } from '../../api/hooks';
 import { useCurrencyUsd, useI18n, type TFunction } from '../../i18n';
 import { stableTomorrow } from '../../lib/dateRanges';
 
@@ -163,23 +162,17 @@ export function CostExplore() {
   const [filters, setFilters] = useState<CostExploreFilters>({});
   const [costMetric, setCostMetric] = useState<CostExploreCostMetric>('EffectiveCost');
 
-  const dataSources = useDataSources();
   const appSettings = useAppSettings();
-  const sources = useMemo(
-    () => enabledFocusSources(dataSources.data?.items ?? []),
-    [dataSources.data?.items],
-  );
   const settings = useMemo(() => appSettings.data?.settings ?? {}, [appSettings.data?.settings]);
   const presetRanges = useMemo(() => rangeForPreset(datePreset), [datePreset]);
   const range = presetRanges.current;
   const previous = presetRanges.previous;
   const sqlGrain: CostExploreDateGrain = aggregation === 'cumulative' ? 'daily' : aggregation;
-  const sqlEnabled = dataSources.isSuccess && appSettings.isSuccess;
+  const sqlEnabled = appSettings.isSuccess;
 
   const currentStatement = useMemo(
     () =>
       buildCostExploreStatement({
-        sources,
         settings,
         range,
         groupBy,
@@ -187,12 +180,11 @@ export function CostExplore() {
         costMetric,
         dateGrain: sqlGrain,
       }),
-    [costMetric, filters, groupBy, range, settings, sources, sqlGrain],
+    [costMetric, filters, groupBy, range, settings, sqlGrain],
   );
   const previousStatement = useMemo(
     () =>
       buildCostExploreStatement({
-        sources,
         settings,
         range: previous,
         groupBy,
@@ -200,12 +192,11 @@ export function CostExplore() {
         costMetric,
         dateGrain: sqlGrain,
       }),
-    [costMetric, filters, groupBy, previous, settings, sources, sqlGrain],
+    [costMetric, filters, groupBy, previous, settings, sqlGrain],
   );
   const currentDailyStatement = useMemo(
     () =>
       buildCostExploreStatement({
-        sources,
         settings,
         range,
         groupBy,
@@ -213,19 +204,19 @@ export function CostExplore() {
         costMetric,
         dateGrain: 'daily',
       }),
-    [costMetric, filters, groupBy, range, settings, sources],
+    [costMetric, filters, groupBy, range, settings],
   );
   const filterValuesStatement = useMemo(
-    () => buildCostExploreFilterValuesStatement(sources, settings, range),
-    [range, settings, sources],
+    () => buildCostExploreFilterValuesStatement(settings, range),
+    [range, settings],
   );
 
   const current = useSqlStatement<CostExploreRow>(currentStatement, {
-    enabled: sqlEnabled && currentStatement !== null,
-    requestKey: ['costExplore', 'current', range, groupBy, filters, costMetric, sqlGrain, sources],
+    enabled: sqlEnabled,
+    requestKey: ['costExplore', 'current', range, groupBy, filters, costMetric, sqlGrain, settings],
   });
   const previousData = useSqlStatement<CostExploreRow>(previousStatement, {
-    enabled: sqlEnabled && previousStatement !== null,
+    enabled: sqlEnabled,
     requestKey: [
       'costExplore',
       'previous',
@@ -234,20 +225,16 @@ export function CostExplore() {
       filters,
       costMetric,
       sqlGrain,
-      sources,
+      settings,
     ],
   });
   const filterValues = useSqlStatement<FilterValueRow>(filterValuesStatement, {
-    enabled: sqlEnabled && filterValuesStatement !== null,
-    requestKey: ['costExplore', 'filterValues', range, sources],
+    enabled: sqlEnabled,
+    requestKey: ['costExplore', 'filterValues', range, settings],
   });
   const currentDaily = useSqlStatement<CostExploreRow>(currentDailyStatement, {
-    enabled:
-      sqlEnabled &&
-      tableView === 'byDate' &&
-      sqlGrain !== 'daily' &&
-      currentDailyStatement !== null,
-    requestKey: ['costExplore', 'currentDaily', range, groupBy, filters, costMetric, sources],
+    enabled: sqlEnabled && tableView === 'byDate' && sqlGrain !== 'daily',
+    requestKey: ['costExplore', 'currentDaily', range, groupBy, filters, costMetric, settings],
   });
 
   const filterOptions = useMemo(() => buildFilterOptions(filterValues.rows), [filterValues.rows]);
@@ -268,7 +255,6 @@ export function CostExplore() {
   const previousCost = summaryRows.reduce((sum, row) => sum + row.previousCost, 0);
   const changePct = previousCost > 0 ? ((totalCost - previousCost) / previousCost) * 100 : null;
   const loading =
-    dataSources.isLoading ||
     appSettings.isLoading ||
     current.isLoading ||
     previousData.isLoading ||
@@ -323,13 +309,6 @@ export function CostExplore() {
           </Select>
         </div>
       </div>
-
-      {sources.length === 0 && dataSources.isSuccess ? (
-        <Alert className="mb-4">
-          <AlertCircle />
-          <AlertDescription>{t('dashboard.noEnabledSources')}</AlertDescription>
-        </Alert>
-      ) : null}
 
       {error ? (
         <Alert variant="destructive" className="mb-4">

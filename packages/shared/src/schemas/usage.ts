@@ -9,23 +9,6 @@ export const UsageRangeSchema = z.object({
 
 export type UsageRange = z.infer<typeof UsageRangeSchema>;
 
-export const UsageDailyRowSchema = z.object({
-  usageDate: z.string(),
-  skuName: z.string(),
-  workspaceId: z.string().nullable(),
-  costUsd: z.number(),
-});
-
-export type UsageDailyRow = z.infer<typeof UsageDailyRowSchema>;
-
-export const UsageDailyResponseSchema = z.object({
-  rows: z.array(UsageDailyRowSchema),
-  totalUsd: z.number(),
-  cachedAt: z.string().datetime().nullable(),
-});
-
-export type UsageDailyResponse = z.infer<typeof UsageDailyResponseSchema>;
-
 export const UsageBySkuRowSchema = z.object({
   skuName: z.string(),
   costUsd: z.number(),

@@ -4,31 +4,13 @@ import {
   buildCostExploreFilterValuesStatement,
   buildCostExploreStatement,
   type CostExploreCostMetric,
-  type DataSource,
 } from '@finlake/shared';
-
-function fakeSource(overrides: Partial<DataSource> = {}): DataSource {
-  const accountId = overrides.accountId ?? 'default';
-  return {
-    name: `source-${accountId}`,
-    providerName: 'databricks',
-    accountId,
-    tableName: 'usage',
-    focusVersion: null,
-    pipelineId: null,
-    enabled: true,
-    config: {},
-    updatedAt: new Date().toISOString(),
-    ...overrides,
-  };
-}
 
 const range = { start: '2026-05-01T00:00:00Z', end: '2026-06-01T00:00:00Z' };
 const settings = { catalog_name: 'finops', gold_schema_name: 'gold' };
 
 test('buildCostExploreStatement emits stable aliases for multiple group keys', () => {
   const statement = buildCostExploreStatement({
-    sources: [fakeSource()],
     settings,
     range,
     groupBy: ['provider', 'serviceName', 'skuMeter'],
@@ -47,7 +29,6 @@ test('buildCostExploreStatement emits stable aliases for multiple group keys', (
 
 test('buildCostExploreStatement handles ungrouped queries', () => {
   const statement = buildCostExploreStatement({
-    sources: [fakeSource()],
     settings,
     range,
     groupBy: [],
@@ -61,7 +42,6 @@ test('buildCostExploreStatement handles ungrouped queries', () => {
 
 test('buildCostExploreStatement parameterizes include and exclude filters', () => {
   const statement = buildCostExploreStatement({
-    sources: [fakeSource()],
     settings,
     range,
     groupBy: ['provider'],
@@ -93,7 +73,6 @@ test('buildCostExploreStatement rejects unsupported cost metrics', () => {
   assert.throws(
     () =>
       buildCostExploreStatement({
-        sources: [fakeSource()],
         settings,
         range,
         groupBy: ['provider'],
@@ -105,21 +84,18 @@ test('buildCostExploreStatement rejects unsupported cost metrics', () => {
 
 test('buildCostExploreStatement emits expected date bucket expressions', () => {
   const weekly = buildCostExploreStatement({
-    sources: [fakeSource()],
     settings,
     range,
     groupBy: ['provider'],
     dateGrain: 'weekly',
   });
   const monthly = buildCostExploreStatement({
-    sources: [fakeSource()],
     settings,
     range,
     groupBy: ['provider'],
     dateGrain: 'monthly',
   });
   const quarterly = buildCostExploreStatement({
-    sources: [fakeSource()],
     settings,
     range,
     groupBy: ['provider'],
@@ -132,7 +108,7 @@ test('buildCostExploreStatement emits expected date bucket expressions', () => {
 });
 
 test('buildCostExploreFilterValuesStatement groups filter dimensions', () => {
-  const statement = buildCostExploreFilterValuesStatement([fakeSource()], settings, range);
+  const statement = buildCostExploreFilterValuesStatement(settings, range);
 
   assert.ok(statement);
   assert.match(statement.query, /AS provider/);

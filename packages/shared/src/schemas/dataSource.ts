@@ -282,7 +282,7 @@ export const DATA_SOURCE_TEMPLATES = [
   },
   {
     id: 'custom',
-    name: 'Custom data source',
+    name: 'Custom',
     description: 'Register an externally managed FOCUS table and Lakeflow pipeline',
     subtitle: 'by your team',
     focus_version: null,

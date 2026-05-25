@@ -54,7 +54,6 @@ import type {
   TransformationPipelinesResponse,
   TransformationSharedRunResult,
   UsageBySkuRow,
-  UsageDailyResponse,
   UsageTopWorkloadRow,
   UpdateBudgetInput,
   WorkspaceMapping,
@@ -83,16 +82,6 @@ function rangeQuery(range: RangeParams): string {
   if (range.workspaceId) sp.set('workspaceId', range.workspaceId);
   if (range.warehouseId) sp.set('warehouseId', range.warehouseId);
   return sp.toString();
-}
-
-export function useUsageDaily(range: RangeParams, enabled = true) {
-  const { selectedWarehouseId } = useSelectedSqlWarehouse();
-  const effectiveRange = withWarehouseId(range, selectedWarehouseId);
-  return useQuery({
-    queryKey: ['usage', 'daily', effectiveRange],
-    queryFn: () => apiFetch<UsageDailyResponse>(`/api/usage/daily?${rangeQuery(effectiveRange)}`),
-    enabled: enabled && Boolean(effectiveRange.warehouseId),
-  });
 }
 
 export function useUsageBySku(range: RangeParams, enabled = true) {
@@ -697,6 +686,8 @@ export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}
       if (invalidateOnSuccess) {
         qc.invalidateQueries({ queryKey: ['dataSources'] });
       }
+      qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['transformations'] });
     },
   });
 }
@@ -712,6 +703,8 @@ export function useUpdateDataSource() {
     onSuccess: (data) => {
       qc.setQueryData(dataSourceQueryKey(data), data);
       qc.invalidateQueries({ queryKey: ['dataSources'] });
+      qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['transformations'] });
     },
   });
 }

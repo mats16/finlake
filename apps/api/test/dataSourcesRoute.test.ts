@@ -29,7 +29,10 @@ async function startServer(deps: DataSourcesRouterDeps = {}): Promise<Harness> {
   const env: Env = EnvSchema.parse({});
   const app = express();
   app.use(express.json());
-  app.use('/api/integrations', dataSourcesRouter(db, env, deps));
+  app.use(
+    '/api/integrations',
+    dataSourcesRouter(db, env, { syncSharedPipeline: async () => {}, ...deps }),
+  );
   app.use(errorHandler);
   const server: Server = app.listen(0);
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
@@ -147,7 +150,13 @@ test('POST /configurations creates AWS row with composite PK reflected', async (
 });
 
 test('POST /configurations creates custom row with external pipeline id and qualified table', async () => {
-  const env = await startServer({ assertPipelineCanRun: async () => {} });
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async () => {},
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
   try {
     const { status, body } = await postJson<DataSource>(
       env.base,
@@ -167,6 +176,7 @@ test('POST /configurations creates custom row with external pipeline id and qual
     assert.equal(body.tableName, 'custom_schema.custom_usage');
     assert.equal(body.pipelineId, 'pipeline-123');
     assert.equal(body.enabled, true);
+    assert.equal(syncCalls, 1);
   } finally {
     await env.close();
   }
@@ -218,6 +228,41 @@ test('POST /configurations creates custom row without pipelineId', async () => {
     assert.equal(body.providerName, PROVIDER_CUSTOM);
     assert.match(body.accountId, /^custom_[0-9a-f-]{36}$/);
     assert.equal(body.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations syncs the shared pipeline for enabled custom row without pipelineId', async () => {
+  let permissionChecks = 0;
+  let syncCalls = 0;
+  const env = await startServer({
+    assertPipelineCanRun: async () => {
+      permissionChecks += 1;
+    },
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'custom',
+        name: 'Custom feed',
+        providerName: 'custom',
+        tableName: 'custom_usage',
+        enabled: true,
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_CUSTOM);
+    assert.equal(body.tableName, 'custom_usage');
+    assert.equal(body.pipelineId, null);
+    assert.equal(body.enabled, true);
+    assert.equal(permissionChecks, 0);
+    assert.equal(syncCalls, 1);
   } finally {
     await env.close();
   }
@@ -281,6 +326,36 @@ test('PATCH /configurations validates custom pipeline run permission before savi
       accountId: created.body.accountId,
     });
     assert.equal(stored?.pipelineId, null);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations syncs the shared pipeline when enabling a custom data source', async () => {
+  let syncCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed',
+      providerName: 'custom',
+      tableName: 'custom_usage',
+    });
+    assert.equal(created.status, 201);
+    assert.equal(syncCalls, 0);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
+      { enabled: true },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.enabled, true);
+    assert.equal(syncCalls, 1);
   } finally {
     await env.close();
   }

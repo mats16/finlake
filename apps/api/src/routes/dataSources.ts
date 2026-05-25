@@ -44,6 +44,7 @@ const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
 
 export interface DataSourcesRouterDeps {
   assertPipelineCanRun?: (pipelineId: string) => Promise<void>;
+  syncSharedPipeline?: () => Promise<void>;
 }
 
 export function dataSourcesRouter(
@@ -55,6 +56,7 @@ export function dataSourcesRouter(
   const assertPipelineCanRun =
     deps.assertPipelineCanRun ??
     ((pipelineId: string) => assertAppServicePrincipalCanRunPipeline(env, pipelineId));
+  const syncSharedPipeline = deps.syncSharedPipeline ?? (() => syncSharedFocusPipeline(env, db));
 
   router.get('/templates', (_req, res) => {
     res.json({ items: DATA_SOURCE_TEMPLATES });
@@ -125,7 +127,14 @@ export function dataSourcesRouter(
         enabled: parsed.data.enabled ?? false,
         config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
       });
-      res.status(201).json(created);
+      if (customSourceNeedsPipelineSync(created)) {
+        await syncSharedPipeline();
+      }
+      const refreshed = await db.repos.dataSources.get({
+        providerName: created.providerName,
+        accountId: created.accountId,
+      });
+      res.status(201).json(refreshed ?? created);
     } catch (err) {
       if (sendPipelineRunPermissionError(err, res)) return;
       next(err);
@@ -185,6 +194,9 @@ export function dataSourcesRouter(
         await assertPipelineCanRun(pipelineIdToCheck);
       }
       const updated = await db.repos.dataSources.update(key, parsed.data);
+      if (customSourceUpdateNeedsPipelineSync(existing, updated, parsed.data)) {
+        await syncSharedPipeline();
+      }
       res.json(updated);
     } catch (err) {
       if (sendPipelineRunPermissionError(err, res)) return;
@@ -357,4 +369,23 @@ function pipelineIdForRunPermissionCheck(
   if (!isCustomProvider(source.providerName)) return null;
   if (patch.pipelineId !== undefined) return patch.pipelineId?.trim() || null;
   return patch.enabled === true ? source.pipelineId : null;
+}
+
+function customSourceNeedsPipelineSync(source: {
+  providerName: string;
+  enabled: boolean;
+}): boolean {
+  return isCustomProvider(source.providerName) && source.enabled;
+}
+
+function customSourceUpdateNeedsPipelineSync(
+  previous: { providerName: string; enabled: boolean },
+  next: { enabled: boolean },
+  patch: { tableName?: string; pipelineId?: string | null; enabled?: boolean },
+): boolean {
+  if (!isCustomProvider(previous.providerName)) return false;
+  const enabledChanged = patch.enabled !== undefined && patch.enabled !== previous.enabled;
+  const activeSourceChanged =
+    next.enabled && (patch.tableName !== undefined || patch.pipelineId !== undefined);
+  return enabledChanged || activeSourceChanged;
 }
