@@ -84,18 +84,19 @@ function templateForRow(row: DataSource): DataSourceTemplate {
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {
-  return template.id === 'aws' || template.id === 'gcp';
+  return template.id === 'aws' || template.id === 'gcp' || template.id === 'custom';
 }
 
 function mergeDataSourceTemplates(
   fallbackTemplates: DataSourceTemplate[],
   apiTemplates: DataSourceTemplate[] | undefined,
 ): DataSourceTemplate[] {
-  const templatesById = new Map(fallbackTemplates.map((template) => [template.id, template]));
-  for (const template of apiTemplates ?? []) {
-    templatesById.set(template.id, template);
-  }
-  return Array.from(templatesById.values());
+  if (!apiTemplates) return fallbackTemplates;
+  const apiTemplateIds = new Set(apiTemplates.map((template) => template.id));
+  return [
+    ...apiTemplates,
+    ...fallbackTemplates.filter((template) => !apiTemplateIds.has(template.id)),
+  ];
 }
 
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
@@ -120,7 +121,6 @@ export function DataSources() {
   const createDs = useCreateDataSource();
 
   const rows = dataSources.data?.items ?? [];
-  const displayRows = rows;
   const pricingSummaries = useMemo(() => {
     const pricingRows = pricing.data?.items ?? [];
     return PRICING_PROVIDER_CONFIGS.map((config) => {
@@ -204,7 +204,7 @@ export function DataSources() {
         </div>
       </div>
 
-      {displayRows.length === 0 && !hasRegisteredPricingData ? (
+      {rows.length === 0 && !hasRegisteredPricingData ? (
         <p className="text-muted-foreground text-sm italic">{t('dataSources.empty')}</p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
@@ -218,7 +218,7 @@ export function DataSources() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {displayRows.map((row) => {
+              {rows.map((row) => {
                 const tpl = templateForRow(row);
                 const registryEntry = getTemplateRegistryEntry(tpl);
                 return (

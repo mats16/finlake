@@ -318,10 +318,10 @@ test('POST /configurations rejects enabled custom row without pipelineId', async
   }
 });
 
-test('POST /configurations rejects whitespace-only custom pipelineId', async () => {
+test('POST /configurations treats whitespace-only custom pipelineId as null', async () => {
   const env = await startServer({ assertPipelineCanRun: async () => {} });
   try {
-    const { status, body } = await postJson<{ error: { message: string } }>(
+    const { status, body } = await postJson<DataSource>(
       env.base,
       '/api/integrations/configurations',
       {
@@ -332,9 +332,8 @@ test('POST /configurations rejects whitespace-only custom pipelineId', async () 
         pipelineId: '   ',
       },
     );
-    assert.equal(status, 400);
-    assert.equal(body.error.message, 'Invalid input');
-    assert.deepEqual(await env.db.repos.dataSources.list(), []);
+    assert.equal(status, 201);
+    assert.equal(body.pipelineId, null);
   } finally {
     await env.close();
   }
@@ -370,7 +369,7 @@ test('POST /configurations creates distinct custom rows for the same pipeline', 
   }
 });
 
-test('PATCH /configurations validates custom pipeline run permission before saving pipeline id', async () => {
+test('PATCH /configurations saves disabled custom pipeline id without permission check', async () => {
   const env = await startServer({
     assertPipelineCanRun: async () => {
       throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
@@ -385,19 +384,19 @@ test('PATCH /configurations validates custom pipeline run permission before savi
     });
     assert.equal(created.status, 201);
 
-    const { status, body } = await patchJson<{ error: { message: string } }>(
+    const { status, body } = await patchJson<DataSource>(
       env.base,
       `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
       { pipelineId: 'pipeline-123' },
     );
-    assert.equal(status, 403);
-    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
+    assert.equal(status, 200);
+    assert.equal(body.pipelineId, 'pipeline-123');
 
     const stored = await env.db.repos.dataSources.get({
       providerName: PROVIDER_CUSTOM,
       accountId: created.body.accountId,
     });
-    assert.equal(stored?.pipelineId, null);
+    assert.equal(stored?.pipelineId, 'pipeline-123');
   } finally {
     await env.close();
   }
@@ -578,14 +577,18 @@ test('PATCH /configurations does not revalidate enabled custom source pipeline o
   }
 });
 
-test('PATCH /configurations revalidates enabled custom source pipeline on table edits', async () => {
+test('PATCH /configurations syncs enabled custom source table edits without revalidating pipeline', async () => {
   const calls: string[] = [];
+  let syncCalls = 0;
   const env = await startServer({
     assertPipelineCanRun: async (pipelineId) => {
       calls.push(pipelineId);
       if (calls.length > 1) {
         throw new PipelineRunPermissionError('App service principal is missing CAN_RUN', 403);
       }
+    },
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
     },
   });
   try {
@@ -599,20 +602,23 @@ test('PATCH /configurations revalidates enabled custom source pipeline on table 
     });
     assert.equal(created.status, 201);
 
-    const { status, body } = await patchJson<{ error: { message: string } }>(
+    assert.equal(syncCalls, 1);
+
+    const { status, body } = await patchJson<DataSource>(
       env.base,
       `/api/integrations/configurations/custom/${encodeURIComponent(created.body.accountId)}`,
       { tableName: 'custom_usage_v2' },
     );
-    assert.equal(status, 403);
-    assert.equal(body.error.message, 'App service principal is missing CAN_RUN');
-    assert.deepEqual(calls, ['pipeline-123', 'pipeline-123']);
+    assert.equal(status, 200);
+    assert.equal(body.tableName, 'custom_usage_v2');
+    assert.deepEqual(calls, ['pipeline-123']);
+    assert.equal(syncCalls, 2);
 
     const stored = await env.db.repos.dataSources.get({
       providerName: PROVIDER_CUSTOM,
       accountId: created.body.accountId,
     });
-    assert.equal(stored?.tableName, 'custom_usage');
+    assert.equal(stored?.tableName, 'custom_usage_v2');
   } finally {
     await env.close();
   }
@@ -760,6 +766,39 @@ test('PATCH /configurations syncs managed source disable while another source re
   }
 });
 
+test('PATCH /configurations syncs enabled managed source pipeline id changes', async () => {
+  let syncCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'aws',
+      name: 'AWS',
+      providerName: 'aws',
+      accountId: '123456789012',
+      tableName: 'aws_usage',
+      pipelineId: 'pipeline-old',
+      enabled: true,
+    });
+    assert.equal(created.status, 201);
+    assert.equal(syncCalls, 1);
+
+    const { status, body } = await patchJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations/aws/123456789012',
+      { pipelineId: 'pipeline-new' },
+    );
+    assert.equal(status, 200);
+    assert.equal(body.pipelineId, 'pipeline-new');
+    assert.equal(syncCalls, 2);
+  } finally {
+    await env.close();
+  }
+});
+
 test('PATCH /configurations accepts registered AWS config with equivalent object values', async () => {
   const env = await startServer();
   try {
@@ -859,6 +898,37 @@ test('POST /configurations rejects duplicate custom table registrations', async 
     assert.equal(first.status, 201);
     assert.equal(second.status, 409);
     assert.match(second.body.error.message, /already registered/);
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations rejects duplicate custom table registrations', async () => {
+  const env = await startServer();
+  try {
+    const first = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed A',
+      providerName: 'custom',
+      tableName: 'custom_usage_a',
+    });
+    const second = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'custom',
+      name: 'Custom feed B',
+      providerName: 'custom',
+      tableName: 'custom_usage_b',
+    });
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+
+    const duplicate = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/custom/${encodeURIComponent(second.body.accountId)}`,
+      { tableName: 'CUSTOM_USAGE_A' },
+    );
+
+    assert.equal(duplicate.status, 409);
+    assert.match(duplicate.body.error.message, /already registered/);
   } finally {
     await env.close();
   }

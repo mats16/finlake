@@ -91,7 +91,7 @@ test('assertAppServicePrincipalCanRunPipeline does not match group SCIM value', 
   );
 });
 
-test('assertAppServicePrincipalCanRunPipeline keeps principal types separate', async () => {
+test('assertAppServicePrincipalCanRunPipeline keeps user and group aliases type-separated', async () => {
   const env = EnvSchema.parse({ DATABRICKS_CLIENT_ID: 'app-client-id' });
   const wc = {
     currentUser: {
@@ -119,10 +119,6 @@ test('assertAppServicePrincipalCanRunPipeline keeps principal types separate', a
             group_name: 'application-id-123',
             all_permissions: [{ permission_level: 'CAN_RUN' }],
           },
-          {
-            service_principal_name: 'scim-id-123',
-            all_permissions: [{ permission_level: 'CAN_RUN' }],
-          },
         ],
       }),
     },
@@ -132,6 +128,27 @@ test('assertAppServicePrincipalCanRunPipeline keeps principal types separate', a
     () => assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never),
     (err) => err instanceof PipelineRunPermissionError && err.statusCode === 403,
   );
+});
+
+test('assertAppServicePrincipalCanRunPipeline accepts SCIM id as service principal ACL name', async () => {
+  const env = EnvSchema.parse({ DATABRICKS_CLIENT_ID: 'app-client-id' });
+  const wc = {
+    currentUser: {
+      me: async () => ({ id: 'scim-id-123', applicationId: 'application-id-123' }),
+    },
+    apiClient: {
+      request: async () => ({
+        access_control_list: [
+          {
+            service_principal_name: 'SCIM-ID-123',
+            all_permissions: [{ permission_level: 'CAN_RUN' }],
+          },
+        ],
+      }),
+    },
+  };
+
+  await assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never);
 });
 
 test('assertAppServicePrincipalCanRunPipeline accepts applicationId as service principal ACL name', async () => {
@@ -155,7 +172,7 @@ test('assertAppServicePrincipalCanRunPipeline accepts applicationId as service p
   await assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never);
 });
 
-test('assertAppServicePrincipalCanRunPipeline ignores top-level permission_level', async () => {
+test('assertAppServicePrincipalCanRunPipeline accepts top-level permission_level', async () => {
   const env = EnvSchema.parse({ DATABRICKS_CLIENT_ID: 'app-client-id' });
   const wc = {
     currentUser: {
@@ -165,7 +182,7 @@ test('assertAppServicePrincipalCanRunPipeline ignores top-level permission_level
       request: async () => ({
         access_control_list: [
           {
-            user_name: 'app-client-id',
+            service_principal_name: 'app-client-id',
             permission_level: 'CAN_RUN',
           },
         ],
@@ -173,10 +190,7 @@ test('assertAppServicePrincipalCanRunPipeline ignores top-level permission_level
     },
   };
 
-  await assert.rejects(
-    () => assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never),
-    (err) => err instanceof PipelineRunPermissionError && err.statusCode === 403,
-  );
+  await assertAppServicePrincipalCanRunPipeline(env, 'pipeline-123', wc as never);
 });
 
 test('assertAppServicePrincipalCanRunPipeline rejects when the app service principal lacks run permission', async () => {
@@ -315,6 +329,44 @@ test('createAppServicePrincipalPipelineRunAsserter retries identity lookup after
 
   assert.equal(identityCalls, 2);
   assert.equal(permissionCalls, 1);
+});
+
+test('createAppServicePrincipalPipelineRunAsserter refreshes aliases after permission denial', async () => {
+  const env = EnvSchema.parse({});
+  let identityCalls = 0;
+  let permissionCalls = 0;
+  const wc = {
+    currentUser: {
+      me: async () => {
+        identityCalls += 1;
+        return {
+          applicationId: 'application-id-123',
+          groups: identityCalls === 1 ? [] : [{ display: 'finlake-runners' }],
+        };
+      },
+    },
+    apiClient: {
+      request: async () => {
+        permissionCalls += 1;
+        return {
+          access_control_list: [
+            {
+              group_name: 'finlake-runners',
+              all_permissions: [{ permission_level: 'CAN_RUN' }],
+            },
+          ],
+        };
+      },
+    },
+  };
+  const assertCanRun = createAppServicePrincipalPipelineRunAsserter(env, {
+    workspaceClientFactory: () => wc as never,
+  });
+
+  await assertCanRun('pipeline-123');
+
+  assert.equal(identityCalls, 2);
+  assert.equal(permissionCalls, 2);
 });
 
 test('createAppServicePrincipalPipelineRunAsserter refreshes cached identity after the ttl', async () => {

@@ -136,7 +136,8 @@ export function dataSourcesRouter(
         enabled: parsed.data.enabled ?? false,
         config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
       });
-      if (sourceNeedsPipelineSync(created)) {
+      const needsPipelineSync = sourceNeedsPipelineSync(created);
+      if (needsPipelineSync) {
         try {
           await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
         } catch (err) {
@@ -153,11 +154,23 @@ export function dataSourcesRouter(
           throw err;
         }
       }
+      if (!needsPipelineSync) {
+        res.status(201).json(created);
+        return;
+      }
       const refreshed = await db.repos.dataSources.get({
         providerName: created.providerName,
         accountId: created.accountId,
       });
-      res.status(201).json(refreshed ?? created);
+      if (!refreshed) {
+        res.status(409).json({
+          error: {
+            message: 'Data source was deleted before pipeline synchronization completed.',
+          },
+        });
+        return;
+      }
+      res.status(201).json(refreshed);
     } catch (err) {
       if (sendPipelineRunPermissionError(err, res)) return;
       next(err);
@@ -215,6 +228,19 @@ export function dataSourcesRouter(
       const nextCandidate = { ...existing, ...parsed.data };
       if (
         isCustomProvider(existing.providerName) &&
+        parsed.data.tableName !== undefined &&
+        parsed.data.tableName !== existing.tableName &&
+        (await customTableAlreadyRegistered(db, parsed.data.tableName, key))
+      ) {
+        res.status(409).json({
+          error: {
+            message: `Custom data source table is already registered: ${parsed.data.tableName}`,
+          },
+        });
+        return;
+      }
+      if (
+        isCustomProvider(existing.providerName) &&
         nextCandidate.enabled &&
         !nextCandidate.pipelineId
       ) {
@@ -237,7 +263,7 @@ export function dataSourcesRouter(
           await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
         } catch (err) {
           try {
-            await restoreDataSource(db, key, existing, parsed.data);
+            await restoreDataSource(db, key, existing, updated, parsed.data);
           } catch (restoreErr) {
             console.warn(
               `[dataSources] Failed to restore DB row ${key.providerName}/${key.accountId} after shared pipeline sync failure: ${(restoreErr as Error).message}`,
@@ -382,6 +408,7 @@ function isRegisteredAwsSource(source: {
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (!isJsonComparable(left) || !isJsonComparable(right)) return Object.is(left, right);
   return JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
 }
 
@@ -389,25 +416,44 @@ function canonicalJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalJsonValue);
   }
-  if (value !== null && typeof value === 'object') {
+  if (isPlainRecord(value)) {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .sort(([leftKey], [rightKey]) => (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0))
         .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]),
     );
   }
   return value;
 }
 
+function isJsonComparable(value: unknown): boolean {
+  if (value === null) return true;
+  if (Array.isArray(value)) return value.every(isJsonComparable);
+  if (isPlainRecord(value)) return Object.values(value).every(isJsonComparable);
+  return ['boolean', 'number', 'string'].includes(typeof value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 async function customTableAlreadyRegistered(
   db: DatabaseClient,
   tableName: string,
+  exceptKey?: DataSourceKey,
 ): Promise<boolean> {
   const normalizedTableName = normalizeTableNameForComparison(tableName);
   const existingSources = await db.repos.dataSources.list();
   return existingSources.some(
     (source) =>
       isCustomProvider(source.providerName) &&
+      !(
+        exceptKey &&
+        source.providerName === exceptKey.providerName &&
+        source.accountId === exceptKey.accountId
+      ) &&
       normalizeTableNameForComparison(source.tableName) === normalizedTableName,
   );
 }
@@ -445,16 +491,13 @@ function pipelineIdForRunPermissionCheck(
   },
 ): string | null {
   if (!isCustomProvider(previous.providerName) || !next.pipelineId) return null;
+  if (!next.enabled) return null;
   const pipelineChanged =
     patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
   if (pipelineChanged) return next.pipelineId;
 
   const enabling = patch.enabled === true && !previous.enabled;
-  if (enabling) return next.pipelineId;
-
-  const enabledSourceChanged =
-    previous.enabled && patch.tableName !== undefined && patch.tableName !== previous.tableName;
-  return enabledSourceChanged ? next.pipelineId : null;
+  return enabling ? next.pipelineId : null;
 }
 
 function sourceNeedsPipelineSync(source: { providerName: string; enabled: boolean }): boolean {
@@ -482,9 +525,12 @@ function sourceUpdateNeedsPipelineSync(
   if (!next.enabled) return false;
 
   const tableNameChanged = patch.tableName !== undefined && patch.tableName !== previous.tableName;
-  const configChanged = patch.config !== undefined && !sameJsonValue(patch.config, previous.config);
   if (!isCustomProvider(previous.providerName)) {
-    return tableNameChanged || configChanged;
+    const configChanged =
+      patch.config !== undefined && !sameJsonValue(patch.config, previous.config);
+    const pipelineChanged =
+      patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+    return tableNameChanged || configChanged || pipelineChanged;
   }
   const pipelineChanged =
     patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
@@ -515,6 +561,13 @@ async function restoreDataSource(
     enabled: boolean;
     config: Record<string, unknown>;
   },
+  updated: {
+    name: string;
+    tableName: string;
+    pipelineId: string | null;
+    enabled: boolean;
+    config: Record<string, unknown>;
+  },
   patch: {
     name?: string;
     tableName?: string;
@@ -523,11 +576,23 @@ async function restoreDataSource(
     config?: Record<string, unknown>;
   },
 ): Promise<void> {
+  const current = await db.repos.dataSources.get(key);
+  if (!current) return;
   const rollback: typeof patch = {};
-  if (patch.name !== undefined) rollback.name = source.name;
-  if (patch.tableName !== undefined) rollback.tableName = source.tableName;
-  if (patch.pipelineId !== undefined) rollback.pipelineId = source.pipelineId;
-  if (patch.enabled !== undefined) rollback.enabled = source.enabled;
-  if (patch.config !== undefined) rollback.config = source.config;
-  await db.repos.dataSources.update(key, rollback);
+  if (patch.name !== undefined && current.name === updated.name) rollback.name = source.name;
+  if (patch.tableName !== undefined && current.tableName === updated.tableName) {
+    rollback.tableName = source.tableName;
+  }
+  if (patch.pipelineId !== undefined && current.pipelineId === updated.pipelineId) {
+    rollback.pipelineId = source.pipelineId;
+  }
+  if (patch.enabled !== undefined && current.enabled === updated.enabled) {
+    rollback.enabled = source.enabled;
+  }
+  if (patch.config !== undefined && sameJsonValue(current.config, updated.config)) {
+    rollback.config = source.config;
+  }
+  if (Object.keys(rollback).length > 0) {
+    await db.repos.dataSources.update(key, rollback);
+  }
 }

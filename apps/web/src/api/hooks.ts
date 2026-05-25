@@ -692,8 +692,9 @@ export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}
   });
 }
 
-export function useUpdateDataSource() {
+export function useUpdateDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
     mutationFn: ({ key, body }: { key: DataSourceKey; body: DataSourceUpdateBody }) =>
       apiFetch<DataSource>(dsConfigPath(key), {
@@ -702,15 +703,18 @@ export function useUpdateDataSource() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(dataSourceQueryKey(data), data);
-      qc.invalidateQueries({ queryKey: ['dataSources'] });
-      qc.invalidateQueries({ queryKey: ['appSettings'] });
-      qc.invalidateQueries({ queryKey: ['transformations'] });
+      if (invalidateOnSuccess) {
+        qc.invalidateQueries({ queryKey: ['dataSources'] });
+        qc.invalidateQueries({ queryKey: ['appSettings'] });
+        qc.invalidateQueries({ queryKey: ['transformations'] });
+      }
     },
   });
 }
 
-export function useDeleteDataSource() {
+export function useDeleteDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
+  const invalidateOnSuccess = opts.invalidateOnSuccess ?? true;
   return useMutation({
     mutationFn: (key: DataSourceKey) =>
       apiFetch<void>(dsConfigPath(key), {
@@ -718,9 +722,11 @@ export function useDeleteDataSource() {
       }),
     onSuccess: (_data, key) => {
       qc.removeQueries({ queryKey: dataSourceQueryKey(key) });
-      qc.invalidateQueries({ queryKey: ['dataSources'] });
-      qc.invalidateQueries({ queryKey: ['appSettings'] });
-      qc.invalidateQueries({ queryKey: ['transformations'] });
+      if (invalidateOnSuccess) {
+        qc.invalidateQueries({ queryKey: ['dataSources'] });
+        qc.invalidateQueries({ queryKey: ['appSettings'] });
+        qc.invalidateQueries({ queryKey: ['transformations'] });
+      }
     },
   });
 }

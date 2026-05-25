@@ -10,6 +10,7 @@ interface PipelinePermissionResponse {
 }
 
 interface PipelineAccessControlEntry {
+  permission_level?: string;
   all_permissions?: Array<{
     permission_level?: string;
   }>;
@@ -68,17 +69,32 @@ export function createAppServicePrincipalPipelineRunAsserter(
       const aliasesPromise = currentPrincipalAliases(wcCache.client, env).catch((err) => {
         if (aliasesCache?.promise === aliasesPromise) {
           aliasesCache = null;
+          wcCache = null;
         }
         throw err;
       });
       aliasesCache = { promise: aliasesPromise, expiresAt: currentTime + cacheTtlMs };
     }
-    await assertAppServicePrincipalCanRunPipeline(
-      env,
-      pipelineId,
-      wcCache.client,
-      aliasesCache.promise,
-    );
+    try {
+      await assertAppServicePrincipalCanRunPipeline(
+        env,
+        pipelineId,
+        wcCache.client,
+        aliasesCache.promise,
+      );
+    } catch (err) {
+      if (!(err instanceof PipelineRunPermissionError) || err.statusCode !== 403 || !wcCache) {
+        throw err;
+      }
+      const refreshedAliases = currentPrincipalAliases(wcCache.client, env);
+      aliasesCache = { promise: refreshedAliases, expiresAt: now() + cacheTtlMs };
+      await assertAppServicePrincipalCanRunPipeline(
+        env,
+        pipelineId,
+        wcCache.client,
+        refreshedAliases,
+      );
+    }
   };
 }
 
@@ -138,7 +154,10 @@ function principalMatches(
 }
 
 function entryCanRun(entry: PipelineAccessControlEntry): boolean {
-  const levels = (entry.all_permissions ?? []).map((permission) => permission.permission_level);
+  const levels = [
+    entry.permission_level,
+    ...(entry.all_permissions ?? []).map((permission) => permission.permission_level),
+  ];
   return levels.some((level) => RUN_PERMISSION_LEVELS.has((level ?? '').trim().toUpperCase()));
 }
 
@@ -162,7 +181,13 @@ async function currentPrincipalAliases(wc: WorkspaceClient, env: Env): Promise<P
       isPermissionDenied(err) ? 403 : 502,
     );
   }
-  for (const value of [env.DATABRICKS_CLIENT_ID, current.applicationId]) {
+  for (const value of [
+    env.DATABRICKS_CLIENT_ID,
+    current.id,
+    current.displayName,
+    current.externalId,
+    current.applicationId,
+  ]) {
     addPrincipalAlias(aliases.servicePrincipal, value);
   }
   addUserAlias(aliases, current.userName);
