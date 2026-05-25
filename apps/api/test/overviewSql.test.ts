@@ -44,6 +44,7 @@ test('baseParams includes time range and per-source params', () => {
   const sources = [
     fakeSource({ providerName: 'databricks', accountId: 'default' }),
     fakeSource({ providerName: 'aws', accountId: '123456789012' }),
+    fakeSource({ providerName: 'gcp', accountId: 'ABCDEF_123456_ABCDEF' }),
   ];
   const range = { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' };
   const params = baseParams(sources, range);
@@ -56,9 +57,12 @@ test('baseParams includes time range and per-source params', () => {
   assert.ok(names.includes('account_id_0'));
   assert.ok(names.includes('data_source_id_1'));
   assert.ok(names.includes('account_id_1'));
+  assert.ok(names.includes('account_id_2'));
 
   const billingParam = params.find((p) => p.name === 'account_id_1');
   assert.equal(billingParam?.value, '123456789012');
+  const gcpBillingParam = params.find((p) => p.name === 'account_id_2');
+  assert.equal(gcpBillingParam?.value, 'ABCDEF-123456-ABCDEF');
   const nullBillingParam = params.find((p) => p.name === 'account_id_0');
   assert.equal(nullBillingParam?.value, null);
 });

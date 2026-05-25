@@ -257,7 +257,9 @@ test('POST /configurations creates Google Cloud row with source config reflected
     );
     assert.equal(status, 201);
     assert.equal(body.providerName, PROVIDER_GCP);
-    assert.equal(body.accountId, 'ABCDEF_123456_ABCDEF');
+    assert.equal(body.accountId, 'ABCDEF-123456-ABCDEF');
+    assert.equal(body.focusVersion, '1.2');
+    assert.equal(body.config.billingAccountId, 'ABCDEF-123456-ABCDEF');
     assert.equal(body.config.sourceCatalog, 'gcp_foreign');
     assert.equal(body.config.sourceSchema, 'billing_export');
     assert.equal(body.config.sourceTable, 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF');

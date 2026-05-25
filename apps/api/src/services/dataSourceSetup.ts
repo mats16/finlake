@@ -17,6 +17,7 @@ import {
   isDatabricksProvider,
   isGcpProvider,
   medallionSchemaNamesFromSettings,
+  normalizeGcpBillingAccountId,
   normalizeS3Prefix,
   quoteIdent,
   quotePrincipal,
@@ -255,7 +256,9 @@ function resourceSlug(source: {
   };
   if (isDatabricksProvider(source.providerName)) return 'focus';
   if (isAwsProvider(source.providerName)) return fromConfig('awsAccountId') ?? source.accountId;
-  if (isGcpProvider(source.providerName)) return fromConfig('billingAccountId') ?? source.accountId;
+  if (isGcpProvider(source.providerName)) {
+    return normalizeGcpBillingAccountId(fromConfig('billingAccountId') ?? source.accountId);
+  }
   if (source.providerName === 'Azure') return fromConfig('subscriptionId') ?? source.accountId;
   return source.accountId;
 }
@@ -539,8 +542,9 @@ function readGcpFocusSource(config: GcpFocusConfig): {
       'Google Cloud billing source must be the resource-level detailed export table. Enable Detailed usage cost in Google Cloud Billing export settings, then select gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>.',
     );
   }
-  const billingAccountId =
-    config.billingAccountId ?? gcpBillingAccountIdFromTableName(config.sourceTable);
+  const billingAccountId = normalizeGcpBillingAccountId(
+    config.billingAccountId ?? gcpBillingAccountIdFromTableName(config.sourceTable),
+  );
   if (!billingAccountId.trim()) {
     throw new Error('Billing account id could not be derived from the selected table.');
   }

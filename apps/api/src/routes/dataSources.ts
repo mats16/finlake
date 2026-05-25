@@ -11,6 +11,8 @@ import {
   isAwsProvider,
   isCustomProvider,
   isDatabricksProvider,
+  isGcpProvider,
+  normalizeGcpBillingAccountId,
   type DataSourceKey,
   type Env,
 } from '@finlake/shared';
@@ -103,7 +105,7 @@ export function dataSourcesRouter(db: DatabaseClient, env: Env): Router {
         focusVersion: template.focus_version,
         pipelineId,
         enabled: parsed.data.enabled ?? false,
-        config: parsed.data.config ?? {},
+        config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
       });
       res.status(201).json(created);
     } catch (err) {
@@ -259,8 +261,28 @@ function accountIdForCreate(
   if (isCustomTemplate) {
     return `custom_${randomUUID()}`;
   }
-  if (accountId?.trim()) return accountId.trim();
+  const trimmedAccountId = accountId?.trim();
+  if (trimmedAccountId) {
+    if (isGcpProvider(providerName)) return normalizeGcpBillingAccountId(trimmedAccountId);
+    return trimmedAccountId;
+  }
   return isDatabricksProvider(providerName) ? DEFAULT_DATABRICKS_ACCOUNT_ID : null;
+}
+
+function configForCreate(
+  providerName: string,
+  config: Record<string, unknown>,
+  accountId: string,
+): Record<string, unknown> {
+  if (!isGcpProvider(providerName)) return config;
+  const billingAccountId =
+    typeof config.billingAccountId === 'string' && config.billingAccountId.trim().length > 0
+      ? config.billingAccountId
+      : accountId;
+  return {
+    ...config,
+    billingAccountId: normalizeGcpBillingAccountId(billingAccountId),
+  };
 }
 
 function isRegisteredAwsSource(source: {

@@ -45,6 +45,7 @@ import {
   DATABRICKS_FOCUS_VERSION,
   GCP_FOCUS_VERSION,
   medallionSchemaNamesFromSettings,
+  normalizeGcpBillingAccountId,
   normalizeS3Prefix,
   s3BucketFromUrl,
   tableLeafName,
@@ -1192,9 +1193,10 @@ function gcpErrorStep(message: string): GcpSetupStepId {
 }
 
 function billingAccountIdFromGcpTable(tableName: string): string {
-  return tableName.startsWith(GCP_DETAILED_BILLING_TABLE_PREFIX)
+  const accountId = tableName.startsWith(GCP_DETAILED_BILLING_TABLE_PREFIX)
     ? tableName.slice(GCP_DETAILED_BILLING_TABLE_PREFIX.length)
     : tableName;
+  return normalizeGcpBillingAccountId(accountId);
 }
 
 function gcpUsageTableName(accountId: string): string {

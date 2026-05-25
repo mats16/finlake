@@ -103,6 +103,10 @@ export function isGcpProvider(providerName: string): boolean {
   return normalizeProviderName(providerName) === PROVIDER_GCP;
 }
 
+export function normalizeGcpBillingAccountId(accountId: string): string {
+  return accountId.trim().replace(/_/g, '-');
+}
+
 export const DataSourceProviderNameSchema = z
   .string()
   .min(1)
@@ -208,7 +212,7 @@ export type CustomDataSourceOptionsResponse = z.infer<typeof CustomDataSourceOpt
 
 export const DATABRICKS_FOCUS_VERSION = '1.3';
 export const AWS_FOCUS_VERSION = '1.2';
-export const GCP_FOCUS_VERSION = '1.0';
+export const GCP_FOCUS_VERSION = '1.2';
 
 export const DataSourceTemplateSchema = z.object({
   id: z.string().min(1).max(128),

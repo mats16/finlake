@@ -36,6 +36,7 @@ import {
   isDatabricksProvider,
   isGcpProvider,
   medallionSchemaNamesFromSettings,
+  normalizeGcpBillingAccountId,
   toDataSourceKey,
   unquotedFqn,
   type DataSource,
@@ -115,7 +116,9 @@ function awsAccountIdFor(row: DataSource): string {
 }
 
 function gcpBillingAccountIdFor(row: DataSource): string {
-  return configString(row.config, 'billingAccountId') || row.accountId;
+  return normalizeGcpBillingAccountId(
+    configString(row.config, 'billingAccountId') || row.accountId,
+  );
 }
 
 function gcpSourceTableFor(row: DataSource): string {

@@ -19,9 +19,11 @@ import {
   DATABRICKS_ACCOUNT_PRICES_TABLE_DEFAULT,
   DATABRICKS_LIST_PRICES_TABLE_DEFAULT,
   DOWNLOADS_VOLUME_DEFAULT,
+  GCP_FOCUS_VERSION,
   MEDALLION_SCHEMA_DEFAULTS,
   PRICING_SCHEMA_DEFAULT,
   medallionSchemaNamesFromSettings,
+  normalizeGcpBillingAccountId,
   quoteIdent,
 } from '@finlake/shared';
 
@@ -76,10 +78,10 @@ test('sourceSilverPipelineName follows ingest pipeline naming convention', () =>
   assert.equal(
     sourceSilverPipelineName({
       providerName: 'gcp',
-      accountId: 'ABCDEF_123456_ABCDEF',
+      accountId: 'ABCDEF-123456-ABCDEF',
       config: { billingAccountId: 'ABCDEF_123456_ABCDEF' },
     }),
-    'finops-ingest-gcp-ABCDEF_123456_ABCDEF-pipeline',
+    'finops-ingest-gcp-ABCDEF-123456-ABCDEF-pipeline',
   );
 });
 
@@ -145,11 +147,13 @@ test('AWS FOCUS data export query includes AWS extension columns', () => {
 });
 
 test('gcp billing export helpers derive canonical source and target names', () => {
+  assert.equal(normalizeGcpBillingAccountId('ABCDEF_123456_ABCDEF'), 'ABCDEF-123456-ABCDEF');
   assert.equal(
     gcpBillingAccountIdFromTableName('gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF'),
-    'ABCDEF_123456_ABCDEF',
+    'ABCDEF-123456-ABCDEF',
   );
-  assert.equal(gcpUsageTableName('ABCDEF_123456_ABCDEF'), 'gcp_abcdef_123456_abcdef_usage');
+  assert.equal(gcpUsageTableName('ABCDEF-123456-ABCDEF'), 'gcp_abcdef_123456_abcdef_usage');
+  assert.equal(GCP_FOCUS_VERSION, '1.2');
 });
 
 test('buildGcpFocusSilverPipelineSql maps detailed billing export into FOCUS columns', () => {
@@ -165,15 +169,45 @@ test('buildGcpFocusSilverPipelineSql maps detailed billing export into FOCUS col
     sql,
     /FROM `gcp_foreign`\.`billing_export`\.`gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF`/,
   );
-  assert.match(sql, /CAST\(billing_account_id AS STRING\) AS BillingAccountId/);
-  assert.match(sql, /'Google Cloud' AS ProviderName/);
-  assert.match(sql, /CAST\(project\.id AS STRING\) AS SubAccountId/);
-  assert.match(sql, /CAST\(resource\.global_name AS STRING\) AS ResourceId/);
   assert.match(
     sql,
-    /CAST\(usage\.amount_in_pricing_units AS DECIMAL\(30, 15\)\) AS PricingQuantity/,
+    /replace\(CAST\(billing_account_id AS STRING\), '_', '-'\) AS BillingAccountId/,
+  );
+  assert.match(sql, /'Google Cloud' AS ProviderName/);
+  assert.match(sql, /CAST\(project\.id AS STRING\) AS SubAccountId/);
+  assert.match(
+    sql,
+    /CAST\(COALESCE\(resource\.global_name, resource\.name\) AS STRING\) AS ResourceId/,
+  );
+  assert.match(
+    sql,
+    /WHEN finlake_cost_type = 'regular'\s+THEN CAST\(usage\.amount_in_pricing_units AS DECIMAL\(30, 15\)\)/,
   );
   assert.match(sql, /map_from_entries\(/);
+  assert.match(sql, /WHEN 'rounding_error' THEN 'Adjustment'/);
+  assert.match(sql, /THEN 'Correction'/);
+  assert.match(sql, /COALESCE\(cost_at_list_consumption_model, cost_at_list, cost\)/);
+  assert.match(sql, /COALESCE\(price\.list_price_consumption_model, price\.list_price\)/);
+  assert.match(sql, /COALESCE\(price\.effective_price, price\.effective_price_default\)/);
+  assert.match(sql, /to_utc_timestamp\(/);
+  assert.match(sql, /America\/Los_Angeles/);
+  assert.match(
+    sql,
+    /CAST\(COALESCE\(resource\.name, resource\.global_name\) AS STRING\) AS ResourceName/,
+  );
+  assert.match(sql, /regexp_extract\(CAST\(resource\.global_name AS STRING\)/);
+  assert.match(sql, /WHEN 'Compute Engine' THEN 'Compute'/);
+  assert.match(sql, /WHEN 'BigQuery' THEN 'Analytics'/);
+  assert.match(sql, /WHEN 'Cloud Storage' THEN 'Storage'/);
+  assert.match(sql, /compute\.googleapis\.com\/reservation_name/);
+  assert.match(sql, /compute\.googleapis\.com\/reservation_project_id/);
+  assert.match(sql, /subscription\.instance_id/);
+  assert.match(sql, /COMMITTED_USAGE_DISCOUNT/);
+  assert.match(sql, /CASE WHEN finlake_cost_type = 'regular' THEN CAST\(sku\.id AS STRING\)/);
+  assert.match(sql, /CASE WHEN finlake_cost_type = 'regular' THEN 'Standard'/);
+  assert.match(sql, /concat\('project:', CAST\(label\.key AS STRING\)\)/);
+  assert.match(sql, /concat\('system:', CAST\(label\.key AS STRING\)\)/);
+  assert.match(sql, /'tag:',\s+COALESCE\(CAST\(tag\.namespace AS STRING\), 'global'\)/);
   assert.doesNotMatch(sql, /usage_daily/);
   assert.doesNotMatch(sql, /gold_schema_name/);
 });

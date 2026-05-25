@@ -4,8 +4,10 @@ import {
   dataSourceKeyString,
   GOLD_USAGE_TABLES,
   isDatabricksDefaultAccount,
+  isGcpProvider,
   MEDALLION_SCHEMA_DEFAULTS,
   medallionSchemaNamesFromSettings,
+  normalizeGcpBillingAccountId,
 } from '../schemas/dataSource.js';
 import type { SqlParam } from '../schemas/sql.js';
 import type { UsageRange } from '../schemas/usage.js';
@@ -182,7 +184,10 @@ matched AS (
 }
 
 function billingAccountFilter(source: DataSource): string | null {
-  return isDatabricksDefaultAccount(source) ? null : source.accountId;
+  if (isDatabricksDefaultAccount(source)) return null;
+  return isGcpProvider(source.providerName)
+    ? normalizeGcpBillingAccountId(source.accountId)
+    : source.accountId;
 }
 
 export function buildDailySql(cte: string): string {
