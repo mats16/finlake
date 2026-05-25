@@ -38,15 +38,47 @@ interface PrincipalAliases {
   group: Set<string>;
 }
 
+export interface PipelineRunAsserterOptions {
+  cacheTtlMs?: number;
+  now?: () => number;
+  workspaceClientFactory?: (env: Env) => WorkspaceClient;
+}
+
+const PRINCIPAL_ALIAS_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export function createAppServicePrincipalPipelineRunAsserter(
   env: Env,
+  options: PipelineRunAsserterOptions = {},
 ): (pipelineId: string) => Promise<void> {
-  let wc: WorkspaceClient | null = null;
-  let aliasesPromise: Promise<PrincipalAliases> | null = null;
+  let wcCache: { client: WorkspaceClient; expiresAt: number } | null = null;
+  let aliasesCache: { promise: Promise<PrincipalAliases>; expiresAt: number } | null = null;
+  const cacheTtlMs = options.cacheTtlMs ?? PRINCIPAL_ALIAS_CACHE_TTL_MS;
+  const now = options.now ?? Date.now;
+  const createWorkspaceClient =
+    options.workspaceClientFactory ??
+    ((currentEnv: Env) => requireAppWorkspaceClient(currentEnv, PipelineRunPermissionError, 412));
+
   return async (pipelineId: string) => {
-    wc ??= requireAppWorkspaceClient(env, PipelineRunPermissionError);
-    aliasesPromise ??= currentPrincipalAliases(wc, env);
-    await assertAppServicePrincipalCanRunPipeline(env, pipelineId, wc, aliasesPromise);
+    const currentTime = now();
+    if (!wcCache || currentTime >= wcCache.expiresAt) {
+      wcCache = { client: createWorkspaceClient(env), expiresAt: currentTime + cacheTtlMs };
+      aliasesCache = null;
+    }
+    if (!aliasesCache || currentTime >= aliasesCache.expiresAt) {
+      const aliasesPromise = currentPrincipalAliases(wcCache.client, env).catch((err) => {
+        if (aliasesCache?.promise === aliasesPromise) {
+          aliasesCache = null;
+        }
+        throw err;
+      });
+      aliasesCache = { promise: aliasesPromise, expiresAt: currentTime + cacheTtlMs };
+    }
+    await assertAppServicePrincipalCanRunPipeline(
+      env,
+      pipelineId,
+      wcCache.client,
+      aliasesCache.promise,
+    );
   };
 }
 
@@ -56,7 +88,7 @@ export async function assertAppServicePrincipalCanRunPipeline(
   workspaceClient?: WorkspaceClient,
   principalAliasesPromise?: Promise<PrincipalAliases>,
 ): Promise<void> {
-  const wc = workspaceClient ?? requireAppWorkspaceClient(env, PipelineRunPermissionError);
+  const wc = workspaceClient ?? requireAppWorkspaceClient(env, PipelineRunPermissionError, 412);
   const aliases = await (principalAliasesPromise ?? currentPrincipalAliases(wc, env));
   let permissions: PipelinePermissionResponse;
   try {

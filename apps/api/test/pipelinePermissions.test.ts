@@ -4,6 +4,7 @@ import { EnvSchema } from '@finlake/shared';
 import {
   PipelineRunPermissionError,
   assertAppServicePrincipalCanRunPipeline,
+  createAppServicePrincipalPipelineRunAsserter,
 } from '../src/services/pipelinePermissions.js';
 
 test('assertAppServicePrincipalCanRunPipeline accepts CAN_RUN for the app service principal', async () => {
@@ -258,4 +259,98 @@ test('assertAppServicePrincipalCanRunPipeline maps permission read failures by c
       ),
     (err) => err instanceof PipelineRunPermissionError && err.statusCode === 502,
   );
+
+  await assert.rejects(
+    () =>
+      assertAppServicePrincipalCanRunPipeline(
+        env,
+        'ambiguous-message',
+        baseClient(new Error('404 page not found while reading proxy response')) as never,
+      ),
+    (err) => err instanceof PipelineRunPermissionError && err.statusCode === 502,
+  );
+});
+
+test('createAppServicePrincipalPipelineRunAsserter retries identity lookup after a rejection', async () => {
+  const env = EnvSchema.parse({});
+  let identityCalls = 0;
+  let permissionCalls = 0;
+  const wc = {
+    currentUser: {
+      me: async () => {
+        identityCalls += 1;
+        if (identityCalls === 1) {
+          throw new Error('transient current user failure');
+        }
+        return { applicationId: 'application-id-123' };
+      },
+    },
+    apiClient: {
+      request: async () => {
+        permissionCalls += 1;
+        return {
+          access_control_list: [
+            {
+              service_principal_name: 'application-id-123',
+              all_permissions: [{ permission_level: 'CAN_RUN' }],
+            },
+          ],
+        };
+      },
+    },
+  };
+  const assertCanRun = createAppServicePrincipalPipelineRunAsserter(env, {
+    workspaceClientFactory: () => wc as never,
+  });
+
+  await assert.rejects(
+    () => assertCanRun('pipeline-123'),
+    (err) => err instanceof PipelineRunPermissionError && err.statusCode === 502,
+  );
+  await assertCanRun('pipeline-123');
+
+  assert.equal(identityCalls, 2);
+  assert.equal(permissionCalls, 1);
+});
+
+test('createAppServicePrincipalPipelineRunAsserter refreshes cached identity after the ttl', async () => {
+  const env = EnvSchema.parse({});
+  let now = 0;
+  let factoryCalls = 0;
+  let identityCalls = 0;
+  const assertCanRun = createAppServicePrincipalPipelineRunAsserter(env, {
+    cacheTtlMs: 10,
+    now: () => now,
+    workspaceClientFactory: () => {
+      factoryCalls += 1;
+      const applicationId = `application-id-${factoryCalls}`;
+      return {
+        currentUser: {
+          me: async () => {
+            identityCalls += 1;
+            return { applicationId };
+          },
+        },
+        apiClient: {
+          request: async () => ({
+            access_control_list: [
+              {
+                service_principal_name: applicationId,
+                all_permissions: [{ permission_level: 'CAN_RUN' }],
+              },
+            ],
+          }),
+        },
+      } as never;
+    },
+  });
+
+  await assertCanRun('pipeline-123');
+  now = 9;
+  await assertCanRun('pipeline-123');
+  now = 10;
+  await assertCanRun('pipeline-123');
+
+  assert.equal(factoryCalls, 2);
+  assert.equal(identityCalls, 2);
 });

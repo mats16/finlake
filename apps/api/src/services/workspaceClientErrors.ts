@@ -28,6 +28,5 @@ export function isNotFound(err: unknown): boolean {
       return true;
     }
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return /RESOURCE_DOES_NOT_EXIST|not found|404/i.test(message);
+  return false;
 }

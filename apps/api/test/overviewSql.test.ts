@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   buildCoverageSql,
   buildOverviewDailyStatement,
+  buildOverviewServicesStatement,
+  buildOverviewSkusStatement,
   buildDailySql,
   joinedBillingRowsSql,
   rangeParams,
@@ -64,6 +66,22 @@ test('buildOverviewDailyStatement returns null without enabled sources', () => {
   );
 
   assert.equal(statement, null);
+});
+
+test('overview service and SKU statements bind source join params', () => {
+  const sources = [fakeSource({ providerName: 'aws', accountId: '123456789012' })];
+  const settings = { catalog_name: 'finops', gold_schema_name: 'gold' };
+  const range = { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' };
+
+  for (const buildStatement of [buildOverviewServicesStatement, buildOverviewSkusStatement]) {
+    const statement = buildStatement(sources, settings, range);
+
+    assert.ok(statement);
+    assert.deepEqual(
+      statement.params.map((param) => param.name),
+      ['start_ts', 'end_ts', 'data_source_id_0', 'provider_name_0', 'account_id_0'],
+    );
+  }
 });
 
 test('buildDailySql preserves all months and groups by 5 dimensions', () => {

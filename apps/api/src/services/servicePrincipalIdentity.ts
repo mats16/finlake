@@ -23,14 +23,22 @@ export async function currentServicePrincipalOwnerAliases(
   addOwnerAlias(aliases, current.userName);
   addOwnerAlias(aliases, current.displayName);
   addOwnerAlias(aliases, current.externalId);
+  addOwnerAlias(aliases, current.applicationId);
 
   return aliases;
 }
 
-export function requireAppWorkspaceClient(env: Env, ErrorClass: ServiceErrorCtor): WorkspaceClient {
+export function requireAppWorkspaceClient(
+  env: Env,
+  ErrorClass: ServiceErrorCtor,
+  missingStatusCode = 500,
+): WorkspaceClient {
   const wc = buildAppWorkspaceClient(env);
   if (!wc) {
-    throw new ErrorClass('Databricks app service principal credentials not configured', 412);
+    throw new ErrorClass(
+      'Databricks app service principal credentials not configured',
+      missingStatusCode,
+    );
   }
   return wc;
 }

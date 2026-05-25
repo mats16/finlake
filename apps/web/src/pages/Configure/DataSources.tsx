@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   dataSourceKeyString,
   isAwsProvider,
-  isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
   type PricingNotebookState,
@@ -99,21 +98,6 @@ function mergeDataSourceTemplates(
   return Array.from(templatesById.values());
 }
 
-function collapseCustomRows(rows: DataSource[]): DataSource[] {
-  const enabledCustom = rows.find((row) => isCustomProvider(row.providerName) && row.enabled);
-  const firstCustom = rows.find((row) => isCustomProvider(row.providerName));
-  const representative = enabledCustom ?? firstCustom;
-  if (!representative) return rows;
-
-  return rows.flatMap((row) =>
-    isCustomProvider(row.providerName)
-      ? row === representative
-        ? [{ ...representative, enabled: Boolean(enabledCustom) }]
-        : []
-      : [row],
-  );
-}
-
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
   if (template.id === 'databricks_focus13') return '/integrations/databricks';
   if (template.id === 'aws') return '/integrations/aws';
@@ -136,7 +120,7 @@ export function DataSources() {
   const createDs = useCreateDataSource();
 
   const rows = dataSources.data?.items ?? [];
-  const displayRows = useMemo(() => collapseCustomRows(rows), [rows]);
+  const displayRows = rows;
   const pricingSummaries = useMemo(() => {
     const pricingRows = pricing.data?.items ?? [];
     return PRICING_PROVIDER_CONFIGS.map((config) => {
@@ -251,11 +235,7 @@ export function DataSources() {
                     <TableCell>
                       <div className="flex min-w-56 items-center gap-3">
                         <VendorLogo source={tpl} logo={registryEntry?.logo} size={32} />
-                        <div className="font-medium">
-                          {isCustomProvider(row.providerName)
-                            ? tpl.name
-                            : displayNameForRow(row, tpl)}
-                        </div>
+                        <div className="font-medium">{displayNameForRow(row, tpl)}</div>
                       </div>
                     </TableCell>
                     <TableCell>

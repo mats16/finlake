@@ -88,7 +88,7 @@ GROUP BY 1, 2, 3
 ORDER BY 4 DESC
 LIMIT 20
 `,
-    params: rangeParams(range),
+    params: baseParams(sources, range),
   };
 }
 
@@ -114,7 +114,7 @@ GROUP BY 1, 2, 3
 ORDER BY 4 DESC
 LIMIT 50
 `,
-    params: rangeParams(range),
+    params: baseParams(sources, range),
   };
 }
 

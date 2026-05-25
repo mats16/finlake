@@ -113,7 +113,7 @@ export function dataSourcesRouter(
       }
       if (isCustomTemplate && parsed.data.enabled === true && !pipelineId) {
         res.status(409).json({
-          error: { message: 'Custom data source must have a pipelineId before enabling.' },
+          error: { message: 'Custom data source cannot be enabled without a pipelineId.' },
         });
         return;
       }
@@ -213,7 +213,7 @@ export function dataSourcesRouter(
         !nextCandidate.pipelineId
       ) {
         res.status(409).json({
-          error: { message: 'Custom data source must have a pipelineId before enabling.' },
+          error: { message: 'Custom data source cannot be enabled without a pipelineId.' },
         });
         return;
       }
@@ -230,7 +230,13 @@ export function dataSourcesRouter(
         try {
           await syncSharedPipelineIfAnyEnabled(db, syncSharedPipeline);
         } catch (err) {
-          await restoreDataSource(db, key, existing);
+          try {
+            await restoreDataSource(db, key, existing);
+          } catch (restoreErr) {
+            console.warn(
+              `[dataSources] Failed to restore DB row ${key.providerName}/${key.accountId} after shared pipeline sync failure: ${(restoreErr as Error).message}`,
+            );
+          }
           throw err;
         }
       }
@@ -370,7 +376,21 @@ function isRegisteredAwsSource(source: {
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJsonValue);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]),
+    );
+  }
+  return value;
 }
 
 async function customTableAlreadyRegistered(
@@ -402,6 +422,7 @@ function sendPipelineRunPermissionError(err: unknown, res: Response): boolean {
 function pipelineIdForRunPermissionCheck(
   previous: {
     providerName: string;
+    tableName: string;
     pipelineId: string | null;
     enabled: boolean;
   },
@@ -418,15 +439,15 @@ function pipelineIdForRunPermissionCheck(
   },
 ): string | null {
   if (!isCustomProvider(previous.providerName) || !next.pipelineId) return null;
-  const pipelineChanged = patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+  const pipelineChanged =
+    patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
   if (pipelineChanged) return next.pipelineId;
 
   const enabling = patch.enabled === true && !previous.enabled;
   if (enabling) return next.pipelineId;
 
   const enabledSourceChanged =
-    previous.enabled &&
-    (patch.name !== undefined || patch.tableName !== undefined || patch.config !== undefined);
+    previous.enabled && patch.tableName !== undefined && patch.tableName !== previous.tableName;
   return enabledSourceChanged ? next.pipelineId : null;
 }
 
@@ -459,7 +480,8 @@ function sourceUpdateNeedsPipelineSync(
   if (!isCustomProvider(previous.providerName)) {
     return tableNameChanged || configChanged;
   }
-  const pipelineChanged = patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
+  const pipelineChanged =
+    patch.pipelineId !== undefined && patch.pipelineId !== previous.pipelineId;
   return tableNameChanged || pipelineChanged;
 }
 
@@ -468,7 +490,12 @@ async function syncSharedPipelineIfAnyEnabled(
   syncSharedPipeline: () => Promise<void>,
 ): Promise<void> {
   const enabledSources = (await db.repos.dataSources.list()).filter((source) => source.enabled);
-  if (enabledSources.length === 0) return;
+  if (enabledSources.length === 0) {
+    console.warn(
+      '[dataSources] Shared pipeline refresh skipped because no enabled data sources remain. Existing generated pipeline assets may require manual cleanup.',
+    );
+    return;
+  }
   await syncSharedPipeline();
 }
 
