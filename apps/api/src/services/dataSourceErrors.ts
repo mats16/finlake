@@ -1,6 +1,6 @@
 import { WorkspaceServiceError } from './workspaceClientErrors.js';
 
-export type DataSourceSetupStep = 'systemGrants' | 'lakeflowJob';
+export type DataSourceSetupStep = 'systemGrants' | 'sourceGrants' | 'lakeflowJob';
 
 export class DataSourceSetupError extends WorkspaceServiceError {
   readonly step: DataSourceSetupStep | undefined;

@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   dataSourceKeyString,
   isAwsProvider,
+  isCustomProvider,
   isDatabricksProvider,
+  isGcpProvider,
   type PricingNotebookState,
   type DataSource,
 } from '@finlake/shared';
@@ -83,13 +85,14 @@ function templateForRow(row: DataSource): DataSourceTemplate {
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {
-  return template.id === 'aws' || template.id === 'custom';
+  return template.id === 'aws' || template.id === 'custom' || template.id === 'gcp';
 }
 
 function detailPathForTemplate(template: DataSourceTemplate): string | null {
   if (template.id === 'databricks_focus13') return '/integrations/databricks';
   if (template.id === 'aws') return '/integrations/aws';
   if (template.id === 'custom') return '/integrations/custom';
+  if (template.id === 'gcp') return '/integrations/gcp';
   return null;
 }
 
@@ -133,6 +136,9 @@ export function DataSources() {
       return false;
     }
     if (tpl.id === 'aws' && rows.some((row) => isAwsProvider(row.providerName))) {
+      return false;
+    }
+    if (tpl.id === 'gcp' && rows.some((row) => isGcpProvider(row.providerName))) {
       return false;
     }
     return true;

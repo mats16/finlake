@@ -5,10 +5,12 @@ import {
   DEFAULT_DATABRICKS_ACCOUNT_ID,
   PROVIDER_AWS,
   PROVIDER_DATABRICKS,
+  PROVIDER_GCP,
   dataSourceKeyString,
   isAwsProvider,
   isDatabricksDefaultAccount,
   isDatabricksProvider,
+  isGcpProvider,
   normalizeProviderName,
   toDataSourceKey,
 } from '@finlake/shared';
@@ -26,12 +28,18 @@ test('normalizeProviderName collapses AWS display names', () => {
   assert.equal(normalizeProviderName('amazon web services'), PROVIDER_AWS);
 });
 
-test('normalizeProviderName trims unknown providers without lowercasing', () => {
-  assert.equal(normalizeProviderName(' Azure '), 'Azure');
-  assert.equal(normalizeProviderName('GCP'), 'GCP');
+test('normalizeProviderName collapses Google Cloud display names', () => {
+  assert.equal(normalizeProviderName('GCP'), PROVIDER_GCP);
+  assert.equal(normalizeProviderName('Google Cloud'), PROVIDER_GCP);
+  assert.equal(normalizeProviderName('Google Cloud Platform'), PROVIDER_GCP);
 });
 
-test('isDatabricksProvider and isAwsProvider accept legacy display names', () => {
+test('normalizeProviderName trims unknown providers without lowercasing', () => {
+  assert.equal(normalizeProviderName(' Azure '), 'Azure');
+  assert.equal(normalizeProviderName('Oracle Cloud'), 'Oracle Cloud');
+});
+
+test('provider guards accept legacy display names', () => {
   assert.ok(isDatabricksProvider('Databricks'));
   assert.ok(isDatabricksProvider('databricks'));
   assert.ok(!isDatabricksProvider('AWS'));
@@ -39,6 +47,10 @@ test('isDatabricksProvider and isAwsProvider accept legacy display names', () =>
   assert.ok(isAwsProvider('AWS'));
   assert.ok(isAwsProvider('Amazon Web Services'));
   assert.ok(!isAwsProvider('Databricks'));
+
+  assert.ok(isGcpProvider('GCP'));
+  assert.ok(isGcpProvider('Google Cloud'));
+  assert.ok(!isGcpProvider('AWS'));
 });
 
 test('isDatabricksDefaultAccount only true for the synthetic default key', () => {

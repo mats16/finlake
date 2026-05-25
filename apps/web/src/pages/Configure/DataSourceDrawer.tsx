@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -28,6 +28,9 @@ import {
 import { Check, ExternalLink, Info, Pencil, X } from 'lucide-react';
 import {
   useAppSettings,
+  useCatalogSchemas,
+  useCatalogTables,
+  useCatalogs,
   useCreateDataSource,
   useDataSource,
   useDeleteDataSource,
@@ -40,6 +43,7 @@ import {
   ACCOUNT_PRICES_DEFAULT,
   CATALOG_SETTING_KEY,
   DATABRICKS_FOCUS_VERSION,
+  GCP_FOCUS_VERSION,
   medallionSchemaNamesFromSettings,
   normalizeS3Prefix,
   s3BucketFromUrl,
@@ -47,6 +51,7 @@ import {
   unquotedFqn,
   toDataSourceKey,
   type DataSource,
+  type DataSourceCreateBody,
   type DataSourceKey,
   type DataSourceSetupResult,
   type ExternalLocationSummary,
@@ -55,7 +60,7 @@ import { useI18n } from '../../i18n';
 import { displayNameForRow, findTemplateById, findTemplateForRow } from './dataSourceCatalog';
 import type { DatabricksFocusDraft } from './DataSources';
 import { type AwsFocusDraft, type AwsSetupMode, useAwsFocusForm } from './useAwsFocusForm';
-import { catalogTableUrl, configString, storageCredentialUrl } from './utils';
+import { catalogTableUrl, configString, messageOf, storageCredentialUrl } from './utils';
 
 const AWS_BCM_DATA_EXPORTS_URL =
   'https://us-east-1.console.aws.amazon.com/costmanagement/home#/bcm-data-exports';
@@ -101,7 +106,9 @@ export function DataSourceDrawer({
       ? 'dataSources.systemTables.focusViewDesc'
       : template?.id === 'aws'
         ? 'dataSources.aws.description'
-        : null;
+        : template?.id === 'gcp'
+          ? 'dataSources.gcp.description'
+          : null;
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => (open ? null : onClose())}>
@@ -180,6 +187,8 @@ export function DataSourceConfigurator({
         <FocusViewSection row={row} actionEnd={deleteAction} />
       ) : template?.id === 'aws' ? (
         <AwsFocusSection row={row} actionEnd={deleteAction} />
+      ) : template?.id === 'gcp' ? (
+        <GcpFocusSection row={row} actionEnd={deleteAction} />
       ) : (
         <div className="max-w-5xl space-y-4">
           <Alert>
@@ -1139,6 +1148,603 @@ function AwsPipelineActions({
         </Alert>
       ) : null}
     </div>
+  );
+}
+
+const GCP_DETAILED_BILLING_TABLE_PREFIX = 'gcp_billing_export_resource_v1_';
+const GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX = 'gcp_billing_export_resource_';
+const HIDDEN_GCP_SCHEMA_NAMES = new Set(['information_schema', 'public']);
+
+interface GcpCatalogOption {
+  name: string;
+  catalogType: string | null;
+}
+
+export type GcpFocusDraft = Pick<
+  DataSourceCreateBody,
+  'templateId' | 'name' | 'providerName' | 'tableName'
+>;
+
+type GcpSetupStepId = 'sourceGrants' | 'lakeflowJob';
+
+function initialGcpSetupSteps(): ResourceStep[] {
+  return [
+    { id: 'sourceGrants', status: 'idle', detail: null, href: null },
+    { id: 'lakeflowJob', status: 'idle', detail: null, href: null },
+  ];
+}
+
+function updateGcpSetupSteps(
+  steps: ResourceStep[],
+  updates: Partial<Record<GcpSetupStepId, Partial<Omit<ResourceStep, 'id'>>>>,
+): ResourceStep[] {
+  return steps.map((step) => {
+    const update = updates[step.id as GcpSetupStepId];
+    return update ? { ...step, ...update } : step;
+  });
+}
+
+function gcpErrorStep(message: string): GcpSetupStepId {
+  if (/grant|foreign catalog|source|USE CATALOG|USE SCHEMA|SELECT/i.test(message)) {
+    return 'sourceGrants';
+  }
+  return 'lakeflowJob';
+}
+
+function billingAccountIdFromGcpTable(tableName: string): string {
+  return tableName.startsWith(GCP_DETAILED_BILLING_TABLE_PREFIX)
+    ? tableName.slice(GCP_DETAILED_BILLING_TABLE_PREFIX.length)
+    : tableName;
+}
+
+function gcpUsageTableName(accountId: string): string {
+  const suffix = accountId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return suffix ? `gcp_${suffix}_usage` : 'gcp_usage';
+}
+
+function isGcpBillingExportResourceTable(tableName: string): boolean {
+  return tableName.startsWith(GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX);
+}
+
+function isRequiredGcpDetailedBillingTable(tableName: string): boolean {
+  return tableName.startsWith(GCP_DETAILED_BILLING_TABLE_PREFIX);
+}
+
+function isForeignCatalog(catalog: GcpCatalogOption): boolean {
+  return (catalog.catalogType ?? '').toUpperCase() === 'FOREIGN_CATALOG';
+}
+
+function isVisibleGcpSchema(schema: { name: string }): boolean {
+  return !HIDDEN_GCP_SCHEMA_NAMES.has(schema.name.trim().toLowerCase());
+}
+
+export function GcpFocusSection({
+  row,
+  draft,
+  onCreated,
+  excludedAccountIds,
+  actionEnd,
+}: {
+  row: DataSource | null;
+  draft?: GcpFocusDraft;
+  onCreated?: (row: DataSource) => void;
+  excludedAccountIds?: string[];
+  actionEnd?: ReactNode;
+}) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const me = useMe();
+  const settings = useAppSettings();
+  const createDs = useCreateDataSource({ invalidateOnSuccess: row !== null });
+  const setupDs = useSetupDataSource({ invalidateOnSuccess: row !== null });
+  const runJob = useRunDataSourceJob();
+  const catalogs = useCatalogs();
+  const remoteConfig = row?.config ?? {};
+  const remoteSourceCatalog = configString(remoteConfig, 'sourceCatalog');
+  const remoteSourceSchema = configString(remoteConfig, 'sourceSchema');
+  const remoteSourceTable = configString(remoteConfig, 'sourceTable');
+  const [sourceCatalog, setSourceCatalog] = useState(remoteSourceCatalog);
+  const [sourceSchema, setSourceSchema] = useState(remoteSourceSchema);
+  const [sourceTable, setSourceTable] = useState(remoteSourceTable);
+  const schemas = useCatalogSchemas(sourceCatalog);
+  const tables = useCatalogTables(sourceCatalog, sourceSchema);
+  const excluded = useMemo(
+    () => new Set(row ? [] : (excludedAccountIds ?? [])),
+    [excludedAccountIds, row],
+  );
+  const billingAccountId = sourceTable ? billingAccountIdFromGcpTable(sourceTable) : '';
+  const derivedTableName = gcpUsageTableName(billingAccountId);
+  const baseTableName =
+    row?.tableName ?? (sourceTable ? derivedTableName : (draft?.tableName ?? 'gcp_usage'));
+  const tableName = tableLeafName(baseTableName);
+  const sourceFqn =
+    sourceCatalog && sourceSchema && sourceTable
+      ? unquotedFqn(sourceCatalog, sourceSchema, sourceTable)
+      : null;
+  const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
+  const silverSchema = medallionSchemaNamesFromSettings(settings.data?.settings ?? {}).silver;
+  const targetFqn = remoteCatalog
+    ? unquotedFqn(remoteCatalog, silverSchema, tableName)
+    : `${silverSchema}.${tableName}`;
+  const [result, setResult] = useState<DataSourceSetupResult | null>(null);
+  const [setupSteps, setSetupSteps] = useState<ResourceStep[]>(initialGcpSetupSteps);
+  const [setupProgressModalOpen, setSetupProgressModalOpen] = useState(false);
+  const [createdRowAfterSetup, setCreatedRowAfterSetup] = useState<DataSource | null>(null);
+  const [lastSetupWasUpdate, setLastSetupWasUpdate] = useState(false);
+  const [setupInFlight, setSetupInFlight] = useState(false);
+  const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
+  const workspaceUrl = me.data?.workspaceUrl ?? null;
+  const isSetup = Boolean(row?.enabled || result);
+  const hasRequiredDetailedExport = sourceTable
+    ? isRequiredGcpDetailedBillingTable(sourceTable)
+    : false;
+  const setupBusy = setupInFlight || createDs.isPending || setupDs.isPending;
+  const setupDisabled =
+    setupBusy ||
+    !remoteCatalog ||
+    !sourceCatalog ||
+    !sourceSchema ||
+    !sourceTable ||
+    !billingAccountId ||
+    !hasRequiredDetailedExport ||
+    (!row && !draft);
+
+  useEffect(() => setSourceCatalog(remoteSourceCatalog), [remoteSourceCatalog]);
+  useEffect(() => setSourceSchema(remoteSourceSchema), [remoteSourceSchema]);
+  useEffect(() => setSourceTable(remoteSourceTable), [remoteSourceTable]);
+  useEffect(() => {
+    setSetupSteps(initialGcpSetupSteps());
+    setSetupProgressModalOpen(false);
+    setCreatedRowAfterSetup(null);
+    setLastSetupWasUpdate(Boolean(row?.enabled));
+  }, [row?.providerName, row?.accountId, row?.enabled]);
+
+  const sourceTableOptions = useMemo(() => {
+    const options = tables.data?.tables ?? [];
+    if (row || excluded.size === 0) return options;
+    return options.filter((table) => !excluded.has(billingAccountIdFromGcpTable(table.name)));
+  }, [excluded, row, tables.data?.tables]);
+  const sourceCatalogOptions = useMemo(() => {
+    return (catalogs.data?.catalogs ?? []).filter(isForeignCatalog);
+  }, [catalogs.data?.catalogs]);
+  const sourceSchemaOptions = useMemo(() => {
+    return (schemas.data?.schemas ?? []).filter(isVisibleGcpSchema);
+  }, [schemas.data?.schemas]);
+
+  const onCatalogChange = (value: string) => {
+    setSourceCatalog(value);
+    setSourceSchema('');
+    setSourceTable('');
+  };
+
+  const onSchemaChange = (value: string) => {
+    setSourceSchema(value);
+    setSourceTable('');
+  };
+
+  const buildConfig = () => ({
+    ...remoteConfig,
+    billingAccountId,
+    sourceCatalog,
+    sourceSchema,
+    sourceTable,
+    sourceFqn,
+    targetSchema: silverSchema,
+  });
+
+  const onSetup = async () => {
+    if (setupDisabled || !sourceFqn) return;
+    setSetupInFlight(true);
+    setResult(null);
+    setLastSetupWasUpdate(Boolean(row?.enabled));
+    setSetupProgressModalOpen(true);
+    setCreatedRowAfterSetup(null);
+    setSetupSteps(
+      updateGcpSetupSteps(initialGcpSetupSteps(), {
+        sourceGrants: {
+          status: 'pending',
+          detail: sourceFqn,
+          href: catalogTableUrl(workspaceUrl, sourceFqn),
+        },
+        lakeflowJob: { status: 'idle', detail: null, href: null },
+      }),
+    );
+    let dataSource = row;
+    const config = buildConfig();
+    try {
+      if (!dataSource) {
+        if (!draft) throw new Error('Missing draft data source configuration.');
+        const created = await createDs.mutateAsync({
+          ...draft,
+          accountId: billingAccountId,
+          tableName,
+          enabled: false,
+          config,
+        });
+        dataSource = created;
+        setCreatedRowAfterSetup(created);
+      }
+
+      const r = await setupDs.mutateAsync({
+        key: toDataSourceKey(dataSource),
+        body: { tableName },
+      });
+      setResult(r);
+      const nextRow: DataSource = {
+        ...dataSource,
+        tableName,
+        focusVersion: dataSource.focusVersion ?? GCP_FOCUS_VERSION,
+        pipelineId: r.pipelineId,
+        enabled: true,
+        config,
+        updatedAt: new Date().toISOString(),
+      };
+      if (!row) setCreatedRowAfterSetup(nextRow);
+      setSetupSteps((steps) =>
+        updateGcpSetupSteps(steps, {
+          sourceGrants: {
+            status: 'done',
+            detail: sourceFqn,
+            href: catalogTableUrl(workspaceUrl, sourceFqn),
+          },
+          lakeflowJob: {
+            status: 'done',
+            detail: r.pipelineId,
+            href: databricksPipelineUrl(workspaceUrl, r.pipelineId),
+          },
+        }),
+      );
+    } catch (err) {
+      const message = (err as Error).message;
+      const serverStep = (err as { step?: string }).step;
+      const failed: GcpSetupStepId =
+        serverStep === 'sourceGrants' || serverStep === 'lakeflowJob'
+          ? serverStep
+          : gcpErrorStep(message);
+      setSetupSteps((steps) =>
+        updateGcpSetupSteps(steps, {
+          [failed]: { status: 'error', detail: message },
+          ...(failed === 'sourceGrants' ? { lakeflowJob: { status: 'idle', detail: null } } : {}),
+        }),
+      );
+    } finally {
+      setSetupInFlight(false);
+    }
+  };
+
+  const onRunJob = async () => {
+    if (!row) return;
+    await runJob.mutateAsync(toDataSourceKey(row));
+  };
+
+  const setupErrorMessage =
+    (createDs.error as Error | null)?.message ?? (setupDs.error as Error | null)?.message ?? null;
+  const closeSetupProgressModal = () => {
+    if (setupBusy) return;
+    setSetupProgressModalOpen(false);
+    const didSetup = createdRowAfterSetup !== null || result !== null;
+    if (createdRowAfterSetup) {
+      onCreated?.(createdRowAfterSetup);
+      setCreatedRowAfterSetup(null);
+    }
+    if (didSetup) {
+      qc.invalidateQueries({ queryKey: ['dataSources'] });
+      qc.invalidateQueries({ queryKey: ['appSettings'] });
+      qc.invalidateQueries({ queryKey: ['transformations'] });
+    }
+  };
+
+  return (
+    <section className="py-1">
+      <div className="max-w-5xl space-y-4">
+        <DatabricksResourceLinks
+          workspaceUrl={workspaceUrl}
+          pipelineId={pipelineId}
+          tableFqn={isSetup && remoteCatalog ? targetFqn : null}
+        />
+        <GcpSourceSelector
+          sourceCatalog={sourceCatalog}
+          sourceSchema={sourceSchema}
+          sourceTable={sourceTable}
+          sourceFqn={sourceFqn}
+          workspaceUrl={workspaceUrl}
+          catalogs={sourceCatalogOptions}
+          schemas={sourceSchemaOptions}
+          tables={sourceTableOptions}
+          loadingCatalogs={catalogs.isLoading}
+          loadingSchemas={schemas.isLoading}
+          loadingTables={tables.isLoading}
+          disabled={Boolean(row) || setupBusy}
+          errorMessage={
+            messageOf(catalogs.error) ?? messageOf(schemas.error) ?? messageOf(tables.error)
+          }
+          onCatalogChange={onCatalogChange}
+          onSchemaChange={onSchemaChange}
+          onTableChange={setSourceTable}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              disabled={setupDisabled}
+              onClick={onSetup}
+              className={isSetup ? 'success-action-button' : undefined}
+            >
+              {setupBusy ? <Spinner /> : null}
+              {t(
+                isSetup
+                  ? 'dataSources.systemTables.updateSchedule'
+                  : 'dataSources.systemTables.setupAndSchedule',
+              )}
+            </Button>
+            {row?.enabled && pipelineId ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="hover:bg-(--secondary-foreground) hover:text-(--secondary)"
+                disabled={runJob.isPending}
+                onClick={onRunJob}
+              >
+                {runJob.isPending ? <Spinner /> : null}
+                {t('dataSources.systemTables.runJob')}
+              </Button>
+            ) : null}
+          </div>
+          {actionEnd ? <div className="ml-auto">{actionEnd}</div> : null}
+        </div>
+        <GcpSetupProgressModal
+          open={setupProgressModalOpen}
+          steps={setupSteps}
+          error={setupErrorMessage}
+          closeDisabled={setupBusy}
+          onClose={closeSetupProgressModal}
+        />
+        {!remoteCatalog ? (
+          <Alert>
+            <Info />
+            <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
+          </Alert>
+        ) : null}
+        {sourceTable && !hasRequiredDetailedExport ? (
+          <Alert>
+            <Info />
+            <AlertDescription>{t('dataSources.gcp.detailedExportRequired')}</AlertDescription>
+          </Alert>
+        ) : null}
+        {result ? (
+          <Alert>
+            <Info />
+            <AlertDescription>
+              {t(
+                lastSetupWasUpdate
+                  ? 'dataSources.systemTables.updateOk'
+                  : 'dataSources.systemTables.setupOk',
+                {
+                  fqn: result.fqn,
+                  jobId: String(result.jobId),
+                },
+              )}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {runJob.data ? (
+          <Alert>
+            <Info />
+            <AlertDescription>
+              {t('dataSources.systemTables.runOk', {
+                updateId: runJob.data.updateId,
+              })}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {createDs.error ? (
+          <Alert variant="destructive">
+            <Info />
+            <AlertDescription>{(createDs.error as Error).message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {setupDs.error ? (
+          <Alert variant="destructive">
+            <Info />
+            <AlertDescription>{(setupDs.error as Error).message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {runJob.error ? (
+          <Alert variant="destructive">
+            <Info />
+            <AlertDescription>{(runJob.error as Error).message}</AlertDescription>
+          </Alert>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function GcpSourceSelector({
+  sourceCatalog,
+  sourceSchema,
+  sourceTable,
+  sourceFqn,
+  workspaceUrl,
+  catalogs,
+  schemas,
+  tables,
+  loadingCatalogs,
+  loadingSchemas,
+  loadingTables,
+  disabled,
+  errorMessage,
+  onCatalogChange,
+  onSchemaChange,
+  onTableChange,
+}: {
+  sourceCatalog: string;
+  sourceSchema: string;
+  sourceTable: string;
+  sourceFqn: string | null;
+  workspaceUrl: string | null;
+  catalogs: GcpCatalogOption[];
+  schemas: Array<{ name: string }>;
+  tables: Array<{
+    name: string;
+    tableType: string | null;
+    dataSourceFormat: string | null;
+  }>;
+  loadingCatalogs: boolean;
+  loadingSchemas: boolean;
+  loadingTables: boolean;
+  disabled: boolean;
+  errorMessage: string | null;
+  onCatalogChange: (value: string) => void;
+  onSchemaChange: (value: string) => void;
+  onTableChange: (value: string) => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid gap-3">
+        <label className="grid gap-1 text-xs">
+          <span className="text-muted-foreground">{t('dataSources.gcp.catalog')}</span>
+          <Select value={sourceCatalog} onValueChange={onCatalogChange} disabled={disabled}>
+            <SelectTrigger className="w-full">
+              <SelectValue
+                placeholder={
+                  loadingCatalogs ? t('common.loading') : t('dataSources.gcp.catalogPlaceholder')
+                }
+              />
+            </SelectTrigger>
+            <SelectContent className="z-[100]">
+              {catalogs.map((catalog) => (
+                <SelectItem key={catalog.name} value={catalog.name}>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{catalog.name}</span>
+                    {catalog.catalogType ? (
+                      <span className="text-muted-foreground text-xs">
+                        {catalog.catalogType.replace(/_CATALOG$/, '').toLowerCase()}
+                      </span>
+                    ) : null}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs">
+          <span className="text-muted-foreground">{t('dataSources.gcp.schema')}</span>
+          <Select
+            value={sourceSchema}
+            onValueChange={onSchemaChange}
+            disabled={disabled || !sourceCatalog}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue
+                placeholder={
+                  loadingSchemas ? t('common.loading') : t('dataSources.gcp.schemaPlaceholder')
+                }
+              />
+            </SelectTrigger>
+            <SelectContent className="z-[100]">
+              {schemas.map((schema) => (
+                <SelectItem key={schema.name} value={schema.name}>
+                  {schema.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs">
+          <span className="text-muted-foreground">{t('dataSources.gcp.table')}</span>
+          <Select
+            value={sourceTable}
+            onValueChange={onTableChange}
+            disabled={disabled || !sourceCatalog || !sourceSchema}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue
+                placeholder={
+                  loadingTables ? t('common.loading') : t('dataSources.gcp.tablePlaceholder')
+                }
+              />
+            </SelectTrigger>
+            <SelectContent className="z-[100]">
+              {tables.map((table) => (
+                <SelectItem key={table.name} value={table.name}>
+                  <span className="flex min-w-0 flex-col">
+                    <span
+                      className={cn(
+                        'truncate',
+                        isGcpBillingExportResourceTable(table.name) ? 'font-semibold' : null,
+                      )}
+                    >
+                      {table.name}
+                    </span>
+                    {table.tableType || table.dataSourceFormat ? (
+                      <span className="text-muted-foreground text-xs">
+                        {[table.tableType, table.dataSourceFormat].filter(Boolean).join(' / ')}
+                      </span>
+                    ) : null}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
+      {sourceFqn ? (
+        <ResourceLink
+          label={t('dataSources.gcp.sourceTable')}
+          id={sourceFqn}
+          href={catalogTableUrl(workspaceUrl, sourceFqn)}
+        />
+      ) : null}
+      {!loadingTables && sourceCatalog && sourceSchema && tables.length === 0 ? (
+        <Alert>
+          <Info />
+          <AlertDescription>{t('dataSources.gcp.noTables')}</AlertDescription>
+        </Alert>
+      ) : null}
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <Info />
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
+function GcpSetupProgressModal({
+  open,
+  steps,
+  error,
+  closeDisabled,
+  onClose,
+}: {
+  open: boolean;
+  steps: ResourceStep[];
+  error: string | null;
+  closeDisabled: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <ResourceProgressModal
+      open={open}
+      titleId="gcp-create-progress-title"
+      title={t('dataSources.gcp.resourceProgress')}
+      steps={steps}
+      stepLabelPrefix="dataSources.gcp.resourceSteps"
+      statusLabelPrefix="dataSources.gcp.resourceStepStatus"
+      error={error}
+      closeDisabled={closeDisabled}
+      onClose={onClose}
+    />
   );
 }
 

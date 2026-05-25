@@ -8,6 +8,8 @@ import type {
   AwsFocusExportCreateBody,
   AwsFocusExportCreateResponse,
   CatalogListResponse,
+  CatalogSchemaListResponse,
+  CatalogTableListResponse,
   CreateBudgetInput,
   CustomDataSourceOptionsResponse,
   DataSource,
@@ -464,6 +466,37 @@ export function useCatalogs() {
   return useQuery({
     queryKey: ['catalogs'],
     queryFn: () => apiFetch<CatalogListResponse>('/api/catalogs'),
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
+export function useCatalogSchemas(catalogName: string | null | undefined) {
+  return useQuery({
+    queryKey: ['catalogs', catalogName, 'schemas'],
+    queryFn: () =>
+      apiFetch<CatalogSchemaListResponse>(
+        `/api/catalogs/${encodeURIComponent(catalogName!)}/schemas`,
+      ),
+    enabled: Boolean(catalogName),
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
+export function useCatalogTables(
+  catalogName: string | null | undefined,
+  schemaName: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ['catalogs', catalogName, 'schemas', schemaName, 'tables'],
+    queryFn: () =>
+      apiFetch<CatalogTableListResponse>(
+        `/api/catalogs/${encodeURIComponent(catalogName!)}/schemas/${encodeURIComponent(
+          schemaName!,
+        )}/tables`,
+      ),
+    enabled: Boolean(catalogName && schemaName),
     staleTime: 60 * 1000,
     retry: false,
   });

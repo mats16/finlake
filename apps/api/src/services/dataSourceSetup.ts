@@ -7,6 +7,7 @@ import {
   DATABRICKS_FOCUS_VERSION,
   FOCUS_REFRESH_CRON_DEFAULT,
   FOCUS_REFRESH_TIMEZONE_DEFAULT,
+  GCP_FOCUS_VERSION,
   GOLD_USAGE_TABLES,
   LAKEFLOW_PIPELINE_SETTING_KEYS,
   focusSourceTables,
@@ -14,9 +15,11 @@ import {
   isAwsProvider,
   isCustomProvider,
   isDatabricksProvider,
+  isGcpProvider,
   medallionSchemaNamesFromSettings,
   normalizeS3Prefix,
   quoteIdent,
+  quotePrincipal,
   s3BucketFromUrl,
   s3ExportPath,
   tableLeafName,
@@ -48,6 +51,12 @@ import {
   buildAwsFocusSilverPipelineSql,
 } from './awsFocusTransformPipelineSql.js';
 import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineSql.js';
+import {
+  buildGcpFocusSilverPipelineSql,
+  gcpBillingAccountIdFromTableName,
+  gcpUsageTableName,
+  isGcpDetailedBillingExportTable,
+} from './gcpFocusTransformPipelineSql.js';
 import { grantStatements } from './focusPermissions.js';
 
 interface FocusConfig {
@@ -59,6 +68,13 @@ interface AwsFocusConfig {
   s3Bucket: string | null;
   s3Prefix: string | null;
   exportName: string | null;
+}
+
+interface GcpFocusConfig {
+  sourceCatalog: string | null;
+  sourceSchema: string | null;
+  sourceTable: string | null;
+  billingAccountId: string | null;
 }
 
 const setupLocks = new Map<string, Promise<void>>();
@@ -199,6 +215,22 @@ function readAwsFocusConfig(config: Record<string, unknown>): AwsFocusConfig {
   };
 }
 
+function readGcpFocusConfig(config: Record<string, unknown>): GcpFocusConfig {
+  const get = (k: string): string | null => {
+    const v = config[k];
+    return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+  };
+  const sourceTable = get('sourceTable');
+  return {
+    sourceCatalog: get('sourceCatalog'),
+    sourceSchema: get('sourceSchema'),
+    sourceTable,
+    billingAccountId:
+      get('billingAccountId') ??
+      (sourceTable ? gcpBillingAccountIdFromTableName(sourceTable) : null),
+  };
+}
+
 export function workspacePathFor(
   appName: string,
   key: DataSourceKey,
@@ -223,6 +255,7 @@ function resourceSlug(source: {
   };
   if (isDatabricksProvider(source.providerName)) return 'focus';
   if (isAwsProvider(source.providerName)) return fromConfig('awsAccountId') ?? source.accountId;
+  if (isGcpProvider(source.providerName)) return fromConfig('billingAccountId') ?? source.accountId;
   if (source.providerName === 'Azure') return fromConfig('subscriptionId') ?? source.accountId;
   return source.accountId;
 }
@@ -246,6 +279,9 @@ export function sourceSilverPipelineName(source: {
   if (isDatabricksProvider(source.providerName)) return 'finops-ingest-databricks-pipeline';
   if (isAwsProvider(source.providerName)) {
     return `finops-ingest-aws-${source.accountId}-pipeline`;
+  }
+  if (isGcpProvider(source.providerName)) {
+    return `finops-ingest-gcp-${resourceSlug(source)}-pipeline`;
   }
   return `${resourceLabelBase(source)}-pipeline`;
 }
@@ -288,13 +324,20 @@ async function setupFocusDataSourceLocked(
     db.repos.appSettings.list(),
   ]);
   if (!source) throw new DataSourceSetupError('Data source not found', 404);
-  if (!isDatabricksProvider(source.providerName) && !isAwsProvider(source.providerName)) {
+  if (
+    !isDatabricksProvider(source.providerName) &&
+    !isAwsProvider(source.providerName) &&
+    !isGcpProvider(source.providerName)
+  ) {
     throw new DataSourceSetupError(
-      `Setup is only supported for Databricks and AWS data sources (got '${source.providerName}')`,
+      `Setup is only supported for Databricks, AWS, and Google Cloud data sources (got '${source.providerName}')`,
       400,
     );
   }
-  if (isDatabricksProvider(source.providerName) && !userToken) {
+  if (
+    (isDatabricksProvider(source.providerName) || isGcpProvider(source.providerName)) &&
+    !userToken
+  ) {
     throw new DataSourceSetupError(
       'Missing OBO access token. Run behind Databricks Apps or `databricks apps run-local`.',
       401,
@@ -316,6 +359,7 @@ async function setupFocusDataSourceLocked(
   let focusVersion: string;
   let tableName: string;
   let databricksAccountPricesTable: string | null = null;
+  let gcpSource: ReturnType<typeof readGcpFocusSource> | null = null;
   try {
     if (isDatabricksProvider(source.providerName)) {
       const existing = readFocusConfig(source.config);
@@ -330,7 +374,7 @@ async function setupFocusDataSourceLocked(
         targetSchema: medallionSchemas.silver,
         goldSchema: medallionSchemas.gold,
       };
-    } else {
+    } else if (isAwsProvider(source.providerName)) {
       const existing = readAwsFocusConfig(source.config);
       const awsSource = readAwsFocusSource(existing);
       tableName = awsUsageTableName(awsSource.awsAccountId);
@@ -339,6 +383,20 @@ async function setupFocusDataSourceLocked(
         ...source.config,
         awsAccountId: awsSource.awsAccountId,
         sourcePath: s3ExportDataPath(awsSource),
+        targetSchema: medallionSchemas.silver,
+        goldSchema: medallionSchemas.gold,
+      };
+    } else {
+      gcpSource = readGcpFocusSource(readGcpFocusConfig(source.config));
+      tableName = body.tableName ?? gcpUsageTableName(gcpSource.billingAccountId);
+      focusVersion = GCP_FOCUS_VERSION;
+      nextConfig = {
+        ...source.config,
+        billingAccountId: gcpSource.billingAccountId,
+        sourceCatalog: gcpSource.sourceCatalog,
+        sourceSchema: gcpSource.sourceSchema,
+        sourceTable: gcpSource.sourceTable,
+        sourceFqn: gcpSource.sourceFqn,
         targetSchema: medallionSchemas.silver,
         goldSchema: medallionSchemas.gold,
       };
@@ -362,6 +420,17 @@ async function setupFocusDataSourceLocked(
     await assertCanReadUsageTable(userExecutor);
     await grantAppSystemTableAccess(env, userExecutor, databricksAccountPricesTable);
     await assertAppCanReadSystemTables(env, warehouseId, databricksAccountPricesTable);
+  }
+
+  if (isGcpProvider(source.providerName)) {
+    if (!gcpSource) {
+      throw new DataSourceSetupError('Google Cloud source table is not configured.', 400);
+    }
+    const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
+    const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
+    await assertCanReadGcpSource(userExecutor, gcpSource.sourceFqn);
+    await grantAppGcpSourceAccess(env, userExecutor, gcpSource);
+    await assertAppCanReadGcpSource(env, warehouseId, gcpSource.sourceFqn);
   }
 
   const candidateSource: DataSource = {
@@ -447,6 +516,51 @@ function readAwsFocusSource(config: AwsFocusConfig): {
     s3Prefix,
     exportName: config.exportName,
   };
+}
+
+function readGcpFocusSource(config: GcpFocusConfig): {
+  sourceCatalog: string;
+  sourceSchema: string;
+  sourceTable: string;
+  sourceFqn: string;
+  billingAccountId: string;
+} {
+  if (!config.sourceCatalog) {
+    throw new Error('Source catalog is not configured. Select a Google Cloud Foreign Catalog.');
+  }
+  if (!config.sourceSchema) {
+    throw new Error('Source schema is not configured. Select the BigQuery dataset schema.');
+  }
+  if (!config.sourceTable) {
+    throw new Error('Source table is not configured. Select the billing export table.');
+  }
+  if (!isGcpDetailedBillingExportTable(config.sourceTable)) {
+    throw new Error(
+      'Google Cloud billing source must be the resource-level detailed export table. Enable Detailed usage cost in Google Cloud Billing export settings, then select gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>.',
+    );
+  }
+  const billingAccountId =
+    config.billingAccountId ?? gcpBillingAccountIdFromTableName(config.sourceTable);
+  if (!billingAccountId.trim()) {
+    throw new Error('Billing account id could not be derived from the selected table.');
+  }
+  return {
+    sourceCatalog: config.sourceCatalog,
+    sourceSchema: config.sourceSchema,
+    sourceTable: config.sourceTable,
+    sourceFqn: quoteFlexibleFqn([config.sourceCatalog, config.sourceSchema, config.sourceTable]),
+    billingAccountId,
+  };
+}
+
+function quoteFlexibleFqn(parts: string[]): string {
+  return parts.map(quoteFlexibleIdent).join('.');
+}
+
+function quoteFlexibleIdent(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error('Identifier parts must not be empty.');
+  return `\`${trimmed.replace(/`/g, '``')}\``;
 }
 
 function s3ExportDataPath({
@@ -579,6 +693,98 @@ async function assertAppCanReadSystemTables(
       ].join(' '),
       400,
       'systemGrants',
+    );
+  }
+}
+
+async function assertCanReadGcpSource(
+  executor: StatementExecutor,
+  sourceFqn: string,
+): Promise<void> {
+  try {
+    await executor.run(
+      `SELECT 1 AS ok FROM ${sourceFqn} LIMIT 1`,
+      [],
+      z.object({ ok: z.number() }),
+    );
+  } catch (err) {
+    throw new DataSourceSetupError(
+      [
+        `Cannot read Google Cloud billing source table ${sourceFqn} with the current user.`,
+        'Grant USE CATALOG, USE SCHEMA, and SELECT on the Foreign Catalog table',
+        'before creating the FOCUS pipeline/job.',
+        (err as Error).message,
+      ].join(' '),
+      400,
+      'sourceGrants',
+    );
+  }
+}
+
+async function grantAppGcpSourceAccess(
+  env: Env,
+  executor: StatementExecutor,
+  source: { sourceCatalog: string; sourceSchema: string; sourceFqn: string },
+): Promise<void> {
+  const sp = (env.DATABRICKS_CLIENT_ID ?? '').trim();
+  if (!sp) {
+    throw new DataSourceSetupError(
+      'DATABRICKS_CLIENT_ID must be configured before granting Google Cloud billing source access.',
+      400,
+      'sourceGrants',
+    );
+  }
+  const spIdent = quotePrincipal(sp);
+  const statements = [
+    `GRANT USE CATALOG ON CATALOG ${quoteFlexibleIdent(source.sourceCatalog)} TO ${spIdent}`,
+    `GRANT USE SCHEMA ON SCHEMA ${quoteFlexibleFqn([
+      source.sourceCatalog,
+      source.sourceSchema,
+    ])} TO ${spIdent}`,
+    `GRANT SELECT ON TABLE ${source.sourceFqn} TO ${spIdent}`,
+  ];
+  for (const sql of statements) {
+    try {
+      await executor.run(sql, [], z.unknown());
+    } catch (err) {
+      throw new DataSourceSetupError(
+        `Failed to grant Google Cloud billing source access to the app service principal: ${(err as Error).message}`,
+        400,
+        'sourceGrants',
+      );
+    }
+  }
+}
+
+async function assertAppCanReadGcpSource(
+  env: Env,
+  warehouseId: string,
+  sourceFqn: string,
+): Promise<void> {
+  const executor = buildAppExecutor(env, warehouseId);
+  if (!executor) {
+    throw new DataSourceSetupError(
+      'Failed to build Databricks SQL executor for app service principal Google Cloud source access check.',
+      500,
+      'sourceGrants',
+    );
+  }
+  try {
+    await executor.run(
+      `SELECT 1 AS ok FROM ${sourceFqn} LIMIT 1`,
+      [],
+      z.object({ ok: z.number() }),
+    );
+  } catch (err) {
+    throw new DataSourceSetupError(
+      [
+        'Cannot read the Google Cloud billing source table with the app service principal after granting access.',
+        'Grant USE CATALOG, USE SCHEMA, and SELECT on the Foreign Catalog source to the app service principal',
+        'before creating the shared FOCUS pipeline/job.',
+        (err as Error).message,
+      ].join(' '),
+      400,
+      'sourceGrants',
     );
   }
 }
@@ -905,6 +1111,23 @@ function sourcePipelineFile(
       pipelineSql: buildFocusSilverPipelineSql({
         table: tableName,
         accountPricesTable: config.accountPricesTable,
+      }),
+    };
+  }
+  if (isGcpProvider(source.providerName)) {
+    const gcpSource = readGcpFocusSource(readGcpFocusConfig(source.config));
+    const tableName =
+      tableLeafName(source.tableName) || gcpUsageTableName(gcpSource.billingAccountId);
+    return {
+      tableName,
+      providerName: source.providerName,
+      source,
+      workspacePath: `${sourceRoot}/silver.sql`,
+      pipelineSql: buildGcpFocusSilverPipelineSql({
+        tableName,
+        sourceCatalog: gcpSource.sourceCatalog,
+        sourceSchema: gcpSource.sourceSchema,
+        sourceTable: gcpSource.sourceTable,
       }),
     };
   }

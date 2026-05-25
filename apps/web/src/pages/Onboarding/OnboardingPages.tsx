@@ -11,7 +11,11 @@ import {
   usePricingNotebook,
 } from '../../api/hooks';
 import { useI18n } from '../../i18n';
-import { AwsIntegrationDetail, DatabricksIntegrationDetail } from '../Configure/IntegrationDetails';
+import {
+  AwsIntegrationDetail,
+  DatabricksIntegrationDetail,
+  GcpIntegrationDetail,
+} from '../Configure/IntegrationDetails';
 import { Pricing } from '../Configure/Pricing';
 import { DataSourceTile, type TileBadge } from '../Configure/DataSourceTile';
 import { CustomDataSourceDialog } from '../Configure/CustomDataSourceDialog';
@@ -86,6 +90,7 @@ export function OnboardingIntegration() {
   const detailPathForTemplate = (template: DataSourceTemplate): string | null => {
     if (template.id === 'databricks_focus13') return '/onboarding/integration/databricks';
     if (template.id === 'aws') return '/onboarding/integration/aws';
+    if (template.id === 'gcp') return '/onboarding/integration/gcp';
     return null;
   };
 
@@ -162,6 +167,14 @@ export function OnboardingAwsIntegration() {
   return (
     <OnboardingDetailPanel backTo="/onboarding/integration">
       <AwsIntegrationDetail {...INTEGRATION_BACK_PROPS} />
+    </OnboardingDetailPanel>
+  );
+}
+
+export function OnboardingGcpIntegration() {
+  return (
+    <OnboardingDetailPanel backTo="/onboarding/integration">
+      <GcpIntegrationDetail {...INTEGRATION_BACK_PROPS} />
     </OnboardingDetailPanel>
   );
 }

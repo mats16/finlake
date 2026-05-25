@@ -74,12 +74,16 @@ export const DEFAULT_DATABRICKS_ACCOUNT_ID = 'default';
 export const PROVIDER_DATABRICKS = 'databricks';
 export const PROVIDER_AWS = 'aws';
 export const PROVIDER_CUSTOM = 'custom';
+export const PROVIDER_GCP = 'gcp';
 
 export function normalizeProviderName(providerName: string): string {
   const lower = providerName.trim().toLowerCase();
   if (lower === 'databricks') return PROVIDER_DATABRICKS;
   if (lower === 'aws' || lower === 'amazon web services') return PROVIDER_AWS;
   if (lower === 'custom' || lower === 'custom data source') return PROVIDER_CUSTOM;
+  if (lower === 'gcp' || lower === 'google cloud' || lower === 'google cloud platform') {
+    return PROVIDER_GCP;
+  }
   return providerName.trim();
 }
 
@@ -93,6 +97,10 @@ export function isAwsProvider(providerName: string): boolean {
 
 export function isCustomProvider(providerName: string): boolean {
   return normalizeProviderName(providerName) === PROVIDER_CUSTOM;
+}
+
+export function isGcpProvider(providerName: string): boolean {
+  return normalizeProviderName(providerName) === PROVIDER_GCP;
 }
 
 export const DataSourceProviderNameSchema = z
@@ -200,6 +208,7 @@ export type CustomDataSourceOptionsResponse = z.infer<typeof CustomDataSourceOpt
 
 export const DATABRICKS_FOCUS_VERSION = '1.3';
 export const AWS_FOCUS_VERSION = '1.2';
+export const GCP_FOCUS_VERSION = '1.0';
 
 export const DataSourceTemplateSchema = z.object({
   id: z.string().min(1).max(128),
@@ -253,10 +262,10 @@ export const DATA_SOURCE_TEMPLATES = [
   {
     id: 'gcp',
     name: 'Google Cloud',
-    description: 'Google Cloud billing export support is coming soon.',
+    description: 'BigQuery detailed billing export',
     subtitle: 'by Google Cloud',
-    focus_version: '1.0',
-    available: false,
+    focus_version: GCP_FOCUS_VERSION,
+    available: true,
     appearance: {
       brandColor: '#4285F4',
     },

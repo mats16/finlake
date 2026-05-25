@@ -1120,11 +1120,16 @@ export const ja: Dictionary = {
       awsAccountsTitle: 'AWS アカウント',
       customEmpty: 'カスタムデータソースはまだ追加されていません。',
       customSourcesTitle: 'カスタムデータソース',
+      gcpEmpty: '表示できる Google Cloud 請求アカウントがありません。',
+      gcpAccountsTitle: 'Google Cloud 請求アカウント',
       connectAccount: 'アカウントを接続',
       selectedSettings: 'AWS アカウント {account} の設定',
       configureAccount: 'AWS アカウント {account} を設定',
+      gcpSelectedSettings: 'Google Cloud 請求アカウント {account} の設定',
       moreActions: 'その他の操作',
       openInAws: 'AWS で開く',
+      cloudBilling: 'Cloud Billing',
+      openInGcp: 'Google Cloud で開く',
       remove: '削除',
       connectIntro: {
         title: 'アカウントを接続',
@@ -1288,6 +1293,38 @@ export const ja: Dictionary = {
         error: '失敗',
       },
     },
+    gcp: {
+      title: 'BigQuery 請求エクスポート',
+      description: 'Google Cloud の詳細請求エクスポートテーブルを FOCUS 形式へ変換します。',
+      connectTitle: 'Google Cloud 請求を接続',
+      connectDescription:
+        'Cloud Billing の詳細エクスポートを含む BigQuery Dataset を、既存の Databricks Foreign Catalog 経由で利用します。',
+      useExistingForeignCatalog: '既存の Foreign Catalog を使う',
+      modalDescription:
+        'BigQuery にエクスポートした Google Cloud の課金データテーブルを選択してください。',
+      catalog: 'カタログ',
+      schema: 'スキーマ (BigQuery Dataset)',
+      table: 'テーブル',
+      sourceTable: 'ソーステーブル',
+      catalogPlaceholder: 'Foreign Catalog を選択',
+      schemaPlaceholder: 'スキーマを選択',
+      tablePlaceholder: 'gcp_billing_export_resource_v1_* を選択',
+      noTables: 'このスキーマに表示できるテーブルがありません。',
+      detailedExportRequired:
+        'FOCUS 変換にはリソースレベルの詳細エクスポートが必須です。Google Cloud の Cloud Billing export 設定で Detailed usage cost の Enable detailed export を有効化し、gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID> テーブルを選択してください。',
+      resourceProgress: '作成状況',
+      resourceSteps: {
+        sourceGrants: 'Foreign Catalog 権限',
+        lakeflowJob: 'Lakeflow Spark 宣言型パイプライン',
+      },
+      resourceStepStatus: {
+        idle: '待機中',
+        pending: '作成中',
+        done: '作成済み',
+        skipped: 'スキップ',
+        error: '失敗',
+      },
+    },
     azure: {
       title: 'Azure Cost Management エクスポートの設定',
       placeholder: 'ストレージアカウント名',
@@ -1314,7 +1351,7 @@ export const ja: Dictionary = {
         subtitle: '',
       },
       gcp: {
-        description: '近日公開予定です。',
+        description: 'BigQuery 詳細請求エクスポート',
         subtitle: '',
       },
       snowflake: {
