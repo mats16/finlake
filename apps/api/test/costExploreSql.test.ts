@@ -133,7 +133,7 @@ test('buildCostExploreStatement emits expected date bucket expressions', () => {
 });
 
 test('buildCostExploreFilterValuesStatement groups filter dimensions', () => {
-  const statement = buildCostExploreFilterValuesStatement(sources, settings, range);
+  const statement = buildCostExploreFilterValuesStatement(settings, range);
 
   assert.ok(statement);
   assert.match(statement.query, /AS provider/);
@@ -142,15 +142,22 @@ test('buildCostExploreFilterValuesStatement groups filter dimensions', () => {
   assert.match(statement.query, /GROUP BY 1, 2, 3, 4, 5/);
 });
 
-test('cost explore statements return null without enabled sources', () => {
-  assert.equal(
-    buildCostExploreStatement({
-      sources: [],
-      settings,
-      range,
-      groupBy: ['provider'],
-    }),
-    null,
+test('cost explore statements read usage_daily without source filtering', () => {
+  const statement = buildCostExploreStatement({
+    settings,
+    range,
+    groupBy: ['provider'],
+  });
+  const filterStatement = buildCostExploreFilterValuesStatement(settings, range);
+
+  assert.ok(!statement.query.includes('JOIN requested'));
+  assert.ok(!filterStatement.query.includes('JOIN requested'));
+  assert.deepEqual(
+    statement.params.map((param) => param.name),
+    ['start_ts', 'end_ts'],
   );
-  assert.equal(buildCostExploreFilterValuesStatement([], settings, range), null);
+  assert.deepEqual(
+    filterStatement.params.map((param) => param.name),
+    ['start_ts', 'end_ts'],
+  );
 });
