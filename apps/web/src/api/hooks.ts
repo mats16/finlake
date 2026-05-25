@@ -693,7 +693,9 @@ export function useCreateDataSource(opts: { invalidateOnSuccess?: boolean } = {}
 }
 
 function dataSourcePatchAffectsSharedPipeline(body: DataSourceUpdateBody): boolean {
-  return body.enabled !== undefined || body.pipelineId !== undefined || body.tableName !== undefined;
+  return (
+    body.enabled !== undefined || body.pipelineId !== undefined || body.tableName !== undefined
+  );
 }
 
 export function useUpdateDataSource(opts: { invalidateOnSuccess?: boolean } = {}) {

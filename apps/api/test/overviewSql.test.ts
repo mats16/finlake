@@ -57,7 +57,9 @@ test('joinedBillingRowsSql joins requested enabled sources to the rollup table',
   assert.ok(sql.includes('JOIN requested'));
   assert.ok(sql.includes('BillingAccountId = r.account_id'));
   assert.ok(sql.includes('r.account_id IS NULL'));
-  assert.ok(sql.includes('LOWER(TRIM(COALESCE(b.ProviderName, r.provider_name))) = r.provider_name'));
+  assert.ok(
+    sql.includes('LOWER(TRIM(COALESCE(b.ProviderName, r.provider_name))) = r.provider_name'),
+  );
 });
 
 test('buildOverviewDailyStatement returns null without enabled sources', () => {
