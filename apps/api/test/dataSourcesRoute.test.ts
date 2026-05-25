@@ -15,6 +15,7 @@ import {
   type Env,
 } from '@finlake/shared';
 import { errorHandler } from '../src/middlewares/error.js';
+import { oboMiddleware } from '../src/middlewares/obo.js';
 import { dataSourcesRouter, type DataSourcesRouterDeps } from '../src/routes/dataSources.js';
 import { PipelineRunPermissionError } from '../src/services/pipelinePermissions.js';
 
@@ -29,6 +30,7 @@ async function startServer(deps: DataSourcesRouterDeps = {}): Promise<Harness> {
   const env: Env = EnvSchema.parse({});
   const app = express();
   app.use(express.json());
+  app.use(oboMiddleware);
   app.use(
     '/api/integrations',
     dataSourcesRouter(db, env, {
@@ -53,6 +55,16 @@ async function startServer(deps: DataSourcesRouterDeps = {}): Promise<Harness> {
       await db.close();
     },
   };
+}
+
+async function getJson<T = unknown>(
+  base: string,
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; body: T }> {
+  const res = await fetch(`${base}${path}`, { headers });
+  const parsed = (await res.json().catch(() => null)) as T;
+  return { status: res.status, body: parsed };
 }
 
 async function postJson<T = unknown>(
@@ -82,6 +94,24 @@ async function patchJson<T = unknown>(
   const parsed = (await res.json().catch(() => null)) as T;
   return { status: res.status, body: parsed };
 }
+
+test('GET /custom-options requires app service principal credentials even with OBO token', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await getJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/custom-options',
+      { 'x-forwarded-access-token': 'user-token' },
+    );
+    assert.equal(status, 401);
+    assert.equal(
+      body.error.message,
+      'DATABRICKS_HOST and app service principal credentials are required to list custom data source resources. Grant the app service principal access to source tables and CAN_RUN on selected pipelines.',
+    );
+  } finally {
+    await env.close();
+  }
+});
 
 test('POST /configurations rejects AWS without accountId', async () => {
   const env = await startServer();

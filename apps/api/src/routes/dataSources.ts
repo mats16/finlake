@@ -65,9 +65,9 @@ export function dataSourcesRouter(
     res.json({ items: DATA_SOURCE_TEMPLATES });
   });
 
-  router.get('/custom-options', async (req, res, next) => {
+  router.get('/custom-options', async (_req, res, next) => {
     try {
-      res.json(await listCustomDataSourceOptions(db, env, req.user?.accessToken));
+      res.json(await listCustomDataSourceOptions(db, env));
     } catch (err) {
       if (err instanceof CustomDataSourceOptionsError) {
         res.status(err.statusCode).json({ error: { message: err.message } });
