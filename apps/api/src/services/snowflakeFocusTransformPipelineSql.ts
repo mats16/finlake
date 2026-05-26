@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import {
-  IDENT_RE,
   SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA,
   SNOWFLAKE_USAGE_IN_CURRENCY_DAILY_TABLE,
+  UC_IDENTIFIER_PART_RE,
   isSnowflakeUsageInCurrencyDailySource,
   quoteIdent,
 } from '@finlake/shared';
@@ -13,7 +13,7 @@ export function buildSnowflakeFocusSilverPipelineSql(opts: {
   sourceSchema: string;
   sourceTable: string;
 }): string {
-  if (!IDENT_RE.test(opts.tableName)) {
+  if (!UC_IDENTIFIER_PART_RE.test(opts.tableName)) {
     throw new Error(`Invalid table identifier "${opts.tableName}"`);
   }
   if (!isSnowflakeUsageInCurrencyDailySource(opts.sourceSchema, opts.sourceTable)) {

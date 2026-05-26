@@ -273,9 +273,11 @@ test('buildSnowflakeFocusSilverPipelineSql maps organization usage into FOCUS co
 
   assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `snowflake_usage`/);
   assert.match(sql, /FROM `snowflake_foreign`\.`ORGANIZATION_USAGE`\.`USAGE_IN_CURRENCY_DAILY`/);
+  assert.match(sql, /CAST\(`ORGANIZATION_NAME` AS STRING\) AS BillingAccountId/);
+  assert.match(sql, /to_utc_timestamp\(CAST\(`USAGE_DATE` AS TIMESTAMP\), 'UTC'\)/);
   assert.match(
     sql,
-    /CAST\(COALESCE\(`CONTRACT_NUMBER`, `ORGANIZATION_NAME`\) AS STRING\) AS BillingAccountId/,
+    /lower\(CAST\(`BILLING_TYPE` AS STRING\)\) IN \('capacity', 'reserved_capacity', 'pro_rated_capacity'\) THEN 'Recurring'/,
   );
   assert.match(sql, /CAST\(`USAGE_IN_CURRENCY` AS DECIMAL\(30, 15\)\) AS BilledCost/);
   assert.match(sql, /CAST\(`USAGE` AS DECIMAL\(30, 15\)\) AS ConsumedQuantity/);
@@ -297,8 +299,23 @@ test('buildSnowflakeFocusSilverPipelineSql maps organization usage into FOCUS co
     sql,
     /CAST\(map_from_arrays\(array\(\), array\(\)\) AS MAP<STRING, STRING>\) AS Tags/,
   );
+  assert.match(
+    sql,
+    /concat\('account:', COALESCE\(CAST\(`ACCOUNT_LOCATOR` AS STRING\), ''\)\)/,
+  );
   assert.doesNotMatch(sql, /ACCOUNT_USAGE/);
   assert.doesNotMatch(sql, /METERING_DAILY_HISTORY/);
+});
+
+test('buildSnowflakeFocusSilverPipelineSql accepts numeric-prefixed target table names', () => {
+  const sql = buildSnowflakeFocusSilverPipelineSql({
+    tableName: '2025_snowflake',
+    sourceCatalog: 'snowflake_foreign',
+    sourceSchema: 'ORGANIZATION_USAGE',
+    sourceTable: 'USAGE_IN_CURRENCY_DAILY',
+  });
+
+  assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `2025_snowflake`/);
 });
 
 test('buildSnowflakeFocusSilverPipelineSql requires organization usage in currency', () => {

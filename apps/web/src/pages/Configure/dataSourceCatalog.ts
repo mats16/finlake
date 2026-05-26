@@ -82,7 +82,7 @@ export const DATA_SOURCE_TEMPLATE_REGISTRY: Record<string, DataSourceTemplateReg
     input: {
       providerName: 'snowflake',
       defaultTableName: 'snowflake_usage',
-      setupSteps: ['snowflakeUsage'],
+      setupSteps: [],
     },
     matches: [
       { providerName: 'snowflake', defaultTableName: 'snowflake_usage' },

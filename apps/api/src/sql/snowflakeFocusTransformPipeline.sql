@@ -15,18 +15,20 @@ WITH source_rows AS (
         AND CAST(`USAGE` AS DECIMAL(30, 15)) != CAST(0 AS DECIMAL(30, 15))
         THEN CAST(`USAGE_IN_CURRENCY` AS DECIMAL(30, 15)) / CAST(`USAGE` AS DECIMAL(30, 15))
       ELSE CAST(NULL AS DECIMAL(30, 15))
-    END AS finlake_unit_price
+    END AS finlake_unit_price,
+    to_utc_timestamp(CAST(`USAGE_DATE` AS TIMESTAMP), 'UTC') AS finlake_usage_period_start,
+    to_utc_timestamp(CAST(date_add(CAST(`USAGE_DATE` AS DATE), 1) AS TIMESTAMP), 'UTC') AS finlake_usage_period_end
   FROM ${source_fqn}
 )
 SELECT
   CAST(NULL AS STRING) AS AvailabilityZone,
   CAST(`USAGE_IN_CURRENCY` AS DECIMAL(30, 15)) AS BilledCost,
-  CAST(COALESCE(`CONTRACT_NUMBER`, `ORGANIZATION_NAME`) AS STRING) AS BillingAccountId,
+  CAST(`ORGANIZATION_NAME` AS STRING) AS BillingAccountId,
   CAST(`ORGANIZATION_NAME` AS STRING) AS BillingAccountName,
   'Organization' AS BillingAccountType,
   CAST(`CURRENCY` AS STRING) AS BillingCurrency,
-  CAST(add_months(DATE_TRUNC('MONTH', CAST(`USAGE_DATE` AS TIMESTAMP)), 1) AS TIMESTAMP) AS BillingPeriodEnd,
-  CAST(DATE_TRUNC('MONTH', CAST(`USAGE_DATE` AS TIMESTAMP)) AS TIMESTAMP) AS BillingPeriodStart,
+  CAST(add_months(DATE_TRUNC('MONTH', finlake_usage_period_start), 1) AS TIMESTAMP) AS BillingPeriodEnd,
+  CAST(DATE_TRUNC('MONTH', finlake_usage_period_start) AS TIMESTAMP) AS BillingPeriodStart,
   CAST(NULL AS STRING) AS CapacityReservationId,
   CAST(NULL AS STRING) AS CapacityReservationStatus,
   CASE
@@ -44,10 +46,11 @@ SELECT
   CAST(COALESCE(`USAGE_TYPE`, `SERVICE_TYPE`, `BILLING_TYPE`) AS STRING) AS ChargeDescription,
   CASE
     WHEN lower(CAST(`BILLING_TYPE` AS STRING)) = 'consumption' THEN 'Usage-Based'
+    WHEN lower(CAST(`BILLING_TYPE` AS STRING)) IN ('capacity', 'reserved_capacity', 'pro_rated_capacity') THEN 'Recurring'
     ELSE 'One-Time'
   END AS ChargeFrequency,
-  CAST(date_add(CAST(`USAGE_DATE` AS DATE), 1) AS TIMESTAMP) AS ChargePeriodEnd,
-  CAST(`USAGE_DATE` AS TIMESTAMP) AS ChargePeriodStart,
+  CAST(finlake_usage_period_end AS TIMESTAMP) AS ChargePeriodEnd,
+  CAST(finlake_usage_period_start AS TIMESTAMP) AS ChargePeriodStart,
   CAST(NULL AS STRING) AS CommitmentDiscountCategory,
   CAST(NULL AS STRING) AS CommitmentDiscountId,
   CAST(NULL AS STRING) AS CommitmentDiscountName,
@@ -108,12 +111,12 @@ SELECT
   ) AS SkuPriceDetails,
   concat_ws(
     '|',
-    concat('organization:', CAST(`ORGANIZATION_NAME` AS STRING)),
+    concat('organization:', COALESCE(CAST(`ORGANIZATION_NAME` AS STRING), '')),
     concat('contract:', CAST(COALESCE(`CONTRACT_NUMBER`, '') AS STRING)),
-    concat('account:', CAST(`ACCOUNT_LOCATOR` AS STRING)),
-    concat('service:', CAST(`SERVICE_TYPE` AS STRING)),
-    concat('rating:', CAST(`RATING_TYPE` AS STRING)),
-    concat('billing:', CAST(`BILLING_TYPE` AS STRING))
+    concat('account:', COALESCE(CAST(`ACCOUNT_LOCATOR` AS STRING), '')),
+    concat('service:', COALESCE(CAST(`SERVICE_TYPE` AS STRING), '')),
+    concat('rating:', COALESCE(CAST(`RATING_TYPE` AS STRING), '')),
+    concat('billing:', COALESCE(CAST(`BILLING_TYPE` AS STRING), ''))
   ) AS SkuPriceId,
   CAST(`ACCOUNT_LOCATOR` AS STRING) AS SubAccountId,
   CAST(`ACCOUNT_NAME` AS STRING) AS SubAccountName,

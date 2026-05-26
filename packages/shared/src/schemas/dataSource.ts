@@ -159,15 +159,15 @@ export function snowflakeSourceIdFromParts(
   sourceSchema: string,
   sourceTable: string,
 ): string {
-  const normalized = [sourceCatalog, sourceSchema, sourceTable]
-    .map((part) => part.trim().toLowerCase())
-    .join('.');
+  const parts = [sourceCatalog, sourceSchema, sourceTable].map((part) => part.trim());
+  const hashInput = parts.join('.');
+  const normalized = hashInput.toLowerCase();
   const slug =
     normalized
       .replace(/[^a-z0-9_]+/g, '_')
       .replace(/^_+|_+$/g, '')
       .slice(0, 96) || 'usage';
-  return `snowflake_${slug}_${stableHash32(normalized)}`;
+  return `snowflake_${slug}_${stableHash32(hashInput)}`;
 }
 
 function stableHash32(value: string): string {

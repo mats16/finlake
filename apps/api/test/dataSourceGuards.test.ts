@@ -14,6 +14,7 @@ import {
   isGcpProvider,
   isSnowflakeProvider,
   normalizeProviderName,
+  snowflakeSourceIdFromParts,
   toDataSourceKey,
 } from '@finlake/shared';
 
@@ -62,6 +63,22 @@ test('provider guards accept legacy display names', () => {
   assert.ok(isSnowflakeProvider('Snowflake'));
   assert.ok(isSnowflakeProvider('snowflake'));
   assert.ok(!isSnowflakeProvider('GCP'));
+});
+
+test('snowflakeSourceIdFromParts preserves case in hash while lowercasing slug', () => {
+  const upper = snowflakeSourceIdFromParts(
+    'My_Catalog',
+    'ORGANIZATION_USAGE',
+    'USAGE_IN_CURRENCY_DAILY',
+  );
+  const lower = snowflakeSourceIdFromParts(
+    'my_catalog',
+    'ORGANIZATION_USAGE',
+    'USAGE_IN_CURRENCY_DAILY',
+  );
+  assert.match(upper, /^snowflake_my_catalog_organization_usage_usage_in_currency_daily_/);
+  assert.match(lower, /^snowflake_my_catalog_organization_usage_usage_in_currency_daily_/);
+  assert.notEqual(upper, lower);
 });
 
 test('isDatabricksDefaultAccount only true for the synthetic default key', () => {

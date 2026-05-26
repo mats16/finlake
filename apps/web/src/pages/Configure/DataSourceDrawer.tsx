@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -1265,6 +1265,7 @@ export function GcpFocusSection({
   const [setupSteps, setSetupSteps] = useState<ResourceStep[]>(initialGcpSetupSteps);
   const [setupProgressModalOpen, setSetupProgressModalOpen] = useState(false);
   const [createdRowAfterSetup, setCreatedRowAfterSetup] = useState<DataSource | null>(null);
+  const createdRowRef = useRef<DataSource | null>(null);
   const [lastSetupWasUpdate, setLastSetupWasUpdate] = useState(false);
   const [setupInFlight, setSetupInFlight] = useState(false);
   const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
@@ -1291,8 +1292,9 @@ export function GcpFocusSection({
     setSetupSteps(initialGcpSetupSteps());
     setSetupProgressModalOpen(false);
     setCreatedRowAfterSetup(null);
+    createdRowRef.current = null;
     setLastSetupWasUpdate(Boolean(row?.enabled));
-  }, [row?.providerName, row?.accountId, row?.enabled]);
+  }, [row?.providerName, row?.accountId]);
 
   const sourceTableOptions = useMemo(() => {
     const options = tables.data?.tables ?? [];
@@ -1333,7 +1335,6 @@ export function GcpFocusSection({
     setResult(null);
     setLastSetupWasUpdate(Boolean(row?.enabled));
     setSetupProgressModalOpen(true);
-    setCreatedRowAfterSetup(null);
     setSetupSteps(
       updateGcpSetupSteps(initialGcpSetupSteps(), {
         sourceGrants: {
@@ -1344,7 +1345,7 @@ export function GcpFocusSection({
         lakeflowJob: { status: 'idle', detail: null, href: null },
       }),
     );
-    let dataSource = row;
+    let dataSource = row ?? createdRowRef.current;
     const config = buildConfig();
     try {
       if (!dataSource) {
@@ -1357,6 +1358,7 @@ export function GcpFocusSection({
           config,
         });
         dataSource = created;
+        createdRowRef.current = created;
         setCreatedRowAfterSetup(created);
       }
 
@@ -1374,7 +1376,10 @@ export function GcpFocusSection({
         config,
         updatedAt: new Date().toISOString(),
       };
-      if (!row) setCreatedRowAfterSetup(nextRow);
+      if (!row) {
+        createdRowRef.current = nextRow;
+        setCreatedRowAfterSetup(nextRow);
+      }
       setSetupSteps((steps) =>
         updateGcpSetupSteps(steps, {
           sourceGrants: {
@@ -1421,6 +1426,7 @@ export function GcpFocusSection({
     if (createdRowAfterSetup) {
       onCreated?.(createdRowAfterSetup);
       setCreatedRowAfterSetup(null);
+      createdRowRef.current = null;
     }
     if (didSetup) {
       qc.invalidateQueries({ queryKey: ['dataSources'] });
@@ -1826,6 +1832,7 @@ export function SnowflakeFocusSection({
   const [setupSteps, setSetupSteps] = useState<ResourceStep[]>(initialSnowflakeSetupSteps);
   const [setupProgressModalOpen, setSetupProgressModalOpen] = useState(false);
   const [createdRowAfterSetup, setCreatedRowAfterSetup] = useState<DataSource | null>(null);
+  const createdRowRef = useRef<DataSource | null>(null);
   const [lastSetupWasUpdate, setLastSetupWasUpdate] = useState(false);
   const [setupInFlight, setSetupInFlight] = useState(false);
   const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
@@ -1853,8 +1860,9 @@ export function SnowflakeFocusSection({
     setSetupSteps(initialSnowflakeSetupSteps());
     setSetupProgressModalOpen(false);
     setCreatedRowAfterSetup(null);
+    createdRowRef.current = null;
     setLastSetupWasUpdate(Boolean(row?.enabled));
-  }, [row?.providerName, row?.accountId, row?.enabled]);
+  }, [row?.providerName, row?.accountId]);
 
   const sourceTableOptions = useMemo(() => {
     const options = tables.data?.tables ?? [];
@@ -1897,7 +1905,6 @@ export function SnowflakeFocusSection({
     setResult(null);
     setLastSetupWasUpdate(Boolean(row?.enabled));
     setSetupProgressModalOpen(true);
-    setCreatedRowAfterSetup(null);
     setSetupSteps(
       updateSnowflakeSetupSteps(initialSnowflakeSetupSteps(), {
         sourceGrants: {
@@ -1908,7 +1915,7 @@ export function SnowflakeFocusSection({
         lakeflowJob: { status: 'idle', detail: null, href: null },
       }),
     );
-    let dataSource = row;
+    let dataSource = row ?? createdRowRef.current;
     const config = buildConfig();
     try {
       if (!dataSource) {
@@ -1921,6 +1928,7 @@ export function SnowflakeFocusSection({
           config,
         });
         dataSource = created;
+        createdRowRef.current = created;
         setCreatedRowAfterSetup(created);
       }
 
@@ -1938,7 +1946,10 @@ export function SnowflakeFocusSection({
         config,
         updatedAt: new Date().toISOString(),
       };
-      if (!row) setCreatedRowAfterSetup(nextRow);
+      if (!row) {
+        createdRowRef.current = nextRow;
+        setCreatedRowAfterSetup(nextRow);
+      }
       setSetupSteps((steps) =>
         updateSnowflakeSetupSteps(steps, {
           sourceGrants: {
@@ -1985,6 +1996,7 @@ export function SnowflakeFocusSection({
     if (createdRowAfterSetup) {
       onCreated?.(createdRowAfterSetup);
       setCreatedRowAfterSetup(null);
+      createdRowRef.current = null;
     }
     if (didSetup) {
       qc.invalidateQueries({ queryKey: ['dataSources'] });
