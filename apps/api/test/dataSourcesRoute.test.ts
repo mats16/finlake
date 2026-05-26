@@ -11,6 +11,7 @@ import {
   PROVIDER_CUSTOM,
   PROVIDER_DATABRICKS,
   PROVIDER_GCP,
+  PROVIDER_SNOWFLAKE,
   type DataSource,
   type Env,
 } from '@finlake/shared';
@@ -1109,6 +1110,39 @@ test('POST /configurations creates Google Cloud row with source config reflected
     assert.equal(body.config.sourceCatalog, 'gcp_foreign');
     assert.equal(body.config.sourceSchema, 'billing_export');
     assert.equal(body.config.sourceTable, 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF');
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates Snowflake row with source config reflected', async () => {
+  const env = await startServer();
+  try {
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'snowflake',
+        name: 'Snowflake usage',
+        providerName: 'Snowflake',
+        accountId: 'snowflake_source',
+        tableName: 'snowflake_usage',
+        config: {
+          sourceCatalog: 'snowflake_foreign',
+          sourceSchema: 'ORGANIZATION_USAGE',
+          sourceTable: 'USAGE_IN_CURRENCY_DAILY',
+        },
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_SNOWFLAKE);
+    assert.equal(body.accountId, 'snowflake_source');
+    assert.equal(body.focusVersion, '1.2');
+    assert.equal(body.config.sourceCatalog, 'snowflake_foreign');
+    assert.equal(body.config.sourceSchema, 'ORGANIZATION_USAGE');
+    assert.equal(body.config.sourceTable, 'USAGE_IN_CURRENCY_DAILY');
+    assert.equal(typeof body.config.sourceId, 'string');
+    assert.ok((body.config.sourceId as string).startsWith('snowflake_'));
   } finally {
     await env.close();
   }

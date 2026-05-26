@@ -12,7 +12,9 @@ import {
   isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
+  isSnowflakeProvider,
   normalizeGcpBillingAccountId,
+  snowflakeSourceIdFromParts,
   toDataSourceKey,
   type DataSourceKey,
   type Env,
@@ -415,15 +417,38 @@ function configForCreate(
   config: Record<string, unknown>,
   accountId: string,
 ): Record<string, unknown> {
-  if (!isGcpProvider(providerName)) return config;
-  const billingAccountId =
-    typeof config.billingAccountId === 'string' && config.billingAccountId.trim().length > 0
-      ? config.billingAccountId
-      : accountId;
-  return {
-    ...config,
-    billingAccountId: normalizeGcpBillingAccountId(billingAccountId),
-  };
+  if (isGcpProvider(providerName)) {
+    const billingAccountId =
+      typeof config.billingAccountId === 'string' && config.billingAccountId.trim().length > 0
+        ? config.billingAccountId
+        : accountId;
+    return {
+      ...config,
+      billingAccountId: normalizeGcpBillingAccountId(billingAccountId),
+    };
+  }
+  if (isSnowflakeProvider(providerName)) {
+    const sourceCatalog = nonEmptyConfigString(config, 'sourceCatalog');
+    const sourceSchema = nonEmptyConfigString(config, 'sourceSchema');
+    const sourceTable = nonEmptyConfigString(config, 'sourceTable');
+    let sourceId = nonEmptyConfigString(config, 'sourceId');
+    if (!sourceId) {
+      sourceId =
+        sourceCatalog && sourceSchema && sourceTable
+          ? snowflakeSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable)
+          : accountId;
+    }
+    return {
+      ...config,
+      sourceId,
+    };
+  }
+  return config;
+}
+
+function nonEmptyConfigString(config: Record<string, unknown>, key: string): string | null {
+  const value = config[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function isRegisteredAwsSource(source: {

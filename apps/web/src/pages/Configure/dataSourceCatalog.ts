@@ -3,6 +3,7 @@ import {
   isAwsProvider,
   isDatabricksProvider,
   isGcpProvider,
+  isSnowflakeProvider,
   tableLeafName,
   type DataSource,
   type DataSourceTemplate,
@@ -78,7 +79,15 @@ export const DATA_SOURCE_TEMPLATE_REGISTRY: Record<string, DataSourceTemplateReg
     logo: { kind: 'google-cloud' },
   },
   snowflake: {
-    matches: [{ providerName: 'Snowflake', defaultTableName: 'snowflake_credits' }],
+    input: {
+      providerName: 'snowflake',
+      defaultTableName: 'snowflake_usage',
+      setupSteps: ['snowflakeUsage'],
+    },
+    matches: [
+      { providerName: 'snowflake', defaultTableName: 'snowflake_usage' },
+      { providerName: 'Snowflake', defaultTableName: 'snowflake_credits' },
+    ],
     logo: { kind: 'snowflake' },
   },
   custom: {
@@ -138,6 +147,7 @@ export const LEGACY_TEMPLATE_NAMES: Record<string, string[]> = {
   aws: ['Amazon Web Services'],
   custom: ['Custom data source'],
   gcp: ['Google Cloud Platform', 'GCP'],
+  snowflake: ['Snowflake Credits'],
 };
 
 export const PRICING_AWS_TEMPLATE: DataSourceTemplate = {
@@ -174,6 +184,7 @@ export function rowMatchesTemplate(row: DataSource, template: DataSourceTemplate
   if (template.id === 'aws') return isAwsProvider(row.providerName);
   if (template.id === 'databricks_focus13') return isDatabricksProvider(row.providerName);
   if (template.id === 'gcp') return isGcpProvider(row.providerName);
+  if (template.id === 'snowflake') return isSnowflakeProvider(row.providerName);
   return findTemplateForRow(row)?.id === template.id;
 }
 

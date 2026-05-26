@@ -176,7 +176,12 @@ export async function listAccessibleTables(
 export class CatalogServiceError extends WorkspaceServiceError {}
 
 function tableSortKey(table: CatalogTableSummary): string {
-  const recommended = table.name.startsWith('gcp_billing_export_resource_v1_') ? '0' : '1';
+  const lowerName = table.name.toLowerCase();
+  const recommended =
+    table.name.startsWith('gcp_billing_export_resource_v1_') ||
+    lowerName === 'usage_in_currency_daily'
+      ? '0'
+      : '1';
   return `${recommended}:${table.name}`;
 }
 

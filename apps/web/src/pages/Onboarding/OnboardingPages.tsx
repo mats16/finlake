@@ -15,6 +15,7 @@ import {
   AwsIntegrationDetail,
   DatabricksIntegrationDetail,
   GcpIntegrationDetail,
+  SnowflakeIntegrationDetail,
 } from '../Configure/IntegrationDetails';
 import { Pricing } from '../Configure/Pricing';
 import { DataSourceTile, type TileBadge } from '../Configure/DataSourceTile';
@@ -91,6 +92,7 @@ export function OnboardingIntegration() {
     if (template.id === 'databricks_focus13') return '/onboarding/integration/databricks';
     if (template.id === 'aws') return '/onboarding/integration/aws';
     if (template.id === 'gcp') return '/onboarding/integration/gcp';
+    if (template.id === 'snowflake') return '/onboarding/integration/snowflake';
     return null;
   };
 
@@ -175,6 +177,14 @@ export function OnboardingGcpIntegration() {
   return (
     <OnboardingDetailPanel backTo="/onboarding/integration">
       <GcpIntegrationDetail {...INTEGRATION_BACK_PROPS} />
+    </OnboardingDetailPanel>
+  );
+}
+
+export function OnboardingSnowflakeIntegration() {
+  return (
+    <OnboardingDetailPanel backTo="/onboarding/integration">
+      <SnowflakeIntegrationDetail {...INTEGRATION_BACK_PROPS} />
     </OnboardingDetailPanel>
   );
 }

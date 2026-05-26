@@ -1122,10 +1122,13 @@ export const ja: Dictionary = {
       customSourcesTitle: 'カスタムデータソース',
       gcpEmpty: '表示できる Google Cloud 請求アカウントがありません。',
       gcpAccountsTitle: 'Google Cloud 請求アカウント',
+      snowflakeEmpty: '表示できる Snowflake 使用量ソースがありません。',
+      snowflakeSourcesTitle: 'Snowflake 使用量ソース',
       connectAccount: 'アカウントを接続',
       selectedSettings: 'AWS アカウント {account} の設定',
       configureAccount: 'AWS アカウント {account} を設定',
       gcpSelectedSettings: 'Google Cloud 請求アカウント {account} の設定',
+      snowflakeSelectedSettings: 'Snowflake ソース {source} の設定',
       moreActions: 'その他の操作',
       openInAws: 'AWS で開く',
       cloudBilling: 'Cloud Billing',
@@ -1163,6 +1166,7 @@ export const ja: Dictionary = {
       },
       columns: {
         account: 'アカウント ID',
+        source: 'ソース',
         storageCredential: 'ストレージ資格情報',
         lastUpdated: '最終更新',
         status: 'ステータス',
@@ -1325,6 +1329,38 @@ export const ja: Dictionary = {
         error: '失敗',
       },
     },
+    snowflake: {
+      title: 'Snowflake 組織使用量',
+      description: 'Snowflake の通貨建て組織使用量を FOCUS 形式へ変換します。',
+      connectTitle: 'Snowflake 使用量を接続',
+      connectDescription:
+        '組織使用量を含む Snowflake SNOWFLAKE データベースを、既存の Databricks Foreign Catalog 経由で利用します。',
+      useExistingForeignCatalog: '既存の Foreign Catalog を使う',
+      modalDescription:
+        'Snowflake Foreign Catalog から SNOWFLAKE.ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY を選択してください。',
+      catalog: 'カタログ',
+      schema: 'スキーマ',
+      table: 'テーブル',
+      sourceTable: 'ソーステーブル',
+      catalogPlaceholder: 'Foreign Catalog を選択',
+      schemaPlaceholder: 'ORGANIZATION_USAGE を選択',
+      tablePlaceholder: 'USAGE_IN_CURRENCY_DAILY を選択',
+      noTables: 'このスキーマに表示できるテーブルがありません。',
+      usageTableRequired:
+        'Snowflake の FOCUS 変換には、SNOWFLAKE データベースを公開する Foreign Catalog 上の ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY が必要です。',
+      resourceProgress: '作成状況',
+      resourceSteps: {
+        sourceGrants: 'Foreign Catalog 権限',
+        lakeflowJob: 'Lakeflow Spark 宣言型パイプライン',
+      },
+      resourceStepStatus: {
+        idle: '待機中',
+        pending: '作成中',
+        done: '作成済み',
+        skipped: 'スキップ',
+        error: '失敗',
+      },
+    },
     azure: {
       title: 'Azure Cost Management エクスポートの設定',
       placeholder: 'ストレージアカウント名',
@@ -1355,8 +1391,8 @@ export const ja: Dictionary = {
         subtitle: '',
       },
       snowflake: {
-        description: '近日公開予定です。',
-        subtitle: '',
+        description: '通貨建て組織使用量',
+        subtitle: 'Snowflake 提供',
       },
       custom: {
         description: 'Auto Loader や Lakeflow Connect を介して独自のコストデータを取り込み',

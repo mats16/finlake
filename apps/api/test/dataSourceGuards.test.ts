@@ -6,11 +6,13 @@ import {
   PROVIDER_AWS,
   PROVIDER_DATABRICKS,
   PROVIDER_GCP,
+  PROVIDER_SNOWFLAKE,
   dataSourceKeyString,
   isAwsProvider,
   isDatabricksDefaultAccount,
   isDatabricksProvider,
   isGcpProvider,
+  isSnowflakeProvider,
   normalizeProviderName,
   toDataSourceKey,
 } from '@finlake/shared';
@@ -34,6 +36,11 @@ test('normalizeProviderName collapses Google Cloud display names', () => {
   assert.equal(normalizeProviderName('Google Cloud Platform'), PROVIDER_GCP);
 });
 
+test('normalizeProviderName collapses Snowflake display names', () => {
+  assert.equal(normalizeProviderName('Snowflake'), PROVIDER_SNOWFLAKE);
+  assert.equal(normalizeProviderName('snowflake'), PROVIDER_SNOWFLAKE);
+});
+
 test('normalizeProviderName trims unknown providers without lowercasing', () => {
   assert.equal(normalizeProviderName(' Azure '), 'Azure');
   assert.equal(normalizeProviderName('Oracle Cloud'), 'Oracle Cloud');
@@ -51,6 +58,10 @@ test('provider guards accept legacy display names', () => {
   assert.ok(isGcpProvider('GCP'));
   assert.ok(isGcpProvider('Google Cloud'));
   assert.ok(!isGcpProvider('AWS'));
+
+  assert.ok(isSnowflakeProvider('Snowflake'));
+  assert.ok(isSnowflakeProvider('snowflake'));
+  assert.ok(!isSnowflakeProvider('GCP'));
 });
 
 test('isDatabricksDefaultAccount only true for the synthetic default key', () => {

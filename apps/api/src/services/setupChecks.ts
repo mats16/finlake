@@ -1,4 +1,11 @@
-import type { Env, SetupCheckResult, SetupStepId } from '@finlake/shared';
+import {
+  SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA,
+  SNOWFLAKE_USAGE_IN_CURRENCY_DAILY_TABLE,
+  isSnowflakeUsageInCurrencyDailySource,
+  type Env,
+  type SetupCheckResult,
+  type SetupStepId,
+} from '@finlake/shared';
 import { buildUserExecutor } from './statementExecution.js';
 import { z } from 'zod';
 
@@ -24,6 +31,8 @@ export async function runSetupCheck(
       return checkAwsCur(input, checkedAt);
     case 'gcpBilling':
       return checkGcpBilling(input, checkedAt);
+    case 'snowflakeUsage':
+      return checkSnowflakeUsage(input, checkedAt);
     case 'azureExport':
       return checkAzureExport(input, checkedAt);
     case 'tagging':
@@ -222,6 +231,47 @@ function checkGcpBilling(input: Record<string, unknown>, checkedAt: string): Set
     status: 'ok',
     message: `Marked Google Cloud billing export table: ${table}`,
     details: { table },
+    checkedAt,
+  };
+}
+
+function checkSnowflakeUsage(input: Record<string, unknown>, checkedAt: string): SetupCheckResult {
+  const schema =
+    typeof input.schema === 'string' && input.schema.trim().length > 0
+      ? input.schema.trim()
+      : undefined;
+  const table =
+    typeof input.table === 'string' && input.table.trim().length > 0
+      ? input.table.trim()
+      : undefined;
+  if (!schema || !table) {
+    return {
+      step: 'snowflakeUsage',
+      status: 'warning',
+      message: 'Snowflake organization usage table not selected yet',
+      remediation: {
+        cli: `Create a Databricks Foreign Catalog for the Snowflake SNOWFLAKE database, then select ${SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA}.${SNOWFLAKE_USAGE_IN_CURRENCY_DAILY_TABLE}.`,
+      },
+      checkedAt,
+    };
+  }
+  if (!isSnowflakeUsageInCurrencyDailySource(schema, table)) {
+    return {
+      step: 'snowflakeUsage',
+      status: 'warning',
+      message: 'Snowflake organization usage in currency table is required',
+      remediation: {
+        cli: `Select ${SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA}.${SNOWFLAKE_USAGE_IN_CURRENCY_DAILY_TABLE} from a Snowflake Foreign Catalog that exposes the SNOWFLAKE database.`,
+      },
+      details: { schema, table },
+      checkedAt,
+    };
+  }
+  return {
+    step: 'snowflakeUsage',
+    status: 'ok',
+    message: `Marked Snowflake usage table: ${schema}.${table}`,
+    details: { schema, table },
     checkedAt,
   };
 }

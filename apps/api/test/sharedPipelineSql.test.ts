@@ -5,6 +5,7 @@ import {
   buildAwsFocusSilverPipelineSql,
 } from '../src/services/awsFocusTransformPipelineSql.js';
 import { buildGcpFocusSilverPipelineSql } from '../src/services/gcpFocusTransformPipelineSql.js';
+import { buildSnowflakeFocusSilverPipelineSql } from '../src/services/snowflakeFocusTransformPipelineSql.js';
 import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
 import {
@@ -18,6 +19,8 @@ import {
   GCP_FOCUS_VERSION,
   MEDALLION_SCHEMA_DEFAULTS,
   PRICING_SCHEMA_DEFAULT,
+  SNOWFLAKE_FOCUS_VERSION,
+  isSnowflakeUsageInCurrencyDailySource,
   gcpBillingAccountIdFromTableName,
   gcpUsageTableName,
   medallionSchemaNamesFromSettings,
@@ -80,6 +83,14 @@ test('sourceSilverPipelineName follows ingest pipeline naming convention', () =>
       config: { billingAccountId: 'ABCDEF_123456_ABCDEF' },
     }),
     'finops-ingest-gcp-ABCDEF-123456-ABCDEF-pipeline',
+  );
+  assert.equal(
+    sourceSilverPipelineName({
+      providerName: 'snowflake',
+      accountId: 'snowflake_source',
+      config: { sourceId: 'snowflake_source' },
+    }),
+    'finops-ingest-snowflake-snowflake_source-pipeline',
   );
 });
 
@@ -239,6 +250,67 @@ test('buildGcpFocusSilverPipelineSql requires resource-level detailed billing ex
         sourceTable: 'gcp_billing_export_v1_ABCDEF_123456_ABCDEF',
       }),
     /resource-level detailed export table/,
+  );
+});
+
+test('snowflake usage helpers validate organization usage in currency source', () => {
+  assert.ok(isSnowflakeUsageInCurrencyDailySource('ORGANIZATION_USAGE', 'USAGE_IN_CURRENCY_DAILY'));
+  assert.ok(isSnowflakeUsageInCurrencyDailySource('organization_usage', 'usage_in_currency_daily'));
+  assert.equal(
+    isSnowflakeUsageInCurrencyDailySource('ACCOUNT_USAGE', 'METERING_DAILY_HISTORY'),
+    false,
+  );
+  assert.equal(SNOWFLAKE_FOCUS_VERSION, '1.2');
+});
+
+test('buildSnowflakeFocusSilverPipelineSql maps organization usage into FOCUS columns', () => {
+  const sql = buildSnowflakeFocusSilverPipelineSql({
+    tableName: 'snowflake_usage',
+    sourceCatalog: 'snowflake_foreign',
+    sourceSchema: 'ORGANIZATION_USAGE',
+    sourceTable: 'USAGE_IN_CURRENCY_DAILY',
+  });
+
+  assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `snowflake_usage`/);
+  assert.match(sql, /FROM `snowflake_foreign`\.`ORGANIZATION_USAGE`\.`USAGE_IN_CURRENCY_DAILY`/);
+  assert.match(
+    sql,
+    /CAST\(COALESCE\(`CONTRACT_NUMBER`, `ORGANIZATION_NAME`\) AS STRING\) AS BillingAccountId/,
+  );
+  assert.match(sql, /CAST\(`USAGE_IN_CURRENCY` AS DECIMAL\(30, 15\)\) AS BilledCost/);
+  assert.match(sql, /CAST\(`USAGE` AS DECIMAL\(30, 15\)\) AS ConsumedQuantity/);
+  assert.match(sql, /'Snowflake' AS ProviderName/);
+  assert.match(sql, /CAST\(`ACCOUNT_LOCATOR` AS STRING\) AS SubAccountId/);
+  assert.match(
+    sql,
+    /named_struct\('key', 'BillingType', 'value', CAST\(`BILLING_TYPE` AS STRING\)\)/,
+  );
+  assert.match(
+    sql,
+    /named_struct\('key', 'RatingType', 'value', CAST\(`RATING_TYPE` AS STRING\)\)/,
+  );
+  assert.match(
+    sql,
+    /named_struct\('key', 'BalanceSource', 'value', CAST\(`BALANCE_SOURCE` AS STRING\)\)/,
+  );
+  assert.match(
+    sql,
+    /CAST\(map_from_arrays\(array\(\), array\(\)\) AS MAP<STRING, STRING>\) AS Tags/,
+  );
+  assert.doesNotMatch(sql, /ACCOUNT_USAGE/);
+  assert.doesNotMatch(sql, /METERING_DAILY_HISTORY/);
+});
+
+test('buildSnowflakeFocusSilverPipelineSql requires organization usage in currency', () => {
+  assert.throws(
+    () =>
+      buildSnowflakeFocusSilverPipelineSql({
+        tableName: 'snowflake_usage',
+        sourceCatalog: 'snowflake_foreign',
+        sourceSchema: 'ACCOUNT_USAGE',
+        sourceTable: 'METERING_DAILY_HISTORY',
+      }),
+    /ORGANIZATION_USAGE\.USAGE_IN_CURRENCY_DAILY/,
   );
 });
 
@@ -423,6 +495,7 @@ test('buildUsageGoldSql unions source silver tables with provider extension colu
     sources: [
       { tableName: 'databricks_usage', providerName: 'Databricks' },
       { tableName: 'aws_123456789012_usage', providerName: 'Amazon Web Services' },
+      { tableName: 'snowflake_usage', providerName: 'snowflake' },
     ],
   });
 
@@ -446,10 +519,15 @@ test('buildUsageGoldSql unions source silver tables with provider extension colu
     sql,
     /`x_Discounts`,\s+`x_Operation`,\s+`x_ServiceCode`,\s+CAST\(NULL AS BOOLEAN\) AS `x_Serverless`,\s+CAST\(NULL AS BOOLEAN\) AS `x_Photon`\s+FROM `finops`\.`silver`\.`aws_123456789012_usage`/,
   );
+  assert.match(
+    sql,
+    /CAST\(NULL AS MAP<STRING, DOUBLE>\) AS `x_Discounts`,\s+CAST\(NULL AS STRING\) AS `x_Operation`,\s+CAST\(NULL AS STRING\) AS `x_ServiceCode`,\s+CAST\(NULL AS BOOLEAN\) AS `x_Serverless`,\s+CAST\(NULL AS BOOLEAN\) AS `x_Photon`\s+FROM `finops`\.`silver`\.`snowflake_usage`/,
+  );
   assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `gold`\.`usage_daily`/);
   assert.match(sql, /FROM `finops`\.`silver`\.`databricks_usage`/);
   assert.match(sql, /UNION ALL/);
   assert.match(sql, /FROM `finops`\.`silver`\.`aws_123456789012_usage`/);
+  assert.match(sql, /FROM `finops`\.`silver`\.`snowflake_usage`/);
   assert.match(sql, /FROM `silver`\.`usage`/);
   assert.doesNotMatch(sql, /SELECT \*/);
   assert.doesNotMatch(sql, /x_FinLakeDataSourceId/);
