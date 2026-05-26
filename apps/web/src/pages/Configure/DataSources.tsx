@@ -84,7 +84,12 @@ function templateForRow(row: DataSource): DataSourceTemplate {
 }
 
 function canAddMultiple(template: DataSourceTemplate): boolean {
-  return template.id === 'aws' || template.id === 'gcp' || template.id === 'custom';
+  return (
+    template.id === 'aws' ||
+    template.id === 'gcp' ||
+    template.id === 'snowflake' ||
+    template.id === 'custom'
+  );
 }
 
 function mergeDataSourceTemplates(
@@ -104,6 +109,7 @@ function detailPathForTemplate(template: DataSourceTemplate): string | null {
   if (template.id === 'aws') return '/integrations/aws';
   if (template.id === 'custom') return '/integrations/custom';
   if (template.id === 'gcp') return '/integrations/gcp';
+  if (template.id === 'snowflake') return '/integrations/snowflake';
   return null;
 }
 

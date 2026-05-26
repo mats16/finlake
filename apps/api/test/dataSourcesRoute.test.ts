@@ -11,6 +11,8 @@ import {
   PROVIDER_CUSTOM,
   PROVIDER_DATABRICKS,
   PROVIDER_GCP,
+  PROVIDER_SNOWFLAKE,
+  snowflakeSourceIdFromParts,
   type DataSource,
   type Env,
 } from '@finlake/shared';
@@ -1109,6 +1111,130 @@ test('POST /configurations creates Google Cloud row with source config reflected
     assert.equal(body.config.sourceCatalog, 'gcp_foreign');
     assert.equal(body.config.sourceSchema, 'billing_export');
     assert.equal(body.config.sourceTable, 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF');
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations creates Snowflake row with source config reflected', async () => {
+  const env = await startServer();
+  try {
+    const expectedSourceId = snowflakeSourceIdFromParts(
+      'snowflake_foreign',
+      'ORGANIZATION_USAGE',
+      'USAGE_IN_CURRENCY_DAILY',
+    );
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'snowflake',
+        name: 'Snowflake usage',
+        providerName: 'Snowflake',
+        accountId: 'snowflake_source',
+        tableName: 'snowflake_usage',
+        config: {
+          sourceCatalog: 'snowflake_foreign',
+          sourceSchema: 'ORGANIZATION_USAGE',
+          sourceTable: 'USAGE_IN_CURRENCY_DAILY',
+        },
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.providerName, PROVIDER_SNOWFLAKE);
+    assert.equal(body.accountId, expectedSourceId);
+    assert.equal(body.focusVersion, '1.2');
+    assert.equal(body.config.sourceCatalog, 'snowflake_foreign');
+    assert.equal(body.config.sourceSchema, 'ORGANIZATION_USAGE');
+    assert.equal(body.config.sourceTable, 'USAGE_IN_CURRENCY_DAILY');
+    assert.equal(
+      body.config.sourceFqn,
+      'snowflake_foreign.ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY',
+    );
+    assert.equal(body.config.sourceId, expectedSourceId);
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations rejects Snowflake without organization usage source config', async () => {
+  const env = await startServer();
+  try {
+    const missing = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'snowflake',
+      name: 'Snowflake usage',
+      providerName: 'snowflake',
+      accountId: 'ignored',
+      tableName: 'snowflake_usage',
+      config: {},
+    });
+    assert.equal(missing.status, 400);
+    assert.match(
+      String((missing.body as { error?: { message?: string } }).error?.message),
+      /sourceCatalog, sourceSchema, and sourceTable/,
+    );
+
+    const wrongTable = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'snowflake',
+      name: 'Snowflake usage',
+      providerName: 'snowflake',
+      accountId: 'ignored',
+      tableName: 'snowflake_usage',
+      config: {
+        sourceCatalog: 'snowflake_foreign',
+        sourceSchema: 'ACCOUNT_USAGE',
+        sourceTable: 'METERING_DAILY_HISTORY',
+      },
+    });
+    assert.equal(wrongTable.status, 400);
+    assert.match(
+      String((wrongTable.body as { error?: { message?: string } }).error?.message),
+      /ORGANIZATION_USAGE\.USAGE_IN_CURRENCY_DAILY/,
+    );
+  } finally {
+    await env.close();
+  }
+});
+
+test('PATCH /configurations rejects registered Snowflake source key changes', async () => {
+  const env = await startServer();
+  try {
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'snowflake',
+      name: 'Snowflake usage',
+      providerName: 'snowflake',
+      accountId: 'ignored',
+      tableName: 'snowflake_usage',
+      config: {
+        sourceCatalog: 'snowflake_foreign',
+        sourceSchema: 'ORGANIZATION_USAGE',
+        sourceTable: 'USAGE_IN_CURRENCY_DAILY',
+        owner: 'finance',
+      },
+    });
+    assert.equal(created.status, 201);
+
+    const key = `${created.body.providerName}/${created.body.accountId}`;
+    const changed = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/${key}`,
+      { config: { sourceTable: 'METERING_DAILY_HISTORY' } },
+    );
+    assert.equal(changed.status, 409);
+    assert.match(
+      String((changed.body as { error?: { message?: string } }).error?.message),
+      /Registered Snowflake source settings cannot be changed: sourceTable/,
+    );
+
+    const partial = await patchJson<DataSource>(
+      env.base,
+      `/api/integrations/configurations/${key}`,
+      { config: { owner: 'platform' } },
+    );
+    assert.equal(partial.status, 200);
+    assert.equal(partial.body.config.sourceCatalog, 'snowflake_foreign');
+    assert.equal(partial.body.config.sourceTable, 'USAGE_IN_CURRENCY_DAILY');
+    assert.equal(partial.body.config.owner, 'platform');
   } finally {
     await env.close();
   }

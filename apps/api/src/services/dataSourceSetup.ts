@@ -10,6 +10,7 @@ import {
   GCP_FOCUS_VERSION,
   GOLD_USAGE_TABLES,
   LAKEFLOW_PIPELINE_SETTING_KEYS,
+  SNOWFLAKE_FOCUS_VERSION,
   focusSourceTables,
   focusViewFqn,
   gcpBillingAccountIdFromTableName,
@@ -19,6 +20,8 @@ import {
   isDatabricksProvider,
   isGcpDetailedBillingExportTable,
   isGcpProvider,
+  isSnowflakeProvider,
+  isSnowflakeUsageInCurrencyDailySource,
   medallionSchemaNamesFromSettings,
   normalizeGcpBillingAccountId,
   normalizeS3Prefix,
@@ -26,6 +29,7 @@ import {
   quotePrincipal,
   s3BucketFromUrl,
   s3ExportPath,
+  snowflakeSourceIdFromParts,
   tableLeafName,
   validateAccountPricesTable,
   dataSourceKeyString,
@@ -56,6 +60,7 @@ import {
 } from './awsFocusTransformPipelineSql.js';
 import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineSql.js';
 import { buildGcpFocusSilverPipelineSql } from './gcpFocusTransformPipelineSql.js';
+import { buildSnowflakeFocusSilverPipelineSql } from './snowflakeFocusTransformPipelineSql.js';
 import { grantStatements } from './focusPermissions.js';
 
 interface FocusConfig {
@@ -74,6 +79,13 @@ interface GcpFocusConfig {
   sourceSchema: string | null;
   sourceTable: string | null;
   billingAccountId: string | null;
+}
+
+interface SnowflakeFocusConfig {
+  sourceCatalog: string | null;
+  sourceSchema: string | null;
+  sourceTable: string | null;
+  sourceId: string | null;
 }
 
 const setupLocks = new Map<string, Promise<void>>();
@@ -230,6 +242,26 @@ function readGcpFocusConfig(config: Record<string, unknown>): GcpFocusConfig {
   };
 }
 
+function readSnowflakeFocusConfig(config: Record<string, unknown>): SnowflakeFocusConfig {
+  const get = (k: string): string | null => {
+    const v = config[k];
+    return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+  };
+  const sourceCatalog = get('sourceCatalog');
+  const sourceSchema = get('sourceSchema');
+  const sourceTable = get('sourceTable');
+  let sourceId = get('sourceId');
+  if (!sourceId && sourceCatalog && sourceSchema && sourceTable) {
+    sourceId = snowflakeSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable);
+  }
+  return {
+    sourceCatalog,
+    sourceSchema,
+    sourceTable,
+    sourceId,
+  };
+}
+
 export function workspacePathFor(
   appName: string,
   key: DataSourceKey,
@@ -257,6 +289,9 @@ function resourceSlug(source: {
   if (isGcpProvider(source.providerName)) {
     return normalizeGcpBillingAccountId(fromConfig('billingAccountId') ?? source.accountId);
   }
+  if (isSnowflakeProvider(source.providerName)) {
+    return fromConfig('sourceId') ?? source.accountId;
+  }
   if (source.providerName === 'Azure') return fromConfig('subscriptionId') ?? source.accountId;
   return source.accountId;
 }
@@ -283,6 +318,9 @@ export function sourceSilverPipelineName(source: {
   }
   if (isGcpProvider(source.providerName)) {
     return `finops-ingest-gcp-${resourceSlug(source)}-pipeline`;
+  }
+  if (isSnowflakeProvider(source.providerName)) {
+    return `finops-ingest-snowflake-${resourceSlug(source)}-pipeline`;
   }
   return `${resourceLabelBase(source)}-pipeline`;
 }
@@ -328,15 +366,18 @@ async function setupFocusDataSourceLocked(
   if (
     !isDatabricksProvider(source.providerName) &&
     !isAwsProvider(source.providerName) &&
-    !isGcpProvider(source.providerName)
+    !isGcpProvider(source.providerName) &&
+    !isSnowflakeProvider(source.providerName)
   ) {
     throw new DataSourceSetupError(
-      `Setup is only supported for Databricks, AWS, and Google Cloud data sources (got '${source.providerName}')`,
+      `Setup is only supported for Databricks, AWS, Google Cloud, and Snowflake data sources (got '${source.providerName}')`,
       400,
     );
   }
   if (
-    (isDatabricksProvider(source.providerName) || isGcpProvider(source.providerName)) &&
+    (isDatabricksProvider(source.providerName) ||
+      isGcpProvider(source.providerName) ||
+      isSnowflakeProvider(source.providerName)) &&
     !userToken
   ) {
     throw new DataSourceSetupError(
@@ -361,6 +402,7 @@ async function setupFocusDataSourceLocked(
   let tableName: string;
   let databricksAccountPricesTable: string | null = null;
   let gcpSource: ReturnType<typeof readGcpFocusSource> | null = null;
+  let snowflakeSource: ReturnType<typeof readSnowflakeFocusSource> | null = null;
   try {
     if (isDatabricksProvider(source.providerName)) {
       const existing = readFocusConfig(source.config);
@@ -387,7 +429,7 @@ async function setupFocusDataSourceLocked(
         targetSchema: medallionSchemas.silver,
         goldSchema: medallionSchemas.gold,
       };
-    } else {
+    } else if (isGcpProvider(source.providerName)) {
       gcpSource = readGcpFocusSource(readGcpFocusConfig(source.config));
       tableName = body.tableName ?? gcpUsageTableName(gcpSource.billingAccountId);
       focusVersion = GCP_FOCUS_VERSION;
@@ -398,6 +440,20 @@ async function setupFocusDataSourceLocked(
         sourceSchema: gcpSource.sourceSchema,
         sourceTable: gcpSource.sourceTable,
         sourceFqn: gcpSource.sourceFqn,
+        targetSchema: medallionSchemas.silver,
+        goldSchema: medallionSchemas.gold,
+      };
+    } else {
+      snowflakeSource = readSnowflakeFocusSource(readSnowflakeFocusConfig(source.config));
+      tableName = body.tableName ?? tableLeafName(source.tableName);
+      focusVersion = SNOWFLAKE_FOCUS_VERSION;
+      nextConfig = {
+        ...source.config,
+        sourceId: snowflakeSource.sourceId,
+        sourceCatalog: snowflakeSource.sourceCatalog,
+        sourceSchema: snowflakeSource.sourceSchema,
+        sourceTable: snowflakeSource.sourceTable,
+        sourceFqn: snowflakeSource.sourceFqn,
         targetSchema: medallionSchemas.silver,
         goldSchema: medallionSchemas.gold,
       };
@@ -429,9 +485,20 @@ async function setupFocusDataSourceLocked(
     }
     const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
     const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
-    await assertCanReadGcpSource(userExecutor, gcpSource.sourceFqn);
-    await grantAppGcpSourceAccess(env, userExecutor, gcpSource);
-    await assertAppCanReadGcpSource(env, warehouseId, gcpSource.sourceFqn);
+    await assertCanReadForeignSource(userExecutor, gcpSource.sourceFqn, 'Google Cloud');
+    await grantAppForeignSourceAccess(env, userExecutor, gcpSource, 'Google Cloud');
+    await assertAppCanReadForeignSource(env, warehouseId, gcpSource.sourceFqn, 'Google Cloud');
+  }
+
+  if (isSnowflakeProvider(source.providerName)) {
+    if (!snowflakeSource) {
+      throw new DataSourceSetupError('Snowflake source table is not configured.', 400);
+    }
+    const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
+    const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
+    await assertCanReadForeignSource(userExecutor, snowflakeSource.sourceFqn, 'Snowflake');
+    await grantAppForeignSourceAccess(env, userExecutor, snowflakeSource, 'Snowflake');
+    await assertAppCanReadForeignSource(env, warehouseId, snowflakeSource.sourceFqn, 'Snowflake');
   }
 
   const candidateSource: DataSource = {
@@ -552,6 +619,39 @@ function readGcpFocusSource(config: GcpFocusConfig): {
     sourceTable: config.sourceTable,
     sourceFqn: quoteFlexibleFqn([config.sourceCatalog, config.sourceSchema, config.sourceTable]),
     billingAccountId,
+  };
+}
+
+function readSnowflakeFocusSource(config: SnowflakeFocusConfig): {
+  sourceCatalog: string;
+  sourceSchema: string;
+  sourceTable: string;
+  sourceFqn: string;
+  sourceId: string;
+} {
+  if (!config.sourceCatalog) {
+    throw new Error('Source catalog is not configured. Select a Snowflake Foreign Catalog.');
+  }
+  if (!config.sourceSchema) {
+    throw new Error('Source schema is not configured. Select ORGANIZATION_USAGE.');
+  }
+  if (!config.sourceTable) {
+    throw new Error('Source table is not configured. Select USAGE_IN_CURRENCY_DAILY.');
+  }
+  if (!isSnowflakeUsageInCurrencyDailySource(config.sourceSchema, config.sourceTable)) {
+    throw new Error(
+      'Snowflake billing source must be ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY from a Foreign Catalog that exposes the SNOWFLAKE database.',
+    );
+  }
+  const sourceId =
+    config.sourceId ??
+    snowflakeSourceIdFromParts(config.sourceCatalog, config.sourceSchema, config.sourceTable);
+  return {
+    sourceCatalog: config.sourceCatalog,
+    sourceSchema: config.sourceSchema,
+    sourceTable: config.sourceTable,
+    sourceFqn: quoteFlexibleFqn([config.sourceCatalog, config.sourceSchema, config.sourceTable]),
+    sourceId,
   };
 }
 
@@ -699,9 +799,10 @@ async function assertAppCanReadSystemTables(
   }
 }
 
-async function assertCanReadGcpSource(
+async function assertCanReadForeignSource(
   executor: StatementExecutor,
   sourceFqn: string,
+  providerLabel: string,
 ): Promise<void> {
   try {
     await executor.run(
@@ -712,7 +813,7 @@ async function assertCanReadGcpSource(
   } catch (err) {
     throw new DataSourceSetupError(
       [
-        `Cannot read Google Cloud billing source table ${sourceFqn} with the current user.`,
+        `Cannot read ${providerLabel} billing source table ${sourceFqn} with the current user.`,
         'Grant USE CATALOG, USE SCHEMA, and SELECT on the Foreign Catalog table',
         'before creating the FOCUS pipeline/job.',
         (err as Error).message,
@@ -723,15 +824,16 @@ async function assertCanReadGcpSource(
   }
 }
 
-async function grantAppGcpSourceAccess(
+async function grantAppForeignSourceAccess(
   env: Env,
   executor: StatementExecutor,
   source: { sourceCatalog: string; sourceSchema: string; sourceFqn: string },
+  providerLabel: string,
 ): Promise<void> {
   const sp = (env.DATABRICKS_CLIENT_ID ?? '').trim();
   if (!sp) {
     throw new DataSourceSetupError(
-      'DATABRICKS_CLIENT_ID must be configured before granting Google Cloud billing source access.',
+      `DATABRICKS_CLIENT_ID must be configured before granting ${providerLabel} billing source access.`,
       400,
       'sourceGrants',
     );
@@ -750,7 +852,7 @@ async function grantAppGcpSourceAccess(
       await executor.run(sql, [], z.unknown());
     } catch (err) {
       throw new DataSourceSetupError(
-        `Failed to grant Google Cloud billing source access to the app service principal: ${(err as Error).message}`,
+        `Failed to grant ${providerLabel} billing source access to the app service principal: ${(err as Error).message}`,
         400,
         'sourceGrants',
       );
@@ -758,15 +860,16 @@ async function grantAppGcpSourceAccess(
   }
 }
 
-async function assertAppCanReadGcpSource(
+async function assertAppCanReadForeignSource(
   env: Env,
   warehouseId: string,
   sourceFqn: string,
+  providerLabel: string,
 ): Promise<void> {
   const executor = buildAppExecutor(env, warehouseId);
   if (!executor) {
     throw new DataSourceSetupError(
-      'Failed to build Databricks SQL executor for app service principal Google Cloud source access check.',
+      `Failed to build Databricks SQL executor for app service principal ${providerLabel} source access check.`,
       500,
       'sourceGrants',
     );
@@ -780,7 +883,7 @@ async function assertAppCanReadGcpSource(
   } catch (err) {
     throw new DataSourceSetupError(
       [
-        'Cannot read the Google Cloud billing source table with the app service principal after granting access.',
+        `Cannot read the ${providerLabel} billing source table with the app service principal after granting access.`,
         'Grant USE CATALOG, USE SCHEMA, and SELECT on the Foreign Catalog source to the app service principal',
         'before creating the shared FOCUS pipeline/job.',
         (err as Error).message,
@@ -1130,6 +1233,22 @@ function sourcePipelineFile(
         sourceCatalog: gcpSource.sourceCatalog,
         sourceSchema: gcpSource.sourceSchema,
         sourceTable: gcpSource.sourceTable,
+      }),
+    };
+  }
+  if (isSnowflakeProvider(source.providerName)) {
+    const snowflakeSource = readSnowflakeFocusSource(readSnowflakeFocusConfig(source.config));
+    const tableName = tableLeafName(source.tableName) || 'snowflake_usage';
+    return {
+      tableName,
+      providerName: source.providerName,
+      source,
+      workspacePath: `${sourceRoot}/silver.sql`,
+      pipelineSql: buildSnowflakeFocusSilverPipelineSql({
+        tableName,
+        sourceCatalog: snowflakeSource.sourceCatalog,
+        sourceSchema: snowflakeSource.sourceSchema,
+        sourceTable: snowflakeSource.sourceTable,
       }),
     };
   }

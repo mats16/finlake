@@ -6,12 +6,15 @@ import {
   PROVIDER_AWS,
   PROVIDER_DATABRICKS,
   PROVIDER_GCP,
+  PROVIDER_SNOWFLAKE,
   dataSourceKeyString,
   isAwsProvider,
   isDatabricksDefaultAccount,
   isDatabricksProvider,
   isGcpProvider,
+  isSnowflakeProvider,
   normalizeProviderName,
+  snowflakeSourceIdFromParts,
   toDataSourceKey,
 } from '@finlake/shared';
 
@@ -34,6 +37,11 @@ test('normalizeProviderName collapses Google Cloud display names', () => {
   assert.equal(normalizeProviderName('Google Cloud Platform'), PROVIDER_GCP);
 });
 
+test('normalizeProviderName collapses Snowflake display names', () => {
+  assert.equal(normalizeProviderName('Snowflake'), PROVIDER_SNOWFLAKE);
+  assert.equal(normalizeProviderName('snowflake'), PROVIDER_SNOWFLAKE);
+});
+
 test('normalizeProviderName trims unknown providers without lowercasing', () => {
   assert.equal(normalizeProviderName(' Azure '), 'Azure');
   assert.equal(normalizeProviderName('Oracle Cloud'), 'Oracle Cloud');
@@ -51,6 +59,26 @@ test('provider guards accept legacy display names', () => {
   assert.ok(isGcpProvider('GCP'));
   assert.ok(isGcpProvider('Google Cloud'));
   assert.ok(!isGcpProvider('AWS'));
+
+  assert.ok(isSnowflakeProvider('Snowflake'));
+  assert.ok(isSnowflakeProvider('snowflake'));
+  assert.ok(!isSnowflakeProvider('GCP'));
+});
+
+test('snowflakeSourceIdFromParts preserves case in hash while lowercasing slug', () => {
+  const upper = snowflakeSourceIdFromParts(
+    'My_Catalog',
+    'ORGANIZATION_USAGE',
+    'USAGE_IN_CURRENCY_DAILY',
+  );
+  const lower = snowflakeSourceIdFromParts(
+    'my_catalog',
+    'ORGANIZATION_USAGE',
+    'USAGE_IN_CURRENCY_DAILY',
+  );
+  assert.match(upper, /^snowflake_my_catalog_organization_usage_usage_in_currency_daily_/);
+  assert.match(lower, /^snowflake_my_catalog_organization_usage_usage_in_currency_daily_/);
+  assert.notEqual(upper, lower);
 });
 
 test('isDatabricksDefaultAccount only true for the synthetic default key', () => {

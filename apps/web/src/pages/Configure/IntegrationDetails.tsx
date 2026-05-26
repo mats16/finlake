@@ -35,8 +35,10 @@ import {
   isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
+  isSnowflakeProvider,
   medallionSchemaNamesFromSettings,
   normalizeGcpBillingAccountId,
+  snowflakeSourceIdFromParts,
   toDataSourceKey,
   unquotedFqn,
   type DataSource,
@@ -55,7 +57,9 @@ import {
   DataSourceConfigurator,
   FocusViewSection,
   GcpFocusSection,
+  SnowflakeFocusSection,
   type GcpFocusDraft,
+  type SnowflakeFocusDraft,
 } from './DataSourceDrawer';
 import { VendorLogo } from './VendorLogo';
 import {
@@ -92,6 +96,9 @@ function providerRows(rows: DataSource[], templateId: string): DataSource[] {
     if (templateId === 'gcp') {
       return isGcpProvider(row.providerName);
     }
+    if (templateId === 'snowflake') {
+      return isSnowflakeProvider(row.providerName);
+    }
     return findTemplateForRow(row)?.id === templateId;
   });
 }
@@ -104,6 +111,12 @@ function isRegisteredAwsSource(row: DataSource): boolean {
 
 function isRegisteredGcpSource(row: DataSource): boolean {
   return ['sourceCatalog', 'sourceSchema', 'sourceTable', 'billingAccountId'].every(
+    (key) => configString(row.config, key).trim().length > 0,
+  );
+}
+
+function isRegisteredSnowflakeSource(row: DataSource): boolean {
+  return ['sourceCatalog', 'sourceSchema', 'sourceTable', 'sourceId'].every(
     (key) => configString(row.config, key).trim().length > 0,
   );
 }
@@ -132,6 +145,28 @@ function gcpSourceTableFor(row: DataSource): string {
     : '-';
 }
 
+function snowflakeSourceIdFor(row: DataSource): string {
+  const sourceId = configString(row.config, 'sourceId');
+  if (sourceId) return sourceId;
+  const sourceCatalog = configString(row.config, 'sourceCatalog');
+  const sourceSchema = configString(row.config, 'sourceSchema');
+  const sourceTable = configString(row.config, 'sourceTable');
+  return sourceCatalog && sourceSchema && sourceTable
+    ? snowflakeSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable)
+    : row.accountId;
+}
+
+function snowflakeSourceTableFor(row: DataSource): string {
+  const sourceFqn = configString(row.config, 'sourceFqn');
+  if (sourceFqn) return sourceFqn;
+  const sourceCatalog = configString(row.config, 'sourceCatalog');
+  const sourceSchema = configString(row.config, 'sourceSchema');
+  const sourceTable = configString(row.config, 'sourceTable');
+  return sourceCatalog && sourceSchema && sourceTable
+    ? unquotedFqn(sourceCatalog, sourceSchema, sourceTable)
+    : '-';
+}
+
 function formatUpdatedAt(value: string, locale: Locale): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
@@ -148,6 +183,8 @@ const EMPTY_SETTINGS: Record<string, string> = {};
 const GCP_CLOUD_BILLING_URL = 'https://console.cloud.google.com/billing';
 const GCP_BILLING_EXPORT_DOCS_URL =
   'https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup';
+const SNOWFLAKE_USAGE_DOCS_URL =
+  'https://docs.snowflake.com/en/sql-reference/organization-usage/usage_in_currency_daily';
 
 function dataSourceTableDisplayName(row: DataSource, settings: Record<string, string>): string {
   if (isCustomProvider(row.providerName) && row.tableName.includes('.')) return row.tableName;
@@ -175,7 +212,7 @@ function IntegrationHeader({
   eyebrowKey = 'dataSources.detail.eyebrow',
   backLabelKey = 'dataSources.detail.backToIntegrations',
 }: {
-  templateId: 'aws' | 'custom' | 'databricks_focus13' | 'gcp';
+  templateId: 'aws' | 'custom' | 'databricks_focus13' | 'gcp' | 'snowflake';
   backTo?: string;
   eyebrowKey?: string;
   backLabelKey?: string;
@@ -226,6 +263,13 @@ function IntegrationHeader({
             </a>
           </Button>
         </div>
+      ) : templateId === 'snowflake' ? (
+        <Button type="button" variant="outline" className="integration-docs-action gap-2" asChild>
+          <a href={SNOWFLAKE_USAGE_DOCS_URL} target="_blank" rel="noreferrer">
+            {t('dataSources.detail.docs')}
+            <ExternalLink className="size-4" aria-hidden="true" />
+          </a>
+        </Button>
       ) : null}
     </div>
   );
@@ -819,6 +863,339 @@ function GcpAccountsTable({
                           {t('dataSources.detail.openInGcp')}
                         </a>
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={deleteDs.isPending}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onRemove(row);
+                        }}
+                      >
+                        {t('dataSources.detail.remove')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+export function SnowflakeIntegrationDetail(props: IntegrationDetailProps = {}) {
+  const { locale, t } = useI18n();
+  const dataSources = useDataSources();
+  const rows = dataSources.data?.items ?? [];
+  const snowflakeRows = useMemo(() => providerRows(rows, 'snowflake'), [rows]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const template = findTemplateById('snowflake');
+  const input = template ? getTemplateInputConfig(template) : undefined;
+  const draft: SnowflakeFocusDraft | undefined =
+    template && input
+      ? {
+          templateId: template.id,
+          name: template.name,
+          providerName: input.providerName,
+          tableName: nextTableName(input.defaultTableName, rows),
+        }
+      : undefined;
+  const selectedRow = selectedKey
+    ? (snowflakeRows.find((row) => dataSourceKeyString(row) === selectedKey) ?? null)
+    : null;
+  const registeredSourceIds = useMemo(
+    () => Array.from(new Set(snowflakeRows.map(snowflakeSourceIdFor))),
+    [snowflakeRows],
+  );
+
+  return (
+    <>
+      <IntegrationHeader templateId="snowflake" {...props} />
+      {snowflakeRows.length > 0 ? (
+        <div className="grid gap-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="m-0 text-base font-semibold">
+                {t('dataSources.detail.snowflakeSourcesTitle')}
+              </h4>
+              <p className="text-muted-foreground mt-1 mb-0 text-sm">
+                {t('dataSources.snowflake.connectDescription')}
+              </p>
+            </div>
+            {draft ? (
+              <Button type="button" className="gap-2" onClick={() => setConnectOpen(true)}>
+                <Plug className="size-4" aria-hidden="true" />
+                {t('dataSources.snowflake.useExistingForeignCatalog')}
+              </Button>
+            ) : null}
+          </div>
+          <SnowflakeSourcesTable
+            rows={snowflakeRows}
+            locale={locale}
+            onConfigure={(row) => setSelectedKey(dataSourceKeyString(row))}
+            onRemoved={(row) => {
+              if (selectedKey === dataSourceKeyString(row)) setSelectedKey(null);
+            }}
+          />
+        </div>
+      ) : draft ? (
+        <section className="grid max-w-5xl gap-5">
+          <h4 className="m-0 text-2xl font-semibold">{t('dataSources.snowflake.connectTitle')}</h4>
+          <p className="text-muted-foreground m-0 text-base">
+            {t('dataSources.snowflake.connectDescription')}
+          </p>
+          <div>
+            <Button type="button" className="gap-2" onClick={() => setConnectOpen(true)}>
+              <Plug className="size-4" aria-hidden="true" />
+              {t('dataSources.snowflake.useExistingForeignCatalog')}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+      {draft ? (
+        <SnowflakeConnectSetupModal
+          open={connectOpen}
+          draft={draft}
+          excludedSourceIds={registeredSourceIds}
+          onCreated={() => setConnectOpen(false)}
+          onClose={() => setConnectOpen(false)}
+        />
+      ) : null}
+      {selectedRow ? (
+        <SnowflakeSourceSettingsSheet row={selectedRow} onClose={() => setSelectedKey(null)} />
+      ) : null}
+    </>
+  );
+}
+
+function SnowflakeConnectSetupModal({
+  open,
+  draft,
+  excludedSourceIds,
+  onCreated,
+  onClose,
+}: {
+  open: boolean;
+  draft: SnowflakeFocusDraft;
+  excludedSourceIds: string[];
+  onCreated: (row: DataSource) => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="snowflake-connect-setup-modal-title"
+        className="bg-background border-border grid max-h-[88vh] w-full max-w-3xl grid-rows-[auto_1fr] rounded-lg border shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 p-5">
+          <div className="min-w-0">
+            <h3 id="snowflake-connect-setup-modal-title" className="text-base font-semibold">
+              {t('dataSources.snowflake.useExistingForeignCatalog')}
+            </h3>
+            <p className="text-muted-foreground mt-1 mb-0 text-sm">
+              {t('dataSources.snowflake.modalDescription')}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/40 grid size-8 place-items-center rounded-md transition-colors"
+            aria-label={t('common.close')}
+            onClick={onClose}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="min-h-0 overflow-y-auto p-5">
+          <SnowflakeFocusSection
+            row={null}
+            draft={draft}
+            excludedSourceIds={excludedSourceIds}
+            onCreated={onCreated}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SnowflakeSourceSettingsSheet({ row, onClose }: { row: DataSource; onClose: () => void }) {
+  const { t } = useI18n();
+  const [shown, setShown] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+
+  const requestClose = useCallback(() => {
+    setShown(false);
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(onClose, 180);
+  }, [onClose]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setShown(true));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  return (
+    <div
+      className={cn(
+        'fixed inset-0 z-[60] flex items-end justify-center bg-black/50 px-4 pt-12 transition-opacity duration-200',
+        shown ? 'opacity-100' : 'opacity-0',
+      )}
+      role="presentation"
+      onMouseDown={requestClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="snowflake-source-settings-sheet-title"
+        className={cn(
+          'bg-background border-border max-h-[86vh] w-full max-w-5xl overflow-y-auto rounded-t-xl border px-5 pt-5 pb-6 shadow-xl transition-transform duration-200 ease-out',
+          shown ? 'translate-y-0' : 'translate-y-full',
+        )}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h4 id="snowflake-source-settings-sheet-title" className="m-0 text-base font-semibold">
+              {t('dataSources.detail.snowflakeSelectedSettings', {
+                source: snowflakeSourceTableFor(row),
+              })}
+            </h4>
+          </div>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/40 grid size-8 place-items-center rounded-md transition-colors"
+            aria-label={t('common.close')}
+            onClick={requestClose}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <DataSourceConfigurator row={row} onClose={requestClose} />
+      </div>
+    </div>
+  );
+}
+
+function SnowflakeSourcesTable({
+  rows,
+  locale,
+  onConfigure,
+  onRemoved,
+}: {
+  rows: DataSource[];
+  locale: Locale;
+  onConfigure: (row: DataSource) => void;
+  onRemoved: (row: DataSource) => void;
+}) {
+  const { t } = useI18n();
+  const deleteDs = useDeleteDataSource();
+  const appSettings = useAppSettings();
+  const settings = appSettings.data?.settings ?? EMPTY_SETTINGS;
+  const deleteErrorMessage = messageOf(deleteDs.error);
+
+  const onRemove = (row: DataSource) => {
+    if (!window.confirm(t('dataSources.confirmDelete', { name: snowflakeSourceTableFor(row) }))) {
+      return;
+    }
+    deleteDs.mutate(toDataSourceKey(row), { onSuccess: () => onRemoved(row) });
+  };
+
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <CardContent className="text-muted-foreground py-8 text-sm">
+          {t('dataSources.detail.snowflakeEmpty')}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid gap-3">
+      {deleteErrorMessage ? (
+        <Alert variant="destructive">
+          <Info />
+          <AlertDescription>{deleteErrorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('dataSources.detail.columns.source')}</TableHead>
+              <TableHead>{t('dataSources.snowflake.sourceTable')}</TableHead>
+              <TableHead>{t('dataSources.columns.table')}</TableHead>
+              <TableHead>{t('dataSources.detail.columns.lastUpdated')}</TableHead>
+              <TableHead>{t('dataSources.detail.columns.status')}</TableHead>
+              <TableHead className="text-right" aria-label={t('dataSources.columns.actions')} />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow
+                key={dataSourceKeyString(row)}
+                className="cursor-pointer"
+                onClick={() => onConfigure(row)}
+              >
+                <TableCell>
+                  <div className="min-w-40 font-medium">{snowflakeSourceIdFor(row)}</div>
+                </TableCell>
+                <TableCell>
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {snowflakeSourceTableFor(row)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-muted-foreground font-mono text-xs">
+                    {dataSourceTableDisplayName(row, settings)}
+                  </span>
+                </TableCell>
+                <TableCell>{formatUpdatedAt(row.updatedAt, locale)}</TableCell>
+                <TableCell>
+                  {isRegisteredSnowflakeSource(row)
+                    ? t('dataSources.detail.connected')
+                    : t('dataSources.badges.setupRequired')}
+                </TableCell>
+                <TableCell className="text-right">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8"
+                        aria-label={t('dataSources.detail.moreActions')}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <MoreHorizontal className="size-4" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
                       <DropdownMenuItem
                         disabled={deleteDs.isPending}
                         onClick={(event) => {

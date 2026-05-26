@@ -10,6 +10,7 @@ import {
   CustomIntegrationDetail,
   DatabricksIntegrationDetail,
   GcpIntegrationDetail,
+  SnowflakeIntegrationDetail,
 } from './pages/Configure/IntegrationDetails';
 import { Catalog } from './pages/Configure/Catalog';
 import { Transformations } from './pages/Configure/Transformations';
@@ -28,6 +29,7 @@ import {
   OnboardingCatalog,
   OnboardingDatabricksIntegration,
   OnboardingGcpIntegration,
+  OnboardingSnowflakeIntegration,
   OnboardingDatabricksPricing,
   OnboardingIntegration,
   OnboardingPricing,
@@ -65,6 +67,10 @@ export function App() {
             />
             <Route path="/onboarding/integration/aws" element={<OnboardingAwsIntegration />} />
             <Route path="/onboarding/integration/gcp" element={<OnboardingGcpIntegration />} />
+            <Route
+              path="/onboarding/integration/snowflake"
+              element={<OnboardingSnowflakeIntegration />}
+            />
             <Route path="/onboarding/pricing" element={<OnboardingPricing />} />
             <Route path="/onboarding/pricing/aws" element={<OnboardingAwsPricing />} />
             <Route
@@ -79,6 +85,7 @@ export function App() {
             <Route path="/integrations/aws" element={<AwsIntegrationDetail />} />
             <Route path="/integrations/custom" element={<CustomIntegrationDetail />} />
             <Route path="/integrations/gcp" element={<GcpIntegrationDetail />} />
+            <Route path="/integrations/snowflake" element={<SnowflakeIntegrationDetail />} />
             <Route path="/tags" element={<GovernedTags />} />
             <Route path="/transformations" element={<Transformations />} />
             <Route path="/pricing" element={<Navigate to="/pricing/aws" replace />} />

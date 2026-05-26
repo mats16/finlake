@@ -5,6 +5,7 @@ export const SetupStepIdSchema = z.enum([
   'permissions',
   'awsCur',
   'gcpBilling',
+  'snowflakeUsage',
   'azureExport',
   'tagging',
 ]);

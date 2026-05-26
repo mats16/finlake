@@ -75,6 +75,7 @@ export const PROVIDER_DATABRICKS = 'databricks';
 export const PROVIDER_AWS = 'aws';
 export const PROVIDER_CUSTOM = 'custom';
 export const PROVIDER_GCP = 'gcp';
+export const PROVIDER_SNOWFLAKE = 'snowflake';
 
 export function normalizeProviderName(providerName: string): string {
   const lower = providerName.trim().toLowerCase();
@@ -84,6 +85,7 @@ export function normalizeProviderName(providerName: string): string {
   if (lower === 'gcp' || lower === 'google cloud' || lower === 'google cloud platform') {
     return PROVIDER_GCP;
   }
+  if (lower === 'snowflake') return PROVIDER_SNOWFLAKE;
   return providerName.trim();
 }
 
@@ -101,6 +103,10 @@ export function isCustomProvider(providerName: string): boolean {
 
 export function isGcpProvider(providerName: string): boolean {
   return normalizeProviderName(providerName) === PROVIDER_GCP;
+}
+
+export function isSnowflakeProvider(providerName: string): boolean {
+  return normalizeProviderName(providerName) === PROVIDER_SNOWFLAKE;
 }
 
 export function normalizeGcpBillingAccountId(accountId: string): string {
@@ -133,6 +139,44 @@ export function gcpUsageTableName(accountId: string): string {
     .replace(/[^a-z0-9_]+/g, '_')
     .replace(/^_+|_+$/g, '');
   return suffix ? `gcp_${suffix}_usage` : 'gcp_usage';
+}
+
+export const SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA = 'ORGANIZATION_USAGE';
+export const SNOWFLAKE_USAGE_IN_CURRENCY_DAILY_TABLE = 'USAGE_IN_CURRENCY_DAILY';
+
+export function isSnowflakeUsageInCurrencyDailySource(
+  sourceSchema: string,
+  sourceTable: string,
+): boolean {
+  return (
+    sourceSchema.trim().toUpperCase() === SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA &&
+    sourceTable.trim().toUpperCase() === SNOWFLAKE_USAGE_IN_CURRENCY_DAILY_TABLE
+  );
+}
+
+export function snowflakeSourceIdFromParts(
+  sourceCatalog: string,
+  sourceSchema: string,
+  sourceTable: string,
+): string {
+  const parts = [sourceCatalog, sourceSchema, sourceTable].map((part) => part.trim());
+  const hashInput = parts.join('.');
+  const normalized = hashInput.toLowerCase();
+  const slug =
+    normalized
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 96) || 'usage';
+  return `snowflake_${slug}_${stableHash32(hashInput)}`;
+}
+
+function stableHash32(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export const DataSourceProviderNameSchema = z
@@ -247,6 +291,7 @@ export type CustomDataSourceOptionsResponse = z.infer<typeof CustomDataSourceOpt
 export const DATABRICKS_FOCUS_VERSION = '1.3';
 export const AWS_FOCUS_VERSION = '1.2';
 export const GCP_FOCUS_VERSION = '1.2';
+export const SNOWFLAKE_FOCUS_VERSION = '1.2';
 
 export const DataSourceTemplateSchema = z.object({
   id: z.string().min(1).max(128),
@@ -311,10 +356,10 @@ export const DATA_SOURCE_TEMPLATES = [
   {
     id: 'snowflake',
     name: 'Snowflake',
-    description: 'Snowflake credits support is coming soon.',
+    description: 'Organization usage in currency',
     subtitle: 'by Snowflake',
-    focus_version: '1.0',
-    available: false,
+    focus_version: SNOWFLAKE_FOCUS_VERSION,
+    available: true,
     appearance: {
       brandColor: '#29B5E8',
     },

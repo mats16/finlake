@@ -12,7 +12,10 @@ import {
   isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
+  isSnowflakeProvider,
+  isSnowflakeUsageInCurrencyDailySource,
   normalizeGcpBillingAccountId,
+  snowflakeSourceIdFromParts,
   toDataSourceKey,
   type DataSourceKey,
   type Env,
@@ -44,6 +47,14 @@ const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
   'exportName',
   's3Prefix',
   's3Region',
+];
+
+const SNOWFLAKE_SOURCE_LOCKED_CONFIG_KEYS = [
+  'sourceId',
+  'sourceCatalog',
+  'sourceSchema',
+  'sourceTable',
+  'sourceFqn',
 ];
 
 export interface DataSourcesRouterDeps {
@@ -127,10 +138,22 @@ export function dataSourcesRouter(
         });
         return;
       }
+      let config: Record<string, unknown>;
+      try {
+        config = configForCreate(
+          parsed.data.providerName,
+          parsed.data.config ?? {},
+          parsed.data.accountId ?? '',
+        );
+      } catch (err) {
+        res.status(400).json({ error: { message: (err as Error).message } });
+        return;
+      }
       const accountId = accountIdForCreate(
         isCustomTemplate,
         parsed.data.providerName,
         parsed.data.accountId,
+        config,
       );
       if (!accountId) {
         res.status(400).json({ error: { message: 'accountId is required' } });
@@ -146,7 +169,7 @@ export function dataSourcesRouter(
           focusVersion: template.focus_version,
           pipelineId,
           enabled: parsed.data.enabled ?? false,
-          config: configForCreate(parsed.data.providerName, parsed.data.config ?? {}, accountId),
+          config,
         });
       } catch (err) {
         if (isCustomTableUniqueViolation(err)) {
@@ -236,8 +259,9 @@ export function dataSourcesRouter(
         res.status(404).json({ error: { message: 'Not found' } });
         return;
       }
-      if (parsed.data.config && isRegisteredAwsSource(existing)) {
-        const changedKeys = AWS_SOURCE_LOCKED_CONFIG_KEYS.filter(
+      const lockedKeys = registeredSourceLockedConfigKeys(existing);
+      if (parsed.data.config && lockedKeys.length > 0) {
+        const changedKeys = lockedKeys.filter(
           (key) =>
             parsed.data.config?.[key] !== undefined &&
             !sameJsonValue(existing.config[key], parsed.data.config[key]),
@@ -245,17 +269,24 @@ export function dataSourcesRouter(
         if (changedKeys.length > 0) {
           res.status(409).json({
             error: {
-              message: `Registered AWS source settings cannot be changed: ${changedKeys.join(', ')}`,
+              message: `Registered ${sourceProviderLabel(existing.providerName)} source settings cannot be changed: ${changedKeys.join(', ')}`,
             },
           });
           return;
         }
       }
       const updatePatch =
-        parsed.data.config && isRegisteredAwsSource(existing)
+        parsed.data.config && lockedKeys.length > 0
           ? { ...parsed.data, config: { ...existing.config, ...parsed.data.config } }
           : parsed.data;
       const nextCandidate = { ...existing, ...updatePatch };
+      if (isSnowflakeProvider(existing.providerName) && nextCandidate.enabled) {
+        const configError = snowflakeSourceConfigError(nextCandidate.config);
+        if (configError) {
+          res.status(409).json({ error: { message: configError } });
+          return;
+        }
+      }
       if (
         isCustomProvider(existing.providerName) &&
         updatePatch.tableName !== undefined &&
@@ -398,9 +429,13 @@ function accountIdForCreate(
   isCustomTemplate: boolean,
   providerName: string,
   accountId: string | undefined,
+  config: Record<string, unknown>,
 ): string | null {
   if (isCustomTemplate) {
     return `custom_${randomUUID()}`;
+  }
+  if (isSnowflakeProvider(providerName)) {
+    return nonEmptyConfigString(config, 'sourceId');
   }
   const trimmedAccountId = accountId?.trim();
   if (trimmedAccountId) {
@@ -413,17 +448,46 @@ function accountIdForCreate(
 function configForCreate(
   providerName: string,
   config: Record<string, unknown>,
-  accountId: string,
+  accountIdFallback: string,
 ): Record<string, unknown> {
-  if (!isGcpProvider(providerName)) return config;
-  const billingAccountId =
-    typeof config.billingAccountId === 'string' && config.billingAccountId.trim().length > 0
-      ? config.billingAccountId
-      : accountId;
-  return {
-    ...config,
-    billingAccountId: normalizeGcpBillingAccountId(billingAccountId),
-  };
+  if (isGcpProvider(providerName)) {
+    const billingAccountId =
+      typeof config.billingAccountId === 'string' && config.billingAccountId.trim().length > 0
+        ? config.billingAccountId
+        : accountIdFallback;
+    return {
+      ...config,
+      ...(billingAccountId
+        ? { billingAccountId: normalizeGcpBillingAccountId(billingAccountId) }
+        : {}),
+    };
+  }
+  if (isSnowflakeProvider(providerName)) {
+    const sourceCatalog = nonEmptyConfigString(config, 'sourceCatalog');
+    const sourceSchema = nonEmptyConfigString(config, 'sourceSchema');
+    const sourceTable = nonEmptyConfigString(config, 'sourceTable');
+    if (!sourceCatalog || !sourceSchema || !sourceTable) {
+      throw new Error('Snowflake sourceCatalog, sourceSchema, and sourceTable are required.');
+    }
+    if (!isSnowflakeUsageInCurrencyDailySource(sourceSchema, sourceTable)) {
+      throw new Error('Snowflake source table must be ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY.');
+    }
+    const sourceId = snowflakeSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable);
+    return {
+      ...config,
+      sourceCatalog,
+      sourceSchema,
+      sourceTable,
+      sourceFqn: `${sourceCatalog}.${sourceSchema}.${sourceTable}`,
+      sourceId,
+    };
+  }
+  return config;
+}
+
+function nonEmptyConfigString(config: Record<string, unknown>, key: string): string | null {
+  const value = config[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function isRegisteredAwsSource(source: {
@@ -435,6 +499,43 @@ function isRegisteredAwsSource(source: {
     const value = source.config[key];
     return typeof value === 'string' && value.trim().length > 0;
   });
+}
+
+function isRegisteredSnowflakeSource(source: {
+  providerName: string;
+  config: Record<string, unknown>;
+}): boolean {
+  if (!isSnowflakeProvider(source.providerName)) return false;
+  return snowflakeSourceConfigError(source.config) === null;
+}
+
+function snowflakeSourceConfigError(config: Record<string, unknown>): string | null {
+  const sourceCatalog = nonEmptyConfigString(config, 'sourceCatalog');
+  const sourceSchema = nonEmptyConfigString(config, 'sourceSchema');
+  const sourceTable = nonEmptyConfigString(config, 'sourceTable');
+  const sourceId = nonEmptyConfigString(config, 'sourceId');
+  if (!sourceCatalog || !sourceSchema || !sourceTable || !sourceId) {
+    return 'Snowflake sourceCatalog, sourceSchema, sourceTable, and sourceId are required.';
+  }
+  if (!isSnowflakeUsageInCurrencyDailySource(sourceSchema, sourceTable)) {
+    return 'Snowflake source table must be ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY.';
+  }
+  return null;
+}
+
+function registeredSourceLockedConfigKeys(source: {
+  providerName: string;
+  config: Record<string, unknown>;
+}): string[] {
+  if (isRegisteredAwsSource(source)) return AWS_SOURCE_LOCKED_CONFIG_KEYS;
+  if (isRegisteredSnowflakeSource(source)) return SNOWFLAKE_SOURCE_LOCKED_CONFIG_KEYS;
+  return [];
+}
+
+function sourceProviderLabel(providerName: string): string {
+  if (isAwsProvider(providerName)) return 'AWS';
+  if (isSnowflakeProvider(providerName)) return 'Snowflake';
+  return providerName;
 }
 
 function isCustomTableUniqueViolation(err: unknown): boolean {

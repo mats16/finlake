@@ -1112,10 +1112,13 @@ export const en = {
       customSourcesTitle: 'Custom data sources',
       gcpEmpty: 'No Google Cloud billing accounts match this view.',
       gcpAccountsTitle: 'Google Cloud billing accounts',
+      snowflakeEmpty: 'No Snowflake usage sources match this view.',
+      snowflakeSourcesTitle: 'Snowflake usage sources',
       connectAccount: 'Connect account',
       selectedSettings: 'Settings for AWS account {account}',
       configureAccount: 'Configure AWS account {account}',
       gcpSelectedSettings: 'Settings for Google Cloud billing account {account}',
+      snowflakeSelectedSettings: 'Settings for Snowflake source {source}',
       moreActions: 'More actions',
       openInAws: 'Open in AWS',
       cloudBilling: 'Cloud Billing',
@@ -1153,6 +1156,7 @@ export const en = {
       },
       columns: {
         account: 'Account ID',
+        source: 'Source',
         storageCredential: 'Storage Credential',
         lastUpdated: 'Last Updated',
         status: 'Status',
@@ -1315,6 +1319,38 @@ export const en = {
         error: 'Failed',
       },
     },
+    snowflake: {
+      title: 'Snowflake organization usage',
+      description: 'Transforms Snowflake organization usage in currency into FOCUS format.',
+      connectTitle: 'Connect Snowflake usage',
+      connectDescription:
+        'Use an existing Databricks Foreign Catalog for the Snowflake SNOWFLAKE database that exposes organization usage.',
+      useExistingForeignCatalog: 'Use existing Foreign Catalog',
+      modalDescription:
+        'Select SNOWFLAKE.ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY from a Snowflake Foreign Catalog.',
+      catalog: 'Catalog',
+      schema: 'Schema',
+      table: 'Table',
+      sourceTable: 'Source table',
+      catalogPlaceholder: 'Select a Foreign Catalog',
+      schemaPlaceholder: 'Select ORGANIZATION_USAGE',
+      tablePlaceholder: 'Select USAGE_IN_CURRENCY_DAILY',
+      noTables: 'No tables are visible in this schema.',
+      usageTableRequired:
+        'Snowflake FOCUS conversion requires ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY from a Foreign Catalog that exposes the SNOWFLAKE database.',
+      resourceProgress: 'Creation progress',
+      resourceSteps: {
+        sourceGrants: 'Foreign Catalog grants',
+        lakeflowJob: 'Lakeflow Spark Declarative Pipelines',
+      },
+      resourceStepStatus: {
+        idle: 'Waiting',
+        pending: 'Creating',
+        done: 'Created',
+        skipped: 'Skipped',
+        error: 'Failed',
+      },
+    },
     azure: {
       title: 'Configure Azure Cost Management Export',
       placeholder: 'storage account name',
@@ -1345,8 +1381,8 @@ export const en = {
         subtitle: '',
       },
       snowflake: {
-        description: 'Coming soon.',
-        subtitle: '',
+        description: 'Organization usage in currency',
+        subtitle: 'by Snowflake',
       },
       custom: {
         description: 'Bring your own cost feed via Auto Loader or Lakeflow Connect',
