@@ -1147,7 +1147,10 @@ test('POST /configurations creates Snowflake row with source config reflected', 
     assert.equal(body.config.sourceCatalog, 'snowflake_foreign');
     assert.equal(body.config.sourceSchema, 'ORGANIZATION_USAGE');
     assert.equal(body.config.sourceTable, 'USAGE_IN_CURRENCY_DAILY');
-    assert.equal(body.config.sourceFqn, 'snowflake_foreign.ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY');
+    assert.equal(
+      body.config.sourceFqn,
+      'snowflake_foreign.ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY',
+    );
     assert.equal(body.config.sourceId, expectedSourceId);
   } finally {
     await env.close();

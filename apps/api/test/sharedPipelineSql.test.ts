@@ -299,10 +299,7 @@ test('buildSnowflakeFocusSilverPipelineSql maps organization usage into FOCUS co
     sql,
     /CAST\(map_from_arrays\(array\(\), array\(\)\) AS MAP<STRING, STRING>\) AS Tags/,
   );
-  assert.match(
-    sql,
-    /concat\('account:', COALESCE\(CAST\(`ACCOUNT_LOCATOR` AS STRING\), ''\)\)/,
-  );
+  assert.match(sql, /concat\('account:', COALESCE\(CAST\(`ACCOUNT_LOCATOR` AS STRING\), ''\)\)/);
   assert.doesNotMatch(sql, /ACCOUNT_USAGE/);
   assert.doesNotMatch(sql, /METERING_DAILY_HISTORY/);
 });

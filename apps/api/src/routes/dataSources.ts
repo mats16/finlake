@@ -470,9 +470,7 @@ function configForCreate(
       throw new Error('Snowflake sourceCatalog, sourceSchema, and sourceTable are required.');
     }
     if (!isSnowflakeUsageInCurrencyDailySource(sourceSchema, sourceTable)) {
-      throw new Error(
-        'Snowflake source table must be ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY.',
-      );
+      throw new Error('Snowflake source table must be ORGANIZATION_USAGE.USAGE_IN_CURRENCY_DAILY.');
     }
     const sourceId = snowflakeSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable);
     return {
