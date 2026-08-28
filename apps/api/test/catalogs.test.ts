@@ -67,6 +67,7 @@ test('missing entity tag assignment is treated as tag absence', () => {
     isPermissionDenied(new Error('[INSUFFICIENT_PERMISSIONS] Insufficient privileges. SQLSTATE: 42501')),
     true,
   );
+  assert.equal(isPermissionDenied(new Error('Insufficient privileges. SQLSTATE: 42501')), true);
   assert.equal(isPermissionDenied({ errorCode: 'NOT_FOUND' }), false);
 });
 

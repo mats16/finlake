@@ -27,7 +27,7 @@ export function isPermissionDenied(err: unknown): boolean {
     }
   }
   const message = err instanceof Error ? err.message : String(err);
-  return /PERMISSION_DENIED|INSUFFICIENT_(?:PERMISSIONS|PRIVILEGES)|SQLSTATE\s*42501|not authorized/i.test(
+  return /PERMISSION_DENIED|INSUFFICIENT_(?:PERMISSIONS|PRIVILEGES)|SQLSTATE\s*:?\s*42501|not authorized/i.test(
     message,
   );
 }
