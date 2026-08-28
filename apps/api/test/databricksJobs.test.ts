@@ -70,8 +70,9 @@ test('upsertMultiPipelineSchedule creates one job with silver tasks feeding gold
           pipelineName: 'finops-aws-123456789012-silver-pipeline',
           files: [
             {
-              workspacePath: '/Workspace/Shared/finlake/data_sources/aws/silver.sql',
-              pipelineSql: 'CREATE VIEW b AS SELECT 1',
+              workspacePath: '/Workspace/Shared/finlake/data_sources/aws/silver.py',
+              pipelineSql: 'from pyspark import pipelines as dp',
+              language: 'PYTHON',
             },
           ],
           catalog: 'finops',
@@ -107,6 +108,18 @@ test('upsertMultiPipelineSchedule creates one job with silver tasks feeding gold
   assert.equal(imports.length, 3);
   assert.equal(createdPipelines.length, 3);
   assert.equal(createdJobs.length, 1);
+  const awsImport = imports.find(
+    (input) =>
+      (input as { path?: string }).path ===
+      '/Workspace/Shared/finlake/data_sources/aws/silver.py',
+  ) as { language?: string };
+  assert.equal(awsImport.language, 'PYTHON');
+  const sqlImport = imports.find(
+    (input) =>
+      (input as { path?: string }).path ===
+      '/Workspace/Shared/finlake/data_sources/databricks/silver.sql',
+  ) as { language?: string };
+  assert.equal(sqlImport.language, 'SQL');
 
   const job = createdJobs[0] as {
     tasks: Array<{ task_key: string; depends_on?: Array<{ task_key: string }> }>;
