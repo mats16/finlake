@@ -69,7 +69,7 @@ import { buildGcpFocusSilverPipelineSql } from './gcpFocusTransformPipelineSql.j
 import { buildSnowflakeFocusSilverPipelineSql } from './snowflakeFocusTransformPipelineSql.js';
 import { grantStatements } from './focusPermissions.js';
 import { listAccessibleCatalogs, listAccessibleTables } from './catalogs.js';
-import { WorkspaceServiceError } from './workspaceClientErrors.js';
+import { WorkspaceServiceError, isPermissionDenied } from './workspaceClientErrors.js';
 
 interface FocusConfig {
   accountPricesTable: string;
@@ -489,8 +489,10 @@ async function setupFocusDataSourceLocked(
     const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
     const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
     await assertCanReadUsageTable(userExecutor);
-    await grantAppSystemTableAccess(env, userExecutor, databricksAccountPricesTable);
-    await assertAppCanReadSystemTables(env, warehouseId, databricksAccountPricesTable);
+    await grantAppSystemTableAccessIfNeeded(
+      () => assertAppCanReadSystemTables(env, warehouseId, databricksAccountPricesTable),
+      () => grantAppSystemTableAccess(env, userExecutor, databricksAccountPricesTable),
+    );
   }
 
   if (isGcpProvider(source.providerName)) {
@@ -907,6 +909,19 @@ async function assertCanReadUsageTable(executor: StatementExecutor): Promise<voi
   }
 }
 
+export async function grantAppSystemTableAccessIfNeeded(
+  assertAccess: () => Promise<void>,
+  grantAccess: () => Promise<void>,
+): Promise<void> {
+  try {
+    await assertAccess();
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+    await grantAccess();
+    await assertAccess();
+  }
+}
+
 async function grantAppSystemTableAccess(
   env: Env,
   executor: StatementExecutor,
@@ -960,7 +975,7 @@ async function assertAppCanReadSystemTables(
   } catch (err) {
     throw new DataSourceSetupError(
       [
-        'Cannot read required system tables with the app service principal after granting access.',
+        'Cannot read required system tables with the app service principal.',
         'Grant USE CATALOG, USE SCHEMA, and SELECT on the required catalogs to the app service principal',
         'before creating the shared FOCUS pipeline/job.',
         (err as Error).message,

@@ -9,6 +9,7 @@ import { buildSnowflakeFocusSilverPipelineSql } from '../src/services/snowflakeF
 import {
   GCP_SOURCE_SCHEMA_PROBE,
   buildUsageGoldSql,
+  grantAppSystemTableAccessIfNeeded,
   sourceSilverPipelineName,
 } from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
@@ -38,6 +39,55 @@ import {
 const databricksSilverSql = buildFocusSilverPipelineSql({
   table: 'databricks_usage',
   accountPricesTable: 'system.billing.list_prices',
+});
+
+test('Databricks setup skips system grants when the app can already read system tables', async () => {
+  let grants = 0;
+
+  await grantAppSystemTableAccessIfNeeded(
+    async () => undefined,
+    async () => {
+      grants += 1;
+    },
+  );
+
+  assert.equal(grants, 0);
+});
+
+test('Databricks setup grants system access only after the access check fails', async () => {
+  const events: string[] = [];
+
+  await grantAppSystemTableAccessIfNeeded(
+    async () => {
+      events.push('check');
+      if (events.length === 1) throw new Error('PERMISSION_DENIED: missing access');
+    },
+    async () => {
+      events.push('grant');
+    },
+  );
+
+  assert.deepEqual(events, ['check', 'grant', 'check']);
+});
+
+test('Databricks setup does not grant system access after an operational failure', async () => {
+  const probeError = new Error('Statement Execution timed out');
+  let grants = 0;
+
+  await assert.rejects(
+    () =>
+      grantAppSystemTableAccessIfNeeded(
+        async () => {
+          throw probeError;
+        },
+        async () => {
+          grants += 1;
+        },
+      ),
+    (err) => err === probeError,
+  );
+
+  assert.equal(grants, 0);
 });
 
 test('Databricks FOCUS mapping prefers AI Gateway metadata without changing legacy fallback', () => {
