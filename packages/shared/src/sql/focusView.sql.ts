@@ -480,9 +480,7 @@ usage_with_pricing AS (
     CAST(
       COALESCE(
         get_json_object(to_json(ap.pricing), '$.effective_list.default'),
-        get_json_object(to_json(ap.pricing), '$.default'),
-        get_json_object(to_json(lp.pricing), '$.effective_list.default'),
-        get_json_object(to_json(lp.pricing), '$.default')
+        get_json_object(to_json(lp.pricing), '$.effective_list.default')
       )
       AS DECIMAL(30, 15)
     ) AS account_unit_price

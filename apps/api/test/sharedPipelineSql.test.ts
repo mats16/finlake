@@ -53,6 +53,10 @@ test('Databricks FOCUS mapping prefers AI Gateway metadata without changing lega
       /WHEN u\.usage_metadata\.endpoint_id IS NOT NULL THEN 'Model Serving Endpoint'/,
     );
     assert.match(sql, /u\.custom_tags AS Tags/);
+    assert.match(
+      sql,
+      /COALESCE\(\s+get_json_object\(to_json\(ap\.pricing\), '\$\.effective_list\.default'\),\s+get_json_object\(to_json\(lp\.pricing\), '\$\.effective_list\.default'\)\s+\)\s+AS DECIMAL\(30, 15\)\s+\) AS account_unit_price/,
+    );
   }
 });
 
@@ -393,9 +397,7 @@ test('buildFocusSilverPipelineSql keeps Databricks SkuPriceDetails as a map', ()
   assert.match(sql, /CAST\(u\.product_features\.is_serverless AS BOOLEAN\) AS x_Serverless/);
   assert.match(sql, /CAST\(u\.product_features\.is_photon AS BOOLEAN\) AS x_Photon/);
   assert.match(sql, /get_json_object\(to_json\(ap\.pricing\), '\$\.effective_list\.default'\)/);
-  assert.match(sql, /get_json_object\(to_json\(ap\.pricing\), '\$\.default'\)/);
   assert.match(sql, /get_json_object\(to_json\(lp\.pricing\), '\$\.effective_list\.default'\)/);
-  assert.match(sql, /get_json_object\(to_json\(lp\.pricing\), '\$\.default'\)/);
   assert.doesNotMatch(sql, /ap\.pricing\.effective_list\.default/);
   assert.doesNotMatch(sql, /lp\.pricing\.effective_list\.default/);
   assert.match(
