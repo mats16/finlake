@@ -16,10 +16,20 @@ export function isPermissionDenied(err: unknown): boolean {
     const status = 'status' in err ? (err as { status: unknown }).status : undefined;
     const statusCode =
       'statusCode' in err ? (err as { statusCode: unknown }).statusCode : undefined;
-    if (errorCode === 'PERMISSION_DENIED' || status === 403 || statusCode === 403) return true;
+    if (
+      errorCode === 'PERMISSION_DENIED' ||
+      errorCode === 'INSUFFICIENT_PERMISSIONS' ||
+      errorCode === 'INSUFFICIENT_PRIVILEGES' ||
+      status === 403 ||
+      statusCode === 403
+    ) {
+      return true;
+    }
   }
   const message = err instanceof Error ? err.message : String(err);
-  return /PERMISSION_DENIED|not authorized/i.test(message);
+  return /PERMISSION_DENIED|INSUFFICIENT_(?:PERMISSIONS|PRIVILEGES)|SQLSTATE\s*:?\s*42501|not authorized/i.test(
+    message,
+  );
 }
 
 export function isNotFound(err: unknown): boolean {
