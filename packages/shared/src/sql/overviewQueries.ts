@@ -58,6 +58,10 @@ export interface AiValueDailyRow {
   ticketsPerEmployee: number | null;
 }
 
+export interface AiValueAvailabilityRow {
+  requiredTableCount: number;
+}
+
 export interface SqlStatementInput {
   query: string;
   params: SqlParam[];
@@ -154,6 +158,7 @@ ai_daily AS (
     CAST(SUM(COALESCE(EffectiveCost, 0)) AS DOUBLE) AS ai_cost_usd
   FROM ${aiTable}
   WHERE ResourceType = 'AI Gateway Model Service'
+    AND ResourceName = 'finops.analytics.support_copilot'
     AND CAST(ChargePeriodStart AS TIMESTAMP) >= :start_ts
     AND CAST(ChargePeriodStart AS TIMESTAMP) <  :end_ts
     AND BillingCurrency = 'USD'
@@ -207,6 +212,30 @@ LEFT JOIN ai_daily a USING (usage_date)
 ORDER BY d.usage_date
 `,
     params: rangeParams(range),
+  };
+}
+
+export function buildAiValueAvailabilityStatement(
+  settings: Record<string, string | undefined>,
+): SqlStatementInput {
+  const catalog = (settings[CATALOG_SETTING_KEY] ?? '').trim();
+  const schemas = medallionSchemaNamesFromSettings(settings);
+  return {
+    query: /* sql */ `
+SELECT CAST(COUNT(*) AS DOUBLE) AS required_table_count
+FROM system.information_schema.tables
+WHERE table_catalog = :catalog
+  AND (
+    (table_schema = :focus_schema AND table_name = :focus_table)
+    OR (table_schema = :analytics_schema AND table_name = 'business_kpi_daily')
+  )
+`,
+    params: [
+      { name: 'catalog', value: catalog, type: 'STRING' },
+      { name: 'focus_schema', value: schemas.silver, type: 'STRING' },
+      { name: 'focus_table', value: FOCUS_VIEW_TABLE_DEFAULT, type: 'STRING' },
+      { name: 'analytics_schema', value: schemas.gold, type: 'STRING' },
+    ],
   };
 }
 

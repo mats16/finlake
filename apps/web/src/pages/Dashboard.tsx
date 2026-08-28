@@ -62,16 +62,19 @@ import {
 } from 'lucide-react';
 import {
   buildAiValueStatement,
+  buildAiValueAvailabilityStatement,
   buildOverviewCoverageStatement,
   buildOverviewDailyStatement,
   buildOverviewServicesStatement,
   buildOverviewSkusStatement,
   type AiValueDailyRow,
+  type AiValueAvailabilityRow,
   type DataSource,
   type FocusOverviewCoverageRow,
   type FocusOverviewDailyRow,
   type FocusOverviewServiceRow,
   type FocusOverviewSkuRow,
+  isDatabricksProvider,
 } from '@finlake/shared';
 import { SqlWarehouseSelector } from '../components/SqlWarehouseSelector';
 import { useAppSettings, useBudgets, useDataSources, useSqlStatement } from '../api/hooks';
@@ -220,6 +223,9 @@ export function Dashboard() {
 
   const configuredSources = dataSources.data?.items ?? [];
   const hasEnabledSource = configuredSources.some((source) => source.enabled);
+  const hasEnabledDatabricksSource = configuredSources.some(
+    (source) => source.enabled && isDatabricksProvider(source.providerName),
+  );
   const settings = appSettings.data?.settings ?? {};
   const historyDailyStatement = useMemo(
     () => buildOverviewDailyStatement(settings, wideRange),
@@ -238,6 +244,10 @@ export function Dashboard() {
     () => buildAiValueStatement(settings, activeRange),
     [activeRange, settings],
   );
+  const aiValueAvailabilityStatement = useMemo(
+    () => buildAiValueAvailabilityStatement(settings),
+    [settings],
+  );
   const sqlEnabled = appSettings.isSuccess && dataSources.isSuccess && hasEnabledSource;
   const historyDaily = useSqlStatement<FocusOverviewDailyRow>(historyDailyStatement, {
     enabled: sqlEnabled,
@@ -255,8 +265,16 @@ export function Dashboard() {
     enabled: sqlEnabled,
     requestKey: ['overview', 'coverage', settings],
   });
+  const aiValueAvailability = useSqlStatement<AiValueAvailabilityRow>(
+    aiValueAvailabilityStatement,
+    {
+      enabled: sqlEnabled && hasEnabledDatabricksSource,
+      requestKey: ['overview', 'aiValueAvailability', settings],
+    },
+  );
+  const hasAiValueTables = aiValueAvailability.rows[0]?.requiredTableCount === 2;
   const aiValue = useSqlStatement<AiValueDailyRow>(aiValueStatement, {
-    enabled: sqlEnabled,
+    enabled: sqlEnabled && hasEnabledDatabricksSource && hasAiValueTables,
     requestKey: ['overview', 'aiValue', activeRange, settings],
   });
   const dailyRows = historyDaily.rows;
@@ -540,7 +558,7 @@ export function Dashboard() {
           <AlertCircle />
           <AlertDescription>{t('dashboard.aiValue.loadFailed')}</AlertDescription>
         </Alert>
-      ) : aiValue.isLoading ? (
+      ) : aiValueAvailability.isLoading || aiValue.isLoading ? (
         <Skeleton className="mb-4 h-72 w-full" />
       ) : aiValueRows.length === 0 ? (
         <Card className="mb-4">
@@ -624,7 +642,6 @@ export function Dashboard() {
                       stroke="#3B82F6"
                       strokeWidth={2}
                       dot={{ r: 2 }}
-                      connectNulls
                     />
                     <Line
                       yAxisId="minutes"

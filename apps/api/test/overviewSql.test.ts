@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildAiValueStatement,
+  buildAiValueAvailabilityStatement,
   buildCoverageSql,
   buildOverviewDailyStatement,
   buildOverviewServicesStatement,
@@ -21,6 +22,7 @@ test('AI value statement joins daily aggregates and preserves missing billed AI 
   assert.match(statement.query, /FROM `finops`\.`focus`\.`databricks_usage`/);
   assert.match(statement.query, /FROM `finops`\.`analytics`\.`business_kpi_daily`/);
   assert.match(statement.query, /ResourceType = 'AI Gateway Model Service'/);
+  assert.match(statement.query, /ResourceName = 'finops\.analytics\.support_copilot'/);
   assert.equal(statement.query.match(/BillingCurrency = 'USD'/g)?.length, 2);
   assert.match(statement.query, /business_daily AS \([\s\S]*GROUP BY 1, 2/);
   assert.match(
@@ -38,6 +40,27 @@ test('AI value statement joins daily aggregates and preserves missing billed AI 
   assert.deepEqual(
     statement.params.map((param) => param.name),
     ['start_ts', 'end_ts'],
+  );
+});
+
+test('AI value availability checks both opt-in Databricks demo tables', () => {
+  const statement = buildAiValueAvailabilityStatement({
+    catalog_name: 'finops',
+    silver_schema_name: 'focus',
+    gold_schema_name: 'analytics',
+  });
+
+  assert.match(statement.query, /FROM system\.information_schema\.tables/);
+  assert.match(statement.query, /table_name = :focus_table/);
+  assert.match(statement.query, /table_name = 'business_kpi_daily'/);
+  assert.deepEqual(
+    statement.params.map((param) => [param.name, param.value]),
+    [
+      ['catalog', 'finops'],
+      ['focus_schema', 'focus'],
+      ['focus_table', 'databricks_usage'],
+      ['analytics_schema', 'analytics'],
+    ],
   );
 });
 
