@@ -12,6 +12,7 @@ import {
   PROVIDER_DATABRICKS,
   PROVIDER_GCP,
   PROVIDER_SNOWFLAKE,
+  GCP_DEMO_ACCOUNT_ID,
   GCP_SOURCE_KIND_TAGGED_DEMO,
   gcpDemoSourceIdFromParts,
   snowflakeSourceIdFromParts,
@@ -1141,9 +1142,38 @@ test('POST /configurations derives tagged GCP demo identity from the source FQN'
       },
     );
     assert.equal(status, 201);
-    assert.equal(body.accountId, expectedSourceId);
+    assert.equal(body.accountId, GCP_DEMO_ACCOUNT_ID);
     assert.equal(body.config.sourceId, expectedSourceId);
     assert.equal(body.config.billingAccountId, undefined);
+  } finally {
+    await env.close();
+  }
+});
+
+test('concurrent tagged GCP demo registration is serialized by the data source key', async () => {
+  const env = await startServer();
+  try {
+    const create = (sourceTable: string) =>
+      postJson<DataSource | { error: { message: string } }>(
+        env.base,
+        '/api/integrations/configurations',
+        {
+          templateId: 'gcp',
+          name: `Demo ${sourceTable}`,
+          providerName: 'gcp',
+          tableName: 'gcp_demo_usage',
+          config: {
+            sourceKind: GCP_SOURCE_KIND_TAGGED_DEMO,
+            sourceCatalog: 'finops',
+            sourceSchema: 'ingest',
+            sourceTable,
+          },
+        },
+      );
+
+    const results = await Promise.all([create('demo_a'), create('demo_b')]);
+    assert.deepEqual(results.map((result) => result.status).sort(), [201, 409]);
+    assert.equal((await env.db.repos.dataSources.list()).length, 1);
   } finally {
     await env.close();
   }

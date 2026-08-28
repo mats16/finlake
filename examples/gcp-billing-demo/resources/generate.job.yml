@@ -20,7 +20,7 @@ resources:
             - task_key: generate_raw
           pipeline_task:
             pipeline_id: ${resources.pipelines.gcp_billing_demo_bronze.id}
-            full_refresh: false
+            full_refresh: true
         - task_key: tag_source
           depends_on:
             - task_key: ingest_bronze

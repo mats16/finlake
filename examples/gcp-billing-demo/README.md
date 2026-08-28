@@ -84,7 +84,7 @@ For details, see the official documentation for [binding existing bundle resourc
 
 The job writes 100,000 rows in ten gzip JSON files to `/Volumes/finops/ingest/downloads/gcp_billing_demo/v1/`, ingests them to `finops.ingest.gcp_billing_demo`, and applies `finlake_source_type=gcp_billing_demo`.
 
-Each dataset version is immutable. Running the job again with the same version, seed, and as-of date validates and reuses the existing ten files so the streaming Bronze table does not duplicate rows. To change any generator input, use a new `dataset_version`.
+Each dataset version is immutable. Running the job again with the same version, seed, and as-of date validates and reuses the existing ten files. To change any generator input, use a new `dataset_version`. The demo job full-refreshes the 100,000-row Bronze table on every run so switching versions replaces the previous dataset instead of appending it.
 
 In FinLake, choose Google Cloud, then select `finops.ingest.gcp_billing_demo`. The app labels the source as **Synthetic demo data** and sends it through the standard GCP to FOCUS and shared Gold pipelines.
 

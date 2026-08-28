@@ -12,6 +12,7 @@ import {
   isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
+  GCP_DEMO_ACCOUNT_ID,
   GCP_SOURCE_KIND_TAGGED_DEMO,
   gcpDemoSourceIdFromParts,
   isSnowflakeProvider,
@@ -177,16 +178,9 @@ export function dataSourcesRouter(
         res.status(400).json({ error: { message: 'accountId is required' } });
         return;
       }
-      if (
+      const isTaggedGcpDemo =
         isGcpProvider(parsed.data.providerName) &&
-        config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO &&
-        (await taggedGcpDemoAlreadyRegistered(db))
-      ) {
-        res.status(409).json({
-          error: { message: 'Only one Google Cloud synthetic demo source can be registered.' },
-        });
-        return;
-      }
+        config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO;
       let created;
       try {
         created = await db.repos.dataSources.create({
@@ -200,6 +194,18 @@ export function dataSourcesRouter(
           config,
         });
       } catch (err) {
+        if (
+          isTaggedGcpDemo &&
+          (await db.repos.dataSources.get({
+            providerName: parsed.data.providerName,
+            accountId: GCP_DEMO_ACCOUNT_ID,
+          }))
+        ) {
+          res.status(409).json({
+            error: { message: 'Only one Google Cloud synthetic demo source can be registered.' },
+          });
+          return;
+        }
         if (isCustomTableUniqueViolation(err)) {
           res.status(409).json({
             error: {
@@ -476,7 +482,7 @@ function accountIdForCreate(
     return nonEmptyConfigString(config, 'sourceId');
   }
   if (isGcpProvider(providerName) && config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO) {
-    return nonEmptyConfigString(config, 'sourceId');
+    return GCP_DEMO_ACCOUNT_ID;
   }
   const trimmedAccountId = accountId?.trim();
   if (trimmedAccountId) {
@@ -603,14 +609,6 @@ function sourceProviderLabel(providerName: string): string {
   if (isGcpProvider(providerName)) return 'Google Cloud';
   if (isSnowflakeProvider(providerName)) return 'Snowflake';
   return providerName;
-}
-
-async function taggedGcpDemoAlreadyRegistered(db: DatabaseClient): Promise<boolean> {
-  return (await db.repos.dataSources.list()).some(
-    (source) =>
-      isGcpProvider(source.providerName) &&
-      source.config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO,
-  );
 }
 
 function isCustomTableUniqueViolation(err: unknown): boolean {

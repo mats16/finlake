@@ -119,6 +119,7 @@ export const GCP_DEMO_SOURCE_TAG_NAME = 'finlake_source_type';
 export const GCP_DEMO_SOURCE_TAG_VALUE = 'gcp_billing_demo';
 export const GCP_SOURCE_KIND_FOREIGN = 'foreign';
 export const GCP_SOURCE_KIND_TAGGED_DEMO = 'tagged_delta_demo';
+export const GCP_DEMO_ACCOUNT_ID = 'gcp_demo';
 export const GCP_DEMO_USAGE_TABLE_NAME = 'gcp_demo_usage';
 
 export function isGcpDetailedBillingExportTable(tableName: string): boolean {
