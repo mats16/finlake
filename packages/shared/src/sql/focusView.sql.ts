@@ -182,7 +182,12 @@ SELECT
     WHEN u.billing_origin_product IN ('DLT', 'ONLINE_TABLES', 'LAKEFLOW_CONNECT')
       THEN u.usage_metadata.dlt_pipeline_id
     WHEN u.billing_origin_product = 'MODEL_SERVING'
-      THEN COALESCE(u.usage_metadata.endpoint_id, u.usage_metadata.cluster_id)
+      THEN COALESCE(
+        get_json_object(to_json(u.usage_metadata), '$.ai_gateway.endpoint_id'),
+        get_json_object(to_json(u.usage_metadata), '$.ai_gateway.endpoint_name'),
+        u.usage_metadata.endpoint_id,
+        u.usage_metadata.cluster_id
+      )
     WHEN u.billing_origin_product = 'VECTOR_SEARCH'
       THEN COALESCE(u.usage_metadata.endpoint_id, u.usage_metadata.dlt_pipeline_id)
     WHEN u.billing_origin_product IN ('AI_FUNCTIONS', 'AI_GATEWAY')
@@ -250,6 +255,8 @@ SELECT
       )
     WHEN u.billing_origin_product = 'MODEL_SERVING'
       THEN COALESCE(
+        get_json_object(to_json(u.usage_metadata), '$.ai_gateway.endpoint_name'),
+        get_json_object(to_json(u.usage_metadata), '$.ai_gateway.endpoint_id'),
         u.usage_metadata.endpoint_name,
         u.usage_metadata.endpoint_id,
         u.cluster_name,
@@ -299,8 +306,11 @@ SELECT
         ELSE 'Spark Declarative Pipeline'
       END
     WHEN u.billing_origin_product = 'MODEL_SERVING' THEN
-      CASE WHEN u.usage_metadata.endpoint_id IS NOT NULL
-        THEN 'Model Serving Endpoint'
+      CASE
+        WHEN get_json_object(to_json(u.usage_metadata), '$.ai_gateway.endpoint_id') IS NOT NULL
+          OR get_json_object(to_json(u.usage_metadata), '$.ai_gateway.endpoint_name') IS NOT NULL
+          THEN 'AI Gateway Model Service'
+        WHEN u.usage_metadata.endpoint_id IS NOT NULL THEN 'Model Serving Endpoint'
         ELSE 'Cluster'
       END
     WHEN u.billing_origin_product = 'VECTOR_SEARCH' THEN

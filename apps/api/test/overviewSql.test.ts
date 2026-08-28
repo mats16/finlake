@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildAiValueStatement,
   buildCoverageSql,
   buildOverviewDailyStatement,
   buildOverviewServicesStatement,
@@ -9,6 +10,36 @@ import {
   rangeParams,
   rollupRowsSql,
 } from '@finlake/shared';
+
+test('AI value statement joins daily aggregates and preserves missing billed AI cost', () => {
+  const statement = buildAiValueStatement(
+    { catalog_name: 'finops', silver_schema_name: 'focus', gold_schema_name: 'analytics' },
+    { start: '2026-08-01T00:00:00Z', end: '2026-09-01T00:00:00Z' },
+  );
+
+  assert.match(statement.query, /FROM `finops`\.`analytics`\.`usage_daily`/);
+  assert.match(statement.query, /FROM `finops`\.`focus`\.`databricks_usage`/);
+  assert.match(statement.query, /FROM `finops`\.`analytics`\.`business_kpi_daily`/);
+  assert.match(statement.query, /ResourceType = 'AI Gateway Model Service'/);
+  assert.equal(statement.query.match(/BillingCurrency = 'USD'/g)?.length, 2);
+  assert.match(statement.query, /business_daily AS \([\s\S]*GROUP BY 1, 2/);
+  assert.match(
+    statement.query,
+    /date_spine AS \([\s\S]*SELECT usage_date FROM cloud_daily[\s\S]*UNION[\s\S]*SELECT usage_date FROM ai_daily[\s\S]*UNION[\s\S]*SELECT usage_date FROM business_daily/,
+  );
+  assert.match(statement.query, /FROM date_spine d/);
+  assert.match(statement.query, /LEFT JOIN business_daily b USING \(usage_date\)/);
+  assert.match(statement.query, /LEFT JOIN ai_daily a USING \(usage_date\)/);
+  assert.match(statement.query, /a\.ai_cost_usd IS NULL OR c\.cloud_cost_usd <= 0 THEN NULL/);
+  assert.match(statement.query, /a\.ai_cost_usd IS NULL OR b\.headcount <= 0 THEN NULL/);
+  assert.match(statement.query, /a\.ai_cost_usd IS NULL OR b\.tickets_resolved <= 0 THEN NULL/);
+  assert.match(statement.query, /WHEN b\.headcount <= 0 THEN NULL/);
+  assert.doesNotMatch(statement.query, /system\.ai_gateway\.usage/);
+  assert.deepEqual(
+    statement.params.map((param) => param.name),
+    ['start_ts', 'end_ts'],
+  );
+});
 
 test('rangeParams includes only the time range', () => {
   const range = { start: '2025-01-01T00:00:00Z', end: '2025-02-01T00:00:00Z' };

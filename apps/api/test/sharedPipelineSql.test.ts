@@ -26,11 +26,34 @@ import {
   medallionSchemaNamesFromSettings,
   normalizeGcpBillingAccountId,
   quoteIdent,
+  focusSelectSql,
 } from '@finlake/shared';
 
 const databricksSilverSql = buildFocusSilverPipelineSql({
   table: 'databricks_usage',
   accountPricesTable: 'system.billing.list_prices',
+});
+
+test('Databricks FOCUS mapping prefers AI Gateway metadata without changing legacy fallback', () => {
+  for (const sql of [databricksSilverSql, focusSelectSql]) {
+    assert.match(
+      sql,
+      /get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_id'\),\s+get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_name'\),\s+u\.usage_metadata\.endpoint_id,\s+u\.usage_metadata\.cluster_id/,
+    );
+    assert.match(
+      sql,
+      /get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_name'\),\s+get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_id'\),\s+u\.usage_metadata\.endpoint_name/,
+    );
+    assert.match(
+      sql,
+      /ai_gateway\.endpoint_id'\) IS NOT NULL\s+OR get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_name'\) IS NOT NULL\s+THEN 'AI Gateway Model Service'/,
+    );
+    assert.match(
+      sql,
+      /WHEN u\.usage_metadata\.endpoint_id IS NOT NULL THEN 'Model Serving Endpoint'/,
+    );
+    assert.match(sql, /u\.custom_tags AS Tags/);
+  }
 });
 
 test('medallion schema defaults use FinLake schema names', () => {
@@ -433,20 +456,20 @@ test('buildFocusSilverPipelineSql falls back to dlt_pipeline_id for SQL/VECTOR_S
   assert.doesNotMatch(sql, /u\.sku_name LIKE 'ENTERPRISE_SERVERLESS_SQL_COMPUTE%'/);
 });
 
-test('buildFocusSilverPipelineSql falls back to cluster_id for MODEL_SERVING without endpoint_id', () => {
+test('buildFocusSilverPipelineSql keeps MODEL_SERVING endpoint and cluster fallbacks', () => {
   const sql = databricksSilverSql;
 
   assert.match(
     sql,
-    /u\.billing_origin_product = 'MODEL_SERVING'\s+THEN COALESCE\(u\.usage_metadata\.endpoint_id, u\.usage_metadata\.cluster_id\)/,
+    /u\.billing_origin_product = 'MODEL_SERVING'\s+THEN COALESCE\(\s+get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_id'\),\s+get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_name'\),\s+u\.usage_metadata\.endpoint_id,\s+u\.usage_metadata\.cluster_id\s+\)/,
   );
   assert.match(
     sql,
-    /u\.billing_origin_product = 'MODEL_SERVING'\s+THEN COALESCE\(\s+u\.usage_metadata\.endpoint_name,\s+u\.usage_metadata\.endpoint_id,\s+u\.cluster_name,\s+u\.usage_metadata\.cluster_id\s+\)/,
+    /u\.billing_origin_product = 'MODEL_SERVING'\s+THEN COALESCE\(\s+get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_name'\),\s+get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_id'\),\s+u\.usage_metadata\.endpoint_name,\s+u\.usage_metadata\.endpoint_id,\s+u\.cluster_name,\s+u\.usage_metadata\.cluster_id\s+\)/,
   );
   assert.match(
     sql,
-    /u\.billing_origin_product = 'MODEL_SERVING' THEN\s+CASE WHEN u\.usage_metadata\.endpoint_id IS NOT NULL\s+THEN 'Model Serving Endpoint'\s+ELSE 'Cluster'/,
+    /u\.billing_origin_product = 'MODEL_SERVING' THEN\s+CASE\s+WHEN get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_id'\) IS NOT NULL\s+OR get_json_object\(to_json\(u\.usage_metadata\), '\$\.ai_gateway\.endpoint_name'\) IS NOT NULL\s+THEN 'AI Gateway Model Service'\s+WHEN u\.usage_metadata\.endpoint_id IS NOT NULL THEN 'Model Serving Endpoint'\s+ELSE 'Cluster'/,
   );
 
   // The old sku_name = 'ENTERPRISE_ALL_PURPOSE_COMPUTE' branch is gone

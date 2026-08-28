@@ -520,6 +520,7 @@ export const ja: Dictionary = {
     someSourcesFailed: '一部のデータソースをクエリできませんでした:',
     sections: {
       costSummary: 'コストサマリー',
+      aiValue: 'AI Value',
       costTrendsBreakdown: 'コスト推移と内訳',
       costAllocationTopSpenders: 'コスト配賦と上位支出',
       optimizationGovernance: '最適化とガバナンス',
@@ -532,6 +533,30 @@ export const ja: Dictionary = {
       savingsRealizedMtd: '実現済み削減額 (当月)',
       anomaliesLast7d: '異常検知 (直近7日)',
       openRecommendations: '未対応の推奨事項',
+    },
+    aiValue: {
+      loadFailed:
+        'AI Value データを読み込めませんでした。合成業績データをロードし、Databricks FOCUS パイプラインを更新してください。',
+      emptyTitle: 'AI Value データがありません',
+      emptyDescription:
+        '合成サポート KPI データをロードしてください。実際の AI 支出は AI Gateway の課金が system.billing.usage に到着した後に表示されます。',
+      aiSpend: 'AI Gateway 支出',
+      cloudShare: 'クラウド支出に占める比率',
+      costPerEmployee: '従業員1人当たり AI 費用',
+      costPerThousandTickets: '1,000チケット当たり AI 費用',
+      ticketsPerEmployee: '従業員日当たり処理件数',
+      billingSource: 'system.billing.usage の実課金額',
+      periodScope: 'Dashboard で選択した期間',
+      averageHeadcount: '日次サポート人員の平均を使用',
+      resolvedTickets: '解決済みサポートチケットを使用',
+      employeeDay: '解決件数を従業員日で除算',
+      trendTitle: '日次の AI 支出とサポート成果',
+      trendDescription:
+        'AI Gateway の実課金額とチーム単位の合成 KPI です。個人データは含みません。',
+      avgResolutionMinutes: '平均解決時間（分）',
+      csat: 'CSAT',
+      disclaimer:
+        '支出と業績を比較する画面であり、AI 支出が業績変化を引き起こしたという因果関係は主張しません。',
     },
     vsLastMonth: '前月比',
     vsSameMonthLastYear: '前年同月比',
