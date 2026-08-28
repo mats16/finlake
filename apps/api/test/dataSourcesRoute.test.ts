@@ -12,6 +12,8 @@ import {
   PROVIDER_DATABRICKS,
   PROVIDER_GCP,
   PROVIDER_SNOWFLAKE,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
+  gcpDemoSourceIdFromParts,
   snowflakeSourceIdFromParts,
   type DataSource,
   type Env,
@@ -1111,6 +1113,110 @@ test('POST /configurations creates Google Cloud row with source config reflected
     assert.equal(body.config.sourceCatalog, 'gcp_foreign');
     assert.equal(body.config.sourceSchema, 'billing_export');
     assert.equal(body.config.sourceTable, 'gcp_billing_export_resource_v1_ABCDEF_123456_ABCDEF');
+  } finally {
+    await env.close();
+  }
+});
+
+test('POST /configurations derives tagged GCP demo identity from the source FQN', async () => {
+  const env = await startServer();
+  try {
+    const expectedSourceId = gcpDemoSourceIdFromParts('finops', 'ingest', 'gcp_billing_demo');
+    const { status, body } = await postJson<DataSource>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'gcp',
+        name: 'Google Cloud demo billing',
+        providerName: 'Google Cloud',
+        accountId: 'spoofed-client-id',
+        tableName: 'gcp_demo_usage',
+        config: {
+          sourceKind: GCP_SOURCE_KIND_TAGGED_DEMO,
+          sourceId: 'spoofed-client-id',
+          sourceCatalog: 'finops',
+          sourceSchema: 'ingest',
+          sourceTable: 'gcp_billing_demo',
+        },
+      },
+    );
+    assert.equal(status, 201);
+    assert.equal(body.accountId, expectedSourceId);
+    assert.equal(body.config.sourceId, expectedSourceId);
+    assert.equal(body.config.billingAccountId, undefined);
+  } finally {
+    await env.close();
+  }
+});
+
+test('GCP demo sources cannot bypass setup validation or register a conflicting target', async () => {
+  let syncCalls = 0;
+  const env = await startServer({
+    syncSharedPipeline: async () => {
+      syncCalls += 1;
+    },
+  });
+  const sourceConfig = {
+    sourceKind: GCP_SOURCE_KIND_TAGGED_DEMO,
+    sourceCatalog: 'finops',
+    sourceSchema: 'ingest',
+    sourceTable: 'gcp_billing_demo',
+  };
+  try {
+    const enabledCreate = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'gcp',
+        name: 'Unvalidated demo',
+        providerName: 'gcp',
+        tableName: 'gcp_demo_usage',
+        enabled: true,
+        config: sourceConfig,
+      },
+    );
+    assert.equal(enabledCreate.status, 409);
+    assert.match(enabledCreate.body.error.message, /setup validation/);
+
+    const created = await postJson<DataSource>(env.base, '/api/integrations/configurations', {
+      templateId: 'gcp',
+      name: 'Validated later',
+      providerName: 'gcp',
+      tableName: 'gcp_demo_usage',
+      config: sourceConfig,
+    });
+    assert.equal(created.status, 201);
+
+    const changedSource = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/gcp/${encodeURIComponent(created.body.accountId)}`,
+      { config: { sourceTable: 'untagged_table' } },
+    );
+    assert.equal(changedSource.status, 409);
+    assert.match(changedSource.body.error.message, /sourceTable/);
+
+    const enabledPatch = await patchJson<{ error: { message: string } }>(
+      env.base,
+      `/api/integrations/configurations/gcp/${encodeURIComponent(created.body.accountId)}`,
+      { enabled: true },
+    );
+    assert.equal(enabledPatch.status, 409);
+    assert.match(enabledPatch.body.error.message, /setup validation/);
+
+    const secondDemo = await postJson<{ error: { message: string } }>(
+      env.base,
+      '/api/integrations/configurations',
+      {
+        templateId: 'gcp',
+        name: 'Conflicting demo',
+        providerName: 'gcp',
+        tableName: 'gcp_demo_usage',
+        config: { ...sourceConfig, sourceTable: 'another_demo' },
+      },
+    );
+    assert.equal(secondDemo.status, 409);
+    assert.match(secondDemo.body.error.message, /Only one/);
+    assert.equal(syncCalls, 0);
   } finally {
     await env.close();
   }

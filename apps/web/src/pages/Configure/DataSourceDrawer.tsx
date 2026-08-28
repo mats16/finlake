@@ -44,8 +44,14 @@ import {
   CATALOG_SETTING_KEY,
   DATABRICKS_FOCUS_VERSION,
   GCP_FOCUS_VERSION,
+  GCP_DEMO_SOURCE_TAG_NAME,
+  GCP_DEMO_SOURCE_TAG_VALUE,
+  GCP_DEMO_USAGE_TABLE_NAME,
+  GCP_SOURCE_KIND_FOREIGN,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
   SNOWFLAKE_FOCUS_VERSION,
   gcpBillingAccountIdFromTableName,
+  gcpDemoSourceIdFromParts,
   gcpUsageTableName,
   isGcpBillingExportResourceTable,
   isGcpDetailedBillingExportTable,
@@ -1238,17 +1244,44 @@ export function GcpFocusSection({
   const remoteSourceCatalog = configString(remoteConfig, 'sourceCatalog');
   const remoteSourceSchema = configString(remoteConfig, 'sourceSchema');
   const remoteSourceTable = configString(remoteConfig, 'sourceTable');
+  const remoteSourceKind = configString(remoteConfig, 'sourceKind');
   const [sourceCatalog, setSourceCatalog] = useState(remoteSourceCatalog);
   const [sourceSchema, setSourceSchema] = useState(remoteSourceSchema);
   const [sourceTable, setSourceTable] = useState(remoteSourceTable);
   const schemas = useCatalogSchemas(sourceCatalog);
-  const tables = useCatalogTables(sourceCatalog, sourceSchema);
+  const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
+  const selectedCatalog = (catalogs.data?.catalogs ?? []).find(
+    (catalog) => catalog.name === sourceCatalog,
+  );
+  let sourceKind = remoteSourceKind || GCP_SOURCE_KIND_FOREIGN;
+  if (selectedCatalog) {
+    sourceKind = isForeignCatalog(selectedCatalog)
+      ? GCP_SOURCE_KIND_FOREIGN
+      : GCP_SOURCE_KIND_TAGGED_DEMO;
+  }
+  const isSyntheticDemo = sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO;
+  const tables = useCatalogTables(
+    sourceCatalog,
+    sourceSchema,
+    isSyntheticDemo
+      ? { tagName: GCP_DEMO_SOURCE_TAG_NAME, tagValue: GCP_DEMO_SOURCE_TAG_VALUE }
+      : undefined,
+  );
   const excluded = useMemo(
     () => new Set(row ? [] : (excludedAccountIds ?? [])),
     [excludedAccountIds, row],
   );
-  const billingAccountId = sourceTable ? gcpBillingAccountIdFromTableName(sourceTable) : '';
-  const derivedTableName = gcpUsageTableName(billingAccountId);
+  const billingAccountId =
+    sourceTable && !isSyntheticDemo ? gcpBillingAccountIdFromTableName(sourceTable) : '';
+  let sourceId = '';
+  if (sourceTable) {
+    sourceId = isSyntheticDemo
+      ? gcpDemoSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable)
+      : billingAccountId;
+  }
+  const derivedTableName = isSyntheticDemo
+    ? GCP_DEMO_USAGE_TABLE_NAME
+    : gcpUsageTableName(sourceId);
   const baseTableName =
     row?.tableName ?? (sourceTable ? derivedTableName : (draft?.tableName ?? 'gcp_usage'));
   const tableName = tableLeafName(baseTableName);
@@ -1256,7 +1289,6 @@ export function GcpFocusSection({
     sourceCatalog && sourceSchema && sourceTable
       ? unquotedFqn(sourceCatalog, sourceSchema, sourceTable)
       : null;
-  const remoteCatalog = settings.data?.settings[CATALOG_SETTING_KEY] ?? '';
   const silverSchema = medallionSchemaNamesFromSettings(settings.data?.settings ?? {}).silver;
   const targetFqn = remoteCatalog
     ? unquotedFqn(remoteCatalog, silverSchema, tableName)
@@ -1271,9 +1303,13 @@ export function GcpFocusSection({
   const pipelineId = result?.pipelineId ?? row?.pipelineId ?? null;
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const isSetup = Boolean(row?.enabled || result);
-  const hasRequiredDetailedExport = sourceTable
-    ? isGcpDetailedBillingExportTable(sourceTable)
-    : false;
+  const selectedTable = (tables.data?.tables ?? []).find((table) => table.name === sourceTable);
+  let hasEligibleSource = false;
+  if (sourceTable) {
+    hasEligibleSource = isSyntheticDemo
+      ? selectedTable?.tags[GCP_DEMO_SOURCE_TAG_NAME] === GCP_DEMO_SOURCE_TAG_VALUE
+      : isGcpDetailedBillingExportTable(sourceTable);
+  }
   const setupBusy = setupInFlight || createDs.isPending || setupDs.isPending;
   const setupDisabled =
     setupBusy ||
@@ -1281,8 +1317,8 @@ export function GcpFocusSection({
     !sourceCatalog ||
     !sourceSchema ||
     !sourceTable ||
-    !billingAccountId ||
-    !hasRequiredDetailedExport ||
+    !sourceId ||
+    !hasEligibleSource ||
     (!row && !draft);
 
   useEffect(() => setSourceCatalog(remoteSourceCatalog), [remoteSourceCatalog]);
@@ -1299,11 +1335,18 @@ export function GcpFocusSection({
   const sourceTableOptions = useMemo(() => {
     const options = tables.data?.tables ?? [];
     if (row || excluded.size === 0) return options;
-    return options.filter((table) => !excluded.has(gcpBillingAccountIdFromTableName(table.name)));
-  }, [excluded, row, tables.data?.tables]);
+    return options.filter((table) => {
+      const id = isSyntheticDemo
+        ? gcpDemoSourceIdFromParts(sourceCatalog, sourceSchema, table.name)
+        : gcpBillingAccountIdFromTableName(table.name);
+      return !excluded.has(id);
+    });
+  }, [excluded, isSyntheticDemo, row, sourceCatalog, sourceSchema, tables.data?.tables]);
   const sourceCatalogOptions = useMemo(() => {
-    return (catalogs.data?.catalogs ?? []).filter(isForeignCatalog);
-  }, [catalogs.data?.catalogs]);
+    return (catalogs.data?.catalogs ?? []).filter(
+      (catalog) => isForeignCatalog(catalog) || catalog.name === remoteCatalog,
+    );
+  }, [catalogs.data?.catalogs, remoteCatalog]);
   const sourceSchemaOptions = useMemo(() => {
     return (schemas.data?.schemas ?? []).filter(isVisibleGcpSchema);
   }, [schemas.data?.schemas]);
@@ -1321,7 +1364,9 @@ export function GcpFocusSection({
 
   const buildConfig = () => ({
     ...remoteConfig,
-    billingAccountId,
+    ...(billingAccountId ? { billingAccountId } : {}),
+    sourceKind,
+    sourceId,
     sourceCatalog,
     sourceSchema,
     sourceTable,
@@ -1352,7 +1397,7 @@ export function GcpFocusSection({
         if (!draft) throw new Error('Missing draft data source configuration.');
         const created = await createDs.mutateAsync({
           ...draft,
-          accountId: billingAccountId,
+          accountId: sourceId,
           tableName,
           enabled: false,
           config,
@@ -1506,10 +1551,22 @@ export function GcpFocusSection({
             <AlertDescription>{t('dataSources.systemTables.catalogMissing')}</AlertDescription>
           </Alert>
         ) : null}
-        {sourceTable && !hasRequiredDetailedExport ? (
+        {isSyntheticDemo && sourceTable ? (
           <Alert>
             <Info />
-            <AlertDescription>{t('dataSources.gcp.detailedExportRequired')}</AlertDescription>
+            <AlertDescription>{t('dataSources.gcp.syntheticDemoNotice')}</AlertDescription>
+          </Alert>
+        ) : null}
+        {sourceTable && !hasEligibleSource ? (
+          <Alert>
+            <Info />
+            <AlertDescription>
+              {t(
+                isSyntheticDemo
+                  ? 'dataSources.gcp.syntheticDemoEligibilityRequired'
+                  : 'dataSources.gcp.detailedExportRequired',
+              )}
+            </AlertDescription>
           </Alert>
         ) : null}
         {result ? (
@@ -1590,6 +1647,7 @@ function GcpSourceSelector({
     name: string;
     tableType: string | null;
     dataSourceFormat: string | null;
+    tags: Record<string, string>;
   }>;
   loadingCatalogs: boolean;
   loadingSchemas: boolean;
@@ -1683,6 +1741,9 @@ function GcpSourceSelector({
                     {table.tableType || table.dataSourceFormat ? (
                       <span className="text-muted-foreground text-xs">
                         {[table.tableType, table.dataSourceFormat].filter(Boolean).join(' / ')}
+                        {table.tags[GCP_DEMO_SOURCE_TAG_NAME] === GCP_DEMO_SOURCE_TAG_VALUE
+                          ? ` · ${t('dataSources.gcp.syntheticDemoBadge')}`
+                          : ''}
                       </span>
                     ) : null}
                   </span>

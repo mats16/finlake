@@ -6,7 +6,11 @@ import {
 } from '../src/services/awsFocusTransformPipelineSql.js';
 import { buildGcpFocusSilverPipelineSql } from '../src/services/gcpFocusTransformPipelineSql.js';
 import { buildSnowflakeFocusSilverPipelineSql } from '../src/services/snowflakeFocusTransformPipelineSql.js';
-import { buildUsageGoldSql, sourceSilverPipelineName } from '../src/services/dataSourceSetup.js';
+import {
+  GCP_SOURCE_SCHEMA_PROBE,
+  buildUsageGoldSql,
+  sourceSilverPipelineName,
+} from '../src/services/dataSourceSetup.js';
 import { buildFocusSilverPipelineSql } from '../src/services/databricksFocusTransformPipelineSql.js';
 import {
   AWS_FOCUS_12_WITH_AWS_COLUMNS_QUERY_STATEMENT,
@@ -17,11 +21,13 @@ import {
   DATABRICKS_LIST_PRICES_TABLE_DEFAULT,
   DOWNLOADS_VOLUME_DEFAULT,
   GCP_FOCUS_VERSION,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
   MEDALLION_SCHEMA_DEFAULTS,
   PRICING_SCHEMA_DEFAULT,
   SNOWFLAKE_FOCUS_VERSION,
   isSnowflakeUsageInCurrencyDailySource,
   gcpBillingAccountIdFromTableName,
+  gcpDemoSourceIdFromParts,
   gcpUsageTableName,
   medallionSchemaNamesFromSettings,
   normalizeGcpBillingAccountId,
@@ -178,6 +184,30 @@ test('gcp billing export helpers derive canonical source and target names', () =
   assert.equal(GCP_FOCUS_VERSION, '1.2');
 });
 
+test('gcp demo source ids are stable and derived from the full table name', () => {
+  const sourceId = gcpDemoSourceIdFromParts('finops', 'ingest', 'gcp_billing_demo');
+  assert.equal(sourceId, gcpDemoSourceIdFromParts('finops', 'ingest', 'gcp_billing_demo'));
+  assert.match(sourceId, /^gcp_demo_finops_ingest_gcp_billing_demo_[a-z0-9]+$/);
+  assert.notEqual(sourceId, gcpDemoSourceIdFromParts('finops', 'other', 'gcp_billing_demo'));
+});
+
+test('GCP source schema probe covers nested fields used by the FOCUS mapping', () => {
+  for (const field of [
+    'adjustment_info.mode',
+    'credits.amount',
+    'price.list_price_consumption_model',
+    'project.labels.value',
+    'resource.global_name',
+    'tags.namespace',
+    'usage.amount_in_pricing_units',
+  ]) {
+    assert.match(
+      GCP_SOURCE_SCHEMA_PROBE,
+      new RegExp(`(?:^|, )${field.replace('.', '[.]')}(?:,|$)`),
+    );
+  }
+});
+
 test('buildGcpFocusSilverPipelineSql maps detailed billing export into FOCUS columns', () => {
   const sql = buildGcpFocusSilverPipelineSql({
     tableName: 'gcp_abcdef_123456_abcdef_usage',
@@ -250,6 +280,32 @@ test('buildGcpFocusSilverPipelineSql requires resource-level detailed billing ex
         sourceTable: 'gcp_billing_export_v1_ABCDEF_123456_ABCDEF',
       }),
     /resource-level detailed export table/,
+  );
+});
+
+test('buildGcpFocusSilverPipelineSql reuses the GCP mapping for tagged Delta demo tables', () => {
+  const sql = buildGcpFocusSilverPipelineSql({
+    tableName: 'gcp_demo_usage',
+    sourceCatalog: 'finops',
+    sourceSchema: 'ingest',
+    sourceTable: 'arbitrary_demo_table',
+    sourceKind: GCP_SOURCE_KIND_TAGGED_DEMO,
+  });
+  assert.match(sql, /FROM `finops`\.`ingest`\.`arbitrary_demo_table`/);
+  assert.match(sql, /'Google Cloud' AS ProviderName/);
+});
+
+test('buildGcpFocusSilverPipelineSql rejects spoofed source kinds', () => {
+  assert.throws(
+    () =>
+      buildGcpFocusSilverPipelineSql({
+        tableName: 'gcp_demo_usage',
+        sourceCatalog: 'finops',
+        sourceSchema: 'ingest',
+        sourceTable: 'gcp_billing_demo',
+        sourceKind: 'client_spoof',
+      }),
+    /Unsupported Google Cloud source kind/,
   );
 });
 

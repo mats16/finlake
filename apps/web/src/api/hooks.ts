@@ -476,14 +476,18 @@ export function useCatalogSchemas(catalogName: string | null | undefined) {
 export function useCatalogTables(
   catalogName: string | null | undefined,
   schemaName: string | null | undefined,
+  tagFilter?: { tagName: string; tagValue: string },
 ) {
+  const tagQuery = tagFilter
+    ? `?tagName=${encodeURIComponent(tagFilter.tagName)}&tagValue=${encodeURIComponent(tagFilter.tagValue)}`
+    : '';
   return useQuery({
-    queryKey: ['catalogs', catalogName, 'schemas', schemaName, 'tables'],
+    queryKey: ['catalogs', catalogName, 'schemas', schemaName, 'tables', tagFilter],
     queryFn: () =>
       apiFetch<CatalogTableListResponse>(
         `/api/catalogs/${encodeURIComponent(catalogName!)}/schemas/${encodeURIComponent(
           schemaName!,
-        )}/tables`,
+        )}/tables${tagQuery}`,
       ),
     enabled: Boolean(catalogName && schemaName),
     staleTime: 60 * 1000,

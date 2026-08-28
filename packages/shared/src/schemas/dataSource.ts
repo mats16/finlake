@@ -115,6 +115,11 @@ export function normalizeGcpBillingAccountId(accountId: string): string {
 
 export const GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX = 'gcp_billing_export_resource_v1_';
 export const GCP_BILLING_EXPORT_RESOURCE_TABLE_PREFIX = 'gcp_billing_export_resource_';
+export const GCP_DEMO_SOURCE_TAG_NAME = 'finlake_source_type';
+export const GCP_DEMO_SOURCE_TAG_VALUE = 'gcp_billing_demo';
+export const GCP_SOURCE_KIND_FOREIGN = 'foreign';
+export const GCP_SOURCE_KIND_TAGGED_DEMO = 'tagged_delta_demo';
+export const GCP_DEMO_USAGE_TABLE_NAME = 'gcp_demo_usage';
 
 export function isGcpDetailedBillingExportTable(tableName: string): boolean {
   return tableName.trim().startsWith(GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX);
@@ -139,6 +144,21 @@ export function gcpUsageTableName(accountId: string): string {
     .replace(/[^a-z0-9_]+/g, '_')
     .replace(/^_+|_+$/g, '');
   return suffix ? `gcp_${suffix}_usage` : 'gcp_usage';
+}
+
+export function gcpDemoSourceIdFromParts(
+  sourceCatalog: string,
+  sourceSchema: string,
+  sourceTable: string,
+): string {
+  const fqn = [sourceCatalog, sourceSchema, sourceTable].map((part) => part.trim()).join('.');
+  const slug =
+    fqn
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 96) || 'usage';
+  return `gcp_demo_${slug}_${stableHash32(fqn)}`;
 }
 
 export const SNOWFLAKE_ORGANIZATION_USAGE_SCHEMA = 'ORGANIZATION_USAGE';

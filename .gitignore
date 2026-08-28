@@ -113,6 +113,9 @@ data/*.db-shm
 # Turbo cache
 .turbo/
 
+# Databricks bundle local deployment state
+**/.databricks/
+
 # Docusaurus cache and generated files
 .docusaurus
 

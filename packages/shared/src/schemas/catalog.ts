@@ -42,6 +42,7 @@ export const CatalogTableSummarySchema = z.object({
   tableType: z.string().nullable(),
   dataSourceFormat: z.string().nullable(),
   comment: z.string().nullable(),
+  tags: z.record(z.string(), z.string()).default({}),
 });
 export type CatalogTableSummary = z.infer<typeof CatalogTableSummarySchema>;
 

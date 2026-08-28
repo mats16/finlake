@@ -5,6 +5,7 @@ import {
   isAwsProvider,
   isDatabricksProvider,
   isGcpProvider,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
   type PricingNotebookState,
   type DataSource,
 } from '@finlake/shared';
@@ -241,7 +242,14 @@ export function DataSources() {
                     <TableCell>
                       <div className="flex min-w-56 items-center gap-3">
                         <VendorLogo source={tpl} logo={registryEntry?.logo} size={32} />
-                        <div className="font-medium">{displayNameForRow(row, tpl)}</div>
+                        <div className="flex flex-wrap items-center gap-2 font-medium">
+                          {displayNameForRow(row, tpl)}
+                          {row.config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO ? (
+                            <span className="bg-warning/15 text-warning-foreground rounded px-1.5 py-0.5 text-xs">
+                              {t('dataSources.gcp.syntheticDemoBadge')}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>

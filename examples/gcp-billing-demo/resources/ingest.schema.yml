@@ -1,0 +1,8 @@
+resources:
+  schemas:
+    ingest_schema:
+      name: ${var.ingest_schema}
+      catalog_name: ${resources.catalogs.finlake_catalog.name}
+      comment: FinLake synthetic GCP billing demo ingestion schema
+      lifecycle:
+        prevent_destroy: true

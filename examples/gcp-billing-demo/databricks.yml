@@ -1,0 +1,26 @@
+bundle:
+  name: finlake-gcp-billing-demo
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    default: finops
+  ingest_schema:
+    default: ingest
+  volume:
+    default: downloads
+  dataset_version:
+    default: v1
+  as_of_date:
+    default: '2026-08-28'
+  seed:
+    default: '72011857'
+
+targets:
+  demo:
+    default: true
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

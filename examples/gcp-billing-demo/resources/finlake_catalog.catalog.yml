@@ -1,0 +1,7 @@
+resources:
+  catalogs:
+    finlake_catalog:
+      name: ${var.catalog}
+      comment: FinLake synthetic GCP billing demo catalog
+      lifecycle:
+        prevent_destroy: true

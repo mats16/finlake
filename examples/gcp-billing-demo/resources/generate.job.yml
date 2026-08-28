@@ -1,0 +1,40 @@
+resources:
+  jobs:
+    generate_gcp_billing_demo:
+      name: finlake-gcp-billing-demo
+      tasks:
+        - task_key: generate_raw
+          notebook_task:
+            notebook_path: ../src/generate_raw.py
+            source: WORKSPACE
+            base_parameters:
+              catalog: ${resources.catalogs.finlake_catalog.name}
+              schema: ${resources.schemas.ingest_schema.name}
+              volume: ${var.volume}
+              dataset_version: ${var.dataset_version}
+              as_of_date: ${var.as_of_date}
+              seed: ${var.seed}
+          environment_key: serverless
+        - task_key: ingest_bronze
+          depends_on:
+            - task_key: generate_raw
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gcp_billing_demo_bronze.id}
+            full_refresh: false
+        - task_key: tag_source
+          depends_on:
+            - task_key: ingest_bronze
+          notebook_task:
+            notebook_path: ../src/tag_source.py
+            source: WORKSPACE
+            base_parameters:
+              catalog: ${resources.catalogs.finlake_catalog.name}
+              schema: ${resources.schemas.ingest_schema.name}
+              table: gcp_billing_demo
+              volume: ${var.volume}
+              dataset_version: ${var.dataset_version}
+          environment_key: serverless
+      environments:
+        - environment_key: serverless
+          spec:
+            client: '1'
