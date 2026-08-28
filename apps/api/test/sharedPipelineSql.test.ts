@@ -60,7 +60,9 @@ test('Databricks setup grants system access only after the access check fails', 
   await grantAppSystemTableAccessIfNeeded(
     async () => {
       events.push('check');
-      if (events.length === 1) throw new Error('PERMISSION_DENIED: missing access');
+      if (events.length === 1) {
+        throw new Error('[INSUFFICIENT_PERMISSIONS] Insufficient privileges. SQLSTATE: 42501');
+      }
     },
     async () => {
       events.push('grant');
