@@ -515,6 +515,7 @@ export const en = {
     someSourcesFailed: 'Some data sources could not be queried:',
     sections: {
       costSummary: 'Cost Summary',
+      aiValue: 'AI Value',
       costTrendsBreakdown: 'Cost Trends & Breakdown',
       costAllocationTopSpenders: 'Cost Allocation & Top Spenders',
       optimizationGovernance: 'Optimization & Governance',
@@ -527,6 +528,30 @@ export const en = {
       savingsRealizedMtd: 'Savings Realized (MTD)',
       anomaliesLast7d: 'Anomalies (Last 7d)',
       openRecommendations: 'Open Recommendations',
+    },
+    aiValue: {
+      loadFailed:
+        'AI value data could not be loaded. Load the synthetic business KPI dataset and refresh the Databricks FOCUS pipeline.',
+      emptyTitle: 'No AI value data',
+      emptyDescription:
+        'Load the synthetic support KPI dataset. Actual AI spend appears after AI Gateway billing reaches system.billing.usage.',
+      aiSpend: 'AI Gateway Spend',
+      cloudShare: 'Share of Cloud Spend',
+      costPerEmployee: 'AI Cost per Employee',
+      costPerThousandTickets: 'AI Cost per 1,000 Tickets',
+      ticketsPerEmployee: 'Tickets per Employee-Day',
+      billingSource: 'Actual billed cost from system.billing.usage',
+      periodScope: 'Selected dashboard period',
+      averageHeadcount: 'Using average daily support headcount',
+      resolvedTickets: 'Using resolved support tickets',
+      employeeDay: 'Resolved tickets divided by employee-days',
+      trendTitle: 'AI spend and support outcomes by day',
+      trendDescription:
+        'Billed AI Gateway spend with synthetic team-level KPIs; no employee-level data.',
+      avgResolutionMinutes: 'Avg resolution (minutes)',
+      csat: 'CSAT',
+      disclaimer:
+        'This view compares spend and outcomes. It does not claim that AI spend caused the observed performance change.',
     },
     vsLastMonth: 'vs last month',
     vsSameMonthLastYear: 'vs same month last year',

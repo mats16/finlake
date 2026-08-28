@@ -4,6 +4,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -44,6 +47,7 @@ import {
 } from '@databricks/appkit-ui/react';
 import {
   AlertCircle,
+  Bot,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -53,18 +57,24 @@ import {
   Sparkles,
   Tags,
   TrendingUp,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import {
+  buildAiValueStatement,
+  buildAiValueAvailabilityStatement,
   buildOverviewCoverageStatement,
   buildOverviewDailyStatement,
   buildOverviewServicesStatement,
   buildOverviewSkusStatement,
+  type AiValueDailyRow,
+  type AiValueAvailabilityRow,
   type DataSource,
   type FocusOverviewCoverageRow,
   type FocusOverviewDailyRow,
   type FocusOverviewServiceRow,
   type FocusOverviewSkuRow,
+  isDatabricksProvider,
 } from '@finlake/shared';
 import { SqlWarehouseSelector } from '../components/SqlWarehouseSelector';
 import { useAppSettings, useBudgets, useDataSources, useSqlStatement } from '../api/hooks';
@@ -213,6 +223,9 @@ export function Dashboard() {
 
   const configuredSources = dataSources.data?.items ?? [];
   const hasEnabledSource = configuredSources.some((source) => source.enabled);
+  const hasEnabledDatabricksSource = configuredSources.some(
+    (source) => source.enabled && isDatabricksProvider(source.providerName),
+  );
   const settings = appSettings.data?.settings ?? {};
   const historyDailyStatement = useMemo(
     () => buildOverviewDailyStatement(settings, wideRange),
@@ -227,6 +240,14 @@ export function Dashboard() {
     [activeRange, settings],
   );
   const coverageStatement = useMemo(() => buildOverviewCoverageStatement(settings), [settings]);
+  const aiValueStatement = useMemo(
+    () => buildAiValueStatement(settings, activeRange),
+    [activeRange, settings],
+  );
+  const aiValueAvailabilityStatement = useMemo(
+    () => buildAiValueAvailabilityStatement(settings),
+    [settings],
+  );
   const sqlEnabled = appSettings.isSuccess && dataSources.isSuccess && hasEnabledSource;
   const historyDaily = useSqlStatement<FocusOverviewDailyRow>(historyDailyStatement, {
     enabled: sqlEnabled,
@@ -244,10 +265,24 @@ export function Dashboard() {
     enabled: sqlEnabled,
     requestKey: ['overview', 'coverage', settings],
   });
+  const aiValueAvailability = useSqlStatement<AiValueAvailabilityRow>(
+    aiValueAvailabilityStatement,
+    {
+      enabled: sqlEnabled && hasEnabledDatabricksSource,
+      requestKey: ['overview', 'aiValueAvailability', settings],
+    },
+  );
+  const hasAiValueTables = aiValueAvailability.rows[0]?.requiredTableCount === 2;
+  const aiValue = useSqlStatement<AiValueDailyRow>(aiValueStatement, {
+    enabled: sqlEnabled && hasEnabledDatabricksSource && hasAiValueTables,
+    requestKey: ['overview', 'aiValue', activeRange, settings],
+  });
   const dailyRows = historyDaily.rows;
   const skuRows = currentSkus.rows;
   const serviceRows = currentServices.rows;
   const coverageRows = coverage.rows;
+  const aiValueRows = aiValue.rows;
+  const aiValueSummary = useMemo(() => summarizeAiValue(aiValueRows), [aiValueRows]);
   const activeProviders = useMemo(
     () =>
       uniqueProvidersFromNames([
@@ -516,6 +551,124 @@ export function Dashboard() {
           loading={currentSkus.isLoading}
         />
       </div>
+
+      <SectionTitle title={t('dashboard.sections.aiValue')} />
+      {aiValue.isError ? (
+        <Alert className="mb-4">
+          <AlertCircle />
+          <AlertDescription>{t('dashboard.aiValue.loadFailed')}</AlertDescription>
+        </Alert>
+      ) : aiValueAvailability.isLoading || aiValue.isLoading ? (
+        <Skeleton className="mb-4 h-72 w-full" />
+      ) : aiValueRows.length === 0 ? (
+        <Card className="mb-4">
+          <CardContent className="pt-6">
+            <EmptyState
+              title={t('dashboard.aiValue.emptyTitle')}
+              description={t('dashboard.aiValue.emptyDescription')}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <KpiCard
+              icon={Bot}
+              label={t('dashboard.aiValue.aiSpend')}
+              value={formatNullableUsd(aiValueSummary.aiCostUsd, formatUsd, t)}
+              delta={t('dashboard.aiValue.billingSource')}
+            />
+            <KpiCard
+              icon={TrendingUp}
+              label={t('dashboard.aiValue.cloudShare')}
+              value={formatNullablePercent(aiValueSummary.aiCostShare, locale, t)}
+              delta={t('dashboard.aiValue.periodScope')}
+            />
+            <KpiCard
+              icon={Users}
+              label={t('dashboard.aiValue.costPerEmployee')}
+              value={formatNullableUsd(aiValueSummary.aiCostPerEmployee, formatUsd, t)}
+              delta={t('dashboard.aiValue.averageHeadcount')}
+            />
+            <KpiCard
+              icon={DollarSign}
+              label={t('dashboard.aiValue.costPerThousandTickets')}
+              value={formatNullableUsd(aiValueSummary.aiCostPerThousandTickets, formatUsd, t)}
+              delta={t('dashboard.aiValue.resolvedTickets')}
+            />
+            <KpiCard
+              icon={CheckCircle2}
+              label={t('dashboard.aiValue.ticketsPerEmployee')}
+              value={formatNullableNumber(aiValueSummary.ticketsPerEmployee, locale, t)}
+              delta={t('dashboard.aiValue.employeeDay')}
+            />
+          </div>
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle className="text-sm">{t('dashboard.aiValue.trendTitle')}</CardTitle>
+              <CardDescription>{t('dashboard.aiValue.trendDescription')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-72">
+                <ResponsiveContainer>
+                  <LineChart data={aiValueRows}>
+                    <CartesianGrid stroke="var(--border)" vertical={false} />
+                    <XAxis
+                      dataKey="usageDate"
+                      stroke="var(--muted-foreground)"
+                      fontSize={11}
+                      tickFormatter={(value: string) => value.slice(5)}
+                    />
+                    <YAxis
+                      yAxisId="minutes"
+                      stroke="var(--muted-foreground)"
+                      fontSize={11}
+                      domain={[0, 'auto']}
+                    />
+                    <YAxis
+                      yAxisId="csat"
+                      orientation="right"
+                      stroke="var(--muted-foreground)"
+                      fontSize={11}
+                      domain={[0, 100]}
+                    />
+                    <YAxis yAxisId="cost" hide domain={[0, 'auto']} />
+                    <RechartsTooltip />
+                    <Legend />
+                    <Line
+                      yAxisId="cost"
+                      dataKey="aiCostUsd"
+                      name={t('dashboard.aiValue.aiSpend')}
+                      stroke="#3B82F6"
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                    />
+                    <Line
+                      yAxisId="minutes"
+                      dataKey="avgResolutionMinutes"
+                      name={t('dashboard.aiValue.avgResolutionMinutes')}
+                      stroke="var(--foreground)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      yAxisId="csat"
+                      dataKey="csat"
+                      name={t('dashboard.aiValue.csat')}
+                      stroke="var(--primary)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-muted-foreground mb-0 mt-3 text-xs">
+                {t('dashboard.aiValue.disclaimer')}
+              </p>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       <div className="mt-5 mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="m-0 text-base font-semibold">
@@ -1472,6 +1625,72 @@ function formatLastUpdated(historyUpdatedAt: number, currentUpdatedAt: number, l
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(timestamp));
+}
+
+interface AiValueSummary {
+  aiCostUsd: number | null;
+  aiCostShare: number | null;
+  aiCostPerEmployee: number | null;
+  aiCostPerThousandTickets: number | null;
+  ticketsPerEmployee: number | null;
+}
+
+function summarizeAiValue(rows: AiValueDailyRow[]): AiValueSummary {
+  const aiRows = rows.filter((row) => isFiniteNumber(row.aiCostUsd));
+  const aiCostUsd = aiRows.length
+    ? aiRows.reduce((sum, row) => sum + (row.aiCostUsd ?? 0), 0)
+    : null;
+  const cloudCostUsd = rows.reduce(
+    (sum, row) => sum + (isFiniteNumber(row.cloudCostUsd) ? row.cloudCostUsd : 0),
+    0,
+  );
+  const headcountRows = rows.filter((row) => isFiniteNumber(row.headcount));
+  const headcountDays = headcountRows.reduce(
+    (sum, row) => sum + (isFiniteNumber(row.headcount) ? row.headcount : 0),
+    0,
+  );
+  const averageHeadcount = headcountRows.length > 0 ? headcountDays / headcountRows.length : 0;
+  const ticketsResolved = rows.reduce(
+    (sum, row) => sum + (isFiniteNumber(row.ticketsResolved) ? row.ticketsResolved : 0),
+    0,
+  );
+
+  return {
+    aiCostUsd,
+    aiCostShare: aiCostUsd !== null && cloudCostUsd > 0 ? aiCostUsd / cloudCostUsd : null,
+    aiCostPerEmployee:
+      aiCostUsd !== null && averageHeadcount > 0 ? aiCostUsd / averageHeadcount : null,
+    aiCostPerThousandTickets:
+      aiCostUsd !== null && ticketsResolved > 0 ? (aiCostUsd * 1000) / ticketsResolved : null,
+    ticketsPerEmployee: headcountDays > 0 ? ticketsResolved / headcountDays : null,
+  };
+}
+
+function formatNullableUsd(
+  value: number | null,
+  formatUsd: (value: number) => string,
+  t: TFunction,
+): string {
+  return isFiniteNumber(value) ? formatUsd(value) : t('dashboard.notAvailable');
+}
+
+function formatNullablePercent(value: number | null, locale: string, t: TFunction): string {
+  if (!isFiniteNumber(value)) return t('dashboard.notAvailable');
+  return new Intl.NumberFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+    style: 'percent',
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function formatNullableNumber(value: number | null, locale: string, t: TFunction): string {
+  if (!isFiniteNumber(value)) return t('dashboard.notAvailable');
+  return new Intl.NumberFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 const wholeUsdFormatters = new Map<string, Intl.NumberFormat>();
