@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
   awsUsageTableName,
-  buildAwsFocusSilverPipelineSql,
+  buildAwsFocusSilverPipelineSource,
 } from '../src/services/awsFocusTransformPipelineSql.js';
 import { buildGcpFocusSilverPipelineSql } from '../src/services/gcpFocusTransformPipelineSql.js';
 import { buildSnowflakeFocusSilverPipelineSql } from '../src/services/snowflakeFocusTransformPipelineSql.js';
@@ -179,28 +180,135 @@ test('sourceSilverPipelineName follows ingest pipeline naming convention', () =>
   );
 });
 
-test('buildAwsFocusSilverPipelineSql embeds source-specific values without gold rollup', () => {
-  const sql = buildAwsFocusSilverPipelineSql({
+test('buildAwsFocusSilverPipelineSource incrementally processes overwritten AWS manifests', () => {
+  const source = buildAwsFocusSilverPipelineSource({
     tableName: 'aws_123456789012_usage',
     s3Bucket: 'finlake-billing-123456789012',
     s3Prefix: 'exports/focus',
     exportName: 'finlake-focus-1-2',
   });
 
-  assert.match(sql, /CREATE OR REFRESH MATERIALIZED VIEW `aws_123456789012_usage`/);
+  assert.match(source, /TABLE_NAME = "aws_123456789012_usage"/);
   assert.match(
-    sql,
-    /FROM read_files\(\s*'s3:\/\/finlake-billing-123456789012\/exports\/focus\/finlake-focus-1-2\/data\/\*\*\/\*\.parquet'/,
+    source,
+    /S3_BUCKET = "finlake-billing-123456789012"[\s\S]*S3_PREFIX = "exports\/focus"[\s\S]*EXPORT_NAME = "finlake-focus-1-2"/,
   );
-  assert.match(
-    sql,
-    /`x_Discounts` MAP<STRING, DOUBLE> COMMENT 'AWS extension containing discount key-value pairs that apply to the line item\.'/,
+  assert.match(source, /spark\.readStream\.format\("cloudFiles"\)/);
+  assert.match(source, /\.option\("cloudFiles\.format", "binaryFile"\)/);
+  assert.match(source, /\.option\("cloudFiles\.allowOverwrites", "true"\)/);
+  assert.match(source, /\.load\(f"\{MANIFEST_ROOT\}\*\*\/\*Manifest\.json"\)/);
+  assert.match(source, /payload\.get\("dataFiles"\)/);
+  assert.match(source, /BILLING_PERIOD=\(\\d\{4\}\)-\(\\d\{2\}\)/);
+  assert.match(source, /normalized\.startswith\(expected\)/);
+  assert.match(source, /spark_session = batch_df\.sparkSession/);
+  assert.match(source, /\.option\("replaceWhere", predicate\)/);
+  assert.match(source, /'delta\.enableRowTracking' = true/);
+  assert.match(source, /'delta\.enableChangeDataFeed' = true/);
+  assert.match(source, /'delta\.enableDeletionVectors' = true/);
+  assert.doesNotMatch(source, /read_files/);
+  assert.doesNotMatch(source, /data\/\*\*\/\*\.parquet/);
+});
+
+test('buildAwsFocusSilverPipelineSource does not replace placeholders inside values', () => {
+  const source = buildAwsFocusSilverPipelineSource({
+    tableName: 'aws_123456789012_usage',
+    s3Bucket: 'finlake-billing-123456789012',
+    s3Prefix: 'exports/__EXPORT_NAME__',
+    exportName: 'finlake-focus-1-2',
+  });
+
+  assert.match(source, /S3_PREFIX = "exports\/__EXPORT_NAME__"/);
+  const result = spawnSync(
+    'python3',
+    ['-c', `compile(${JSON.stringify(source)}, "aws_focus_ingest.py", "exec")`],
+    { encoding: 'utf8' },
   );
-  assert.match(sql, /`x_Operation`,/);
-  assert.match(sql, /`x_ServiceCode`/);
-  assert.doesNotMatch(sql, /usage_daily/);
-  assert.doesNotMatch(sql, /usage_monthly/);
-  assert.doesNotMatch(sql, /gold_schema_name/);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('AWS manifest processing validates inputs and selects the latest snapshot per period', () => {
+  const source = buildAwsFocusSilverPipelineSource({
+    tableName: 'aws_123456789012_usage',
+    s3Bucket: 'finlake-billing-123456789012',
+    s3Prefix: 'exports/focus',
+    exportName: 'finlake-focus-1-2',
+  });
+  const harness = `
+import sys, types
+
+class DP:
+    @staticmethod
+    def foreach_batch_sink(**_kwargs):
+        return lambda fn: fn
+    @staticmethod
+    def append_flow(**_kwargs):
+        return lambda fn: fn
+
+pyspark = types.ModuleType("pyspark")
+pyspark.pipelines = DP
+sql = types.ModuleType("pyspark.sql")
+sql.functions = object()
+sys.modules["pyspark"] = pyspark
+sys.modules["pyspark.sql"] = sql
+
+namespace = {}
+exec(compile(${JSON.stringify(source)}, "aws_focus_ingest.py", "exec"), namespace)
+
+period = "2026-08"
+root = "s3://finlake-billing-123456789012/exports/focus/finlake-focus-1-2"
+manifest_path = f"{root}/metadata/BILLING_PERIOD={period}/finlake-focus-1-2-Manifest.json"
+data_path = f"{root}/data/BILLING_PERIOD={period}/finlake-focus-1-2-00001.snappy.parquet"
+row = {
+    "path": manifest_path,
+    "modificationTime": 1,
+    "content": ('{"dataFiles":["' + data_path + '"]}').encode(),
+}
+parsed = namespace["_manifest"](row)
+assert parsed["period"] == period
+assert parsed["data_files"] == [data_path]
+
+relative = dict(row, content=b'{"dataFiles":["data/BILLING_PERIOD=2026-08/z.parquet","data/BILLING_PERIOD=2026-08/a.parquet"]}')
+assert namespace["_manifest"](relative)["data_files"] == [
+    f"{root}/data/BILLING_PERIOD=2026-08/a.parquet",
+    f"{root}/data/BILLING_PERIOD=2026-08/z.parquet",
+]
+
+empty = dict(row, content=b'{"dataFiles":[]}')
+assert namespace["_manifest"](empty)["data_files"] == []
+
+july = dict(
+    row,
+    path=f"{root}/metadata/BILLING_PERIOD=2026-07/Manifest.json",
+    content=b'{"dataFiles":["data/BILLING_PERIOD=2026-07/july.parquet"]}',
+)
+newer = dict(row, modificationTime=2, content=b'{"dataFiles":["data/BILLING_PERIOD=2026-08/new.parquet"]}')
+seen = []
+spark_session = object()
+sessions = []
+namespace["_ensure_target"] = sessions.append
+namespace["_replace_period"] = lambda actual, manifest: (sessions.append(actual), seen.append(manifest))
+batch = type("Batch", (), {"sparkSession": spark_session, "collect": lambda self: [row, july, newer]})()
+namespace["replace_aws_focus_periods"](batch, 1)
+assert all(actual is spark_session for actual in sessions)
+assert [item["period"] for item in seen] == ["2026-07", "2026-08"]
+assert seen[-1]["data_files"] == [f"{root}/data/BILLING_PERIOD=2026-08/new.parquet"]
+
+for bad in [
+    dict(row, content=b'not-json'),
+    dict(row, content=b'{}'),
+    dict(row, content=b'{"dataFiles":["s3://other-bucket/file.parquet"]}'),
+    dict(row, content=b'{"dataFiles":["data/BILLING_PERIOD=2026-08/../../outside.parquet"]}'),
+    dict(row, path=f"{root}/metadata/no-period/Manifest.json"),
+]:
+    try:
+        namespace["_manifest"](bad)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"manifest should have failed: {bad}")
+`;
+  const result = spawnSync('python3', ['-c', harness], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('buildUsageGoldSql can read a source table outside the default silver schema', () => {

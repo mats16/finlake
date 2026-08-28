@@ -6,7 +6,7 @@ export interface PipelineScheduleParams {
   pipelineName: string;
   /** Display name for the Databricks Job (e.g. `finops-databricks-focus-job`). */
   jobName: string;
-  /** Pipeline SQL source files uploaded into the workspace. */
+  /** Pipeline source files uploaded into the workspace. */
   files: PipelineSourceFile[];
   /** Unity Catalog target catalog. */
   catalog: string;
@@ -29,7 +29,7 @@ export interface PipelineJobTaskParams {
   taskKey: string;
   /** Display name for this Lakeflow pipeline. */
   pipelineName: string;
-  /** Pipeline SQL source files uploaded into the workspace. */
+  /** Pipeline source files uploaded into the workspace. */
   files: PipelineSourceFile[];
   /** Unity Catalog target catalog. */
   catalog: string;
@@ -61,10 +61,12 @@ export interface MultiPipelineScheduleParams {
 }
 
 export interface PipelineSourceFile {
-  /** Absolute workspace path for the uploaded pipeline SQL source. */
+  /** Absolute workspace path for the uploaded pipeline source. */
   workspacePath: string;
-  /** DLT SQL body — must use `CREATE OR REFRESH` syntax. */
+  /** Pipeline source body. */
   pipelineSql: string;
+  /** Workspace source language. SQL remains the default. */
+  language?: 'SQL' | 'PYTHON';
 }
 
 export interface UpsertPipelineScheduleResult {
@@ -145,7 +147,7 @@ export async function uploadPipelineFile(
 
 /**
  * Create or update the Lakeflow Declarative Pipeline that builds the FOCUS
- * materialized view. Photon is managed by Databricks for serverless pipelines,
+ * dataset. Photon is managed by Databricks for serverless pipelines,
  * so we don't pass any photon-related flag — leaving the platform default in
  * place is the supported configuration.
  */
@@ -330,7 +332,11 @@ export async function upsertMultiPipelineSchedule(
         };
       }
       await Promise.all(
-        pipeline.files.map((file) => uploadPipelineFile(wc, file.workspacePath, file.pipelineSql)),
+        pipeline.files.map((file) =>
+          uploadPipelineFile(wc, file.workspacePath, file.pipelineSql, {
+            language: file.language,
+          }),
+        ),
       );
       const pipelineId = await upsertPipeline(
         wc,

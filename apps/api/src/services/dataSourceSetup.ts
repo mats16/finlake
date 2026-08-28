@@ -62,7 +62,7 @@ import {
 import { DataSourceSetupError } from './dataSourceErrors.js';
 import {
   awsUsageTableName,
-  buildAwsFocusSilverPipelineSql,
+  buildAwsFocusSilverPipelineSource,
 } from './awsFocusTransformPipelineSql.js';
 import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineSql.js';
 import { buildGcpFocusSilverPipelineSql } from './gcpFocusTransformPipelineSql.js';
@@ -1452,13 +1452,14 @@ function sourcePipelineFile(
     tableName,
     providerName: source.providerName,
     source,
-    workspacePath: `${sourceRoot}/silver.sql`,
-    pipelineSql: buildAwsFocusSilverPipelineSql({
+    workspacePath: `${sourceRoot}/silver.py`,
+    pipelineSql: buildAwsFocusSilverPipelineSource({
       tableName,
       s3Bucket: awsSource.s3Bucket,
       s3Prefix: awsSource.s3Prefix,
       exportName: awsSource.exportName,
     }),
+    language: 'PYTHON',
   };
 }
 
