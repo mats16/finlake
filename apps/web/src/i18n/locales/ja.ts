@@ -1298,27 +1298,34 @@ export const ja: Dictionary = {
       },
     },
     gcp: {
-      title: 'BigQuery 請求エクスポート',
-      description: 'Google Cloud の詳細請求エクスポートテーブルを FOCUS 形式へ変換します。',
+      title: 'Google Cloud 請求データ',
+      description: 'Google Cloud の請求データを FOCUS 形式へ変換します。',
       connectTitle: 'Google Cloud 請求を接続',
       connectDescription:
-        'Cloud Billing の詳細エクスポートを含む BigQuery Dataset を、既存の Databricks Foreign Catalog 経由で利用します。',
-      useExistingForeignCatalog: '既存の Foreign Catalog を使う',
+        'Foreign Catalog 上の BigQuery 詳細請求エクスポート、または FinLake カタログ内のタグ付き合成 Delta テーブルを選択します。',
+      useExistingForeignCatalog: '請求ソースを選択',
       modalDescription:
-        'BigQuery にエクスポートした Google Cloud の課金データテーブルを選択してください。',
+        'BigQuery の詳細請求エクスポート、またはタグ付き合成 Delta テーブルを選択してください。',
       catalog: 'カタログ',
-      schema: 'スキーマ (BigQuery Dataset)',
+      schema: 'スキーマ',
       table: 'テーブル',
       sourceTable: 'ソーステーブル',
-      catalogPlaceholder: 'Foreign Catalog を選択',
+      catalogPlaceholder: 'カタログを選択',
       schemaPlaceholder: 'スキーマを選択',
-      tablePlaceholder: 'gcp_billing_export_resource_v1_* を選択',
+      tablePlaceholder: '請求ソーステーブルを選択',
       noTables: 'このスキーマに表示できるテーブルがありません。',
       detailedExportRequired:
         'FOCUS 変換にはリソースレベルの詳細エクスポートが必須です。Google Cloud の Cloud Billing export 設定で Detailed usage cost の Enable detailed export を有効化し、gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID> テーブルを選択してください。',
+      syntheticDemoBadge: '合成デモデータ',
+      syntheticDemoNotice:
+        'このタグ付き Delta テーブルは合成したデモ用請求データです。実際の請求エクスポートと同じ GCP → FOCUS パイプラインで処理します。',
+      syntheticDemoEligibilityRequired:
+        'このテーブルは合成デモソースとして利用できません。finlake_source_type=gcp_billing_demo タグを復元し、Delta の managed、external、streaming table のいずれかであることを確認してください。',
+      syntheticDemoBanner:
+        '合成請求データが有効です。実データのソースも有効な場合、アプリの集計値にはデモデータと実データが混在します。',
       resourceProgress: '作成状況',
       resourceSteps: {
-        sourceGrants: 'Foreign Catalog 権限',
+        sourceGrants: 'ソーステーブル権限',
         lakeflowJob: 'Lakeflow Spark 宣言型パイプライン',
       },
       resourceStepStatus: {

@@ -8,12 +8,18 @@ import {
   FOCUS_REFRESH_CRON_DEFAULT,
   FOCUS_REFRESH_TIMEZONE_DEFAULT,
   GCP_FOCUS_VERSION,
+  GCP_DEMO_SOURCE_TAG_NAME,
+  GCP_DEMO_SOURCE_TAG_VALUE,
+  GCP_DEMO_USAGE_TABLE_NAME,
+  GCP_SOURCE_KIND_FOREIGN,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
   GOLD_USAGE_TABLES,
   LAKEFLOW_PIPELINE_SETTING_KEYS,
   SNOWFLAKE_FOCUS_VERSION,
   focusSourceTables,
   focusViewFqn,
   gcpBillingAccountIdFromTableName,
+  gcpDemoSourceIdFromParts,
   gcpUsageTableName,
   isAwsProvider,
   isCustomProvider,
@@ -62,6 +68,8 @@ import { buildFocusSilverPipelineSql } from './databricksFocusTransformPipelineS
 import { buildGcpFocusSilverPipelineSql } from './gcpFocusTransformPipelineSql.js';
 import { buildSnowflakeFocusSilverPipelineSql } from './snowflakeFocusTransformPipelineSql.js';
 import { grantStatements } from './focusPermissions.js';
+import { listAccessibleCatalogs, listAccessibleTables } from './catalogs.js';
+import { WorkspaceServiceError } from './workspaceClientErrors.js';
 
 interface FocusConfig {
   accountPricesTable: string;
@@ -79,6 +87,8 @@ interface GcpFocusConfig {
   sourceSchema: string | null;
   sourceTable: string | null;
   billingAccountId: string | null;
+  sourceKind: string | null;
+  sourceId: string | null;
 }
 
 interface SnowflakeFocusConfig {
@@ -239,6 +249,8 @@ function readGcpFocusConfig(config: Record<string, unknown>): GcpFocusConfig {
     billingAccountId:
       get('billingAccountId') ??
       (sourceTable ? gcpBillingAccountIdFromTableName(sourceTable) : null),
+    sourceKind: get('sourceKind'),
+    sourceId: get('sourceId'),
   };
 }
 
@@ -431,11 +443,13 @@ async function setupFocusDataSourceLocked(
       };
     } else if (isGcpProvider(source.providerName)) {
       gcpSource = readGcpFocusSource(readGcpFocusConfig(source.config));
-      tableName = body.tableName ?? gcpUsageTableName(gcpSource.billingAccountId);
+      tableName = body.tableName ?? gcpTargetTableName(gcpSource);
       focusVersion = GCP_FOCUS_VERSION;
       nextConfig = {
         ...source.config,
-        billingAccountId: gcpSource.billingAccountId,
+        billingAccountId: gcpSource.billingAccountId ?? undefined,
+        sourceKind: gcpSource.sourceKind,
+        sourceId: gcpSource.sourceId,
         sourceCatalog: gcpSource.sourceCatalog,
         sourceSchema: gcpSource.sourceSchema,
         sourceTable: gcpSource.sourceTable,
@@ -485,9 +499,28 @@ async function setupFocusDataSourceLocked(
     }
     const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
     const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
-    await assertCanReadForeignSource(userExecutor, gcpSource.sourceFqn, 'Google Cloud');
-    await grantAppForeignSourceAccess(env, userExecutor, gcpSource, 'Google Cloud');
-    await assertAppCanReadForeignSource(env, warehouseId, gcpSource.sourceFqn, 'Google Cloud');
+    try {
+      await assertEligibleGcpSource(env, userToken as string, catalog, gcpSource);
+    } catch (err) {
+      if (err instanceof DataSourceSetupError) throw err;
+      if (err instanceof WorkspaceServiceError) {
+        throw new DataSourceSetupError(err.message, err.statusCode, 'sourceGrants');
+      }
+      throw new DataSourceSetupError(
+        `Failed to validate Google Cloud source eligibility: ${(err as Error).message}`,
+        400,
+        'sourceGrants',
+      );
+    }
+    await assertCanReadBillingSource(userExecutor, gcpSource.sourceFqn, 'Google Cloud');
+    await grantAppBillingSourceAccess(env, userExecutor, gcpSource, 'Google Cloud');
+    await assertAppCanReadBillingSource(
+      env,
+      warehouseId,
+      gcpSource.sourceFqn,
+      'Google Cloud',
+      GCP_SOURCE_SCHEMA_PROBE,
+    );
   }
 
   if (isSnowflakeProvider(source.providerName)) {
@@ -496,9 +529,9 @@ async function setupFocusDataSourceLocked(
     }
     const warehouseId = await resolveSetupWarehouseId(env, userToken as string, body.warehouseId);
     const userExecutor = buildSetupUserExecutor(env, userToken as string, warehouseId);
-    await assertCanReadForeignSource(userExecutor, snowflakeSource.sourceFqn, 'Snowflake');
-    await grantAppForeignSourceAccess(env, userExecutor, snowflakeSource, 'Snowflake');
-    await assertAppCanReadForeignSource(env, warehouseId, snowflakeSource.sourceFqn, 'Snowflake');
+    await assertCanReadBillingSource(userExecutor, snowflakeSource.sourceFqn, 'Snowflake');
+    await grantAppBillingSourceAccess(env, userExecutor, snowflakeSource, 'Snowflake');
+    await assertAppCanReadBillingSource(env, warehouseId, snowflakeSource.sourceFqn, 'Snowflake');
   }
 
   const candidateSource: DataSource = {
@@ -591,7 +624,9 @@ function readGcpFocusSource(config: GcpFocusConfig): {
   sourceSchema: string;
   sourceTable: string;
   sourceFqn: string;
-  billingAccountId: string;
+  billingAccountId: string | null;
+  sourceKind: string;
+  sourceId: string;
 } {
   if (!config.sourceCatalog) {
     throw new Error('Source catalog is not configured. Select a Google Cloud Foreign Catalog.');
@@ -602,15 +637,25 @@ function readGcpFocusSource(config: GcpFocusConfig): {
   if (!config.sourceTable) {
     throw new Error('Source table is not configured. Select the billing export table.');
   }
-  if (!isGcpDetailedBillingExportTable(config.sourceTable)) {
+  const sourceKind = config.sourceKind ?? GCP_SOURCE_KIND_FOREIGN;
+  if (sourceKind !== GCP_SOURCE_KIND_FOREIGN && sourceKind !== GCP_SOURCE_KIND_TAGGED_DEMO) {
+    throw new Error(`Unsupported Google Cloud source kind: ${sourceKind}`);
+  }
+  if (
+    sourceKind === GCP_SOURCE_KIND_FOREIGN &&
+    !isGcpDetailedBillingExportTable(config.sourceTable)
+  ) {
     throw new Error(
       'Google Cloud billing source must be the resource-level detailed export table. Enable Detailed usage cost in Google Cloud Billing export settings, then select gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID>.',
     );
   }
-  const billingAccountId = normalizeGcpBillingAccountId(
-    config.billingAccountId ?? gcpBillingAccountIdFromTableName(config.sourceTable),
-  );
-  if (!billingAccountId.trim()) {
+  const billingAccountId =
+    sourceKind === GCP_SOURCE_KIND_FOREIGN
+      ? normalizeGcpBillingAccountId(
+          config.billingAccountId ?? gcpBillingAccountIdFromTableName(config.sourceTable),
+        )
+      : null;
+  if (sourceKind === GCP_SOURCE_KIND_FOREIGN && !billingAccountId?.trim()) {
     throw new Error('Billing account id could not be derived from the selected table.');
   }
   return {
@@ -619,7 +664,134 @@ function readGcpFocusSource(config: GcpFocusConfig): {
     sourceTable: config.sourceTable,
     sourceFqn: quoteFlexibleFqn([config.sourceCatalog, config.sourceSchema, config.sourceTable]),
     billingAccountId,
+    sourceKind,
+    sourceId:
+      sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO
+        ? gcpDemoSourceIdFromParts(config.sourceCatalog, config.sourceSchema, config.sourceTable)
+        : billingAccountId!,
   };
+}
+
+function gcpTargetTableName(source: ReturnType<typeof readGcpFocusSource>): string {
+  return source.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO
+    ? GCP_DEMO_USAGE_TABLE_NAME
+    : gcpUsageTableName(source.sourceId);
+}
+
+export const GCP_SOURCE_SCHEMA_PROBE = [
+  'billing_account_id',
+  'cost',
+  'cost_at_list',
+  'cost_at_list_consumption_model',
+  'cost_type',
+  'currency',
+  'currency_conversion_rate',
+  'seller_name',
+  'transaction_type',
+  'usage_start_time',
+  'usage_end_time',
+  'service.id',
+  'service.description',
+  'sku.id',
+  'sku.description',
+  'project.id',
+  'project.number',
+  'project.name',
+  'project.labels.key',
+  'project.labels.value',
+  'resource.name',
+  'resource.global_name',
+  'location.location',
+  'location.region',
+  'location.zone',
+  'usage.amount',
+  'usage.unit',
+  'usage.amount_in_pricing_units',
+  'usage.pricing_unit',
+  'price.effective_price',
+  'price.effective_price_default',
+  'price.list_price',
+  'price.list_price_consumption_model',
+  'price.tier_start_amount',
+  'price.unit',
+  'price.pricing_unit_quantity',
+  'credits.id',
+  'credits.full_name',
+  'credits.type',
+  'credits.name',
+  'credits.amount',
+  'invoice.month',
+  'invoice.publisher_type',
+  'labels.key',
+  'labels.value',
+  'system_labels.key',
+  'system_labels.value',
+  'tags.key',
+  'tags.value',
+  'tags.namespace',
+  'subscription.instance_id',
+  'consumption_model.id',
+  'consumption_model.description',
+  'adjustment_info.id',
+  'adjustment_info.description',
+  'adjustment_info.type',
+  'adjustment_info.mode',
+].join(', ');
+
+async function assertEligibleGcpSource(
+  env: Env,
+  userToken: string,
+  mainCatalog: string,
+  source: ReturnType<typeof readGcpFocusSource>,
+): Promise<void> {
+  const catalog = (await listAccessibleCatalogs(env, userToken)).find(
+    (candidate) => candidate.name === source.sourceCatalog,
+  );
+  if (!catalog) {
+    throw new DataSourceSetupError(
+      `Google Cloud source catalog ${source.sourceCatalog} is not accessible.`,
+      400,
+      'sourceGrants',
+    );
+  }
+  const isForeign = (catalog.catalogType ?? '').toUpperCase() === 'FOREIGN_CATALOG';
+  if (isForeign) {
+    if (
+      source.sourceKind !== GCP_SOURCE_KIND_FOREIGN ||
+      !isGcpDetailedBillingExportTable(source.sourceTable)
+    ) {
+      throw new DataSourceSetupError(
+        'Google Cloud Foreign Catalog sources must use a resource-level detailed billing export table.',
+        400,
+        'sourceGrants',
+      );
+    }
+    return;
+  }
+  if (source.sourceCatalog !== mainCatalog || source.sourceKind !== GCP_SOURCE_KIND_TAGGED_DEMO) {
+    throw new DataSourceSetupError(
+      'Google Cloud Delta demo sources must be in the FinLake main catalog and declare sourceKind tagged_delta_demo.',
+      400,
+      'sourceGrants',
+    );
+  }
+  const tables = await listAccessibleTables(
+    env,
+    userToken,
+    source.sourceCatalog,
+    source.sourceSchema,
+    {
+      tagName: GCP_DEMO_SOURCE_TAG_NAME,
+      tagValue: GCP_DEMO_SOURCE_TAG_VALUE,
+    },
+  );
+  if (!tables.some((table) => table.name === source.sourceTable)) {
+    throw new DataSourceSetupError(
+      'Google Cloud Delta demo source must be a tagged Delta managed, external, or streaming table.',
+      400,
+      'sourceGrants',
+    );
+  }
 }
 
 function readSnowflakeFocusSource(config: SnowflakeFocusConfig): {
@@ -799,7 +971,7 @@ async function assertAppCanReadSystemTables(
   }
 }
 
-async function assertCanReadForeignSource(
+async function assertCanReadBillingSource(
   executor: StatementExecutor,
   sourceFqn: string,
   providerLabel: string,
@@ -814,7 +986,7 @@ async function assertCanReadForeignSource(
     throw new DataSourceSetupError(
       [
         `Cannot read ${providerLabel} billing source table ${sourceFqn} with the current user.`,
-        'Grant USE CATALOG, USE SCHEMA, and SELECT on the Foreign Catalog table',
+        'Grant USE CATALOG, USE SCHEMA, and SELECT on the source table',
         'before creating the FOCUS pipeline/job.',
         (err as Error).message,
       ].join(' '),
@@ -824,7 +996,7 @@ async function assertCanReadForeignSource(
   }
 }
 
-async function grantAppForeignSourceAccess(
+async function grantAppBillingSourceAccess(
   env: Env,
   executor: StatementExecutor,
   source: { sourceCatalog: string; sourceSchema: string; sourceFqn: string },
@@ -860,11 +1032,12 @@ async function grantAppForeignSourceAccess(
   }
 }
 
-async function assertAppCanReadForeignSource(
+async function assertAppCanReadBillingSource(
   env: Env,
   warehouseId: string,
   sourceFqn: string,
   providerLabel: string,
+  schemaProjection?: string,
 ): Promise<void> {
   const executor = buildAppExecutor(env, warehouseId);
   if (!executor) {
@@ -880,11 +1053,14 @@ async function assertAppCanReadForeignSource(
       [],
       z.object({ ok: z.number() }),
     );
+    if (schemaProjection) {
+      await executor.run(`SELECT ${schemaProjection} FROM ${sourceFqn} LIMIT 0`, [], z.unknown());
+    }
   } catch (err) {
     throw new DataSourceSetupError(
       [
         `Cannot read the ${providerLabel} billing source table with the app service principal after granting access.`,
-        'Grant USE CATALOG, USE SCHEMA, and SELECT on the Foreign Catalog source to the app service principal',
+        'Grant USE CATALOG, USE SCHEMA, and SELECT on the source table to the app service principal',
         'before creating the shared FOCUS pipeline/job.',
         (err as Error).message,
       ].join(' '),
@@ -1221,8 +1397,7 @@ function sourcePipelineFile(
   }
   if (isGcpProvider(source.providerName)) {
     const gcpSource = readGcpFocusSource(readGcpFocusConfig(source.config));
-    const tableName =
-      tableLeafName(source.tableName) || gcpUsageTableName(gcpSource.billingAccountId);
+    const tableName = tableLeafName(source.tableName) || gcpTargetTableName(gcpSource);
     return {
       tableName,
       providerName: source.providerName,
@@ -1233,6 +1408,7 @@ function sourcePipelineFile(
         sourceCatalog: gcpSource.sourceCatalog,
         sourceSchema: gcpSource.sourceSchema,
         sourceTable: gcpSource.sourceTable,
+        sourceKind: gcpSource.sourceKind,
       }),
     };
   }

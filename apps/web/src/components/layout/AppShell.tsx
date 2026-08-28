@@ -30,9 +30,9 @@ import {
   type LucideIcon,
   Wallet,
 } from 'lucide-react';
-import { CATALOG_SETTING_KEY } from '@finlake/shared';
+import { CATALOG_SETTING_KEY, GCP_SOURCE_KIND_TAGGED_DEMO } from '@finlake/shared';
 import { useI18n, type Locale } from '../../i18n';
-import { useAppSettings, useMe } from '../../api/hooks';
+import { useAppSettings, useDataSources, useMe } from '../../api/hooks';
 
 interface NavItem {
   to: string;
@@ -126,6 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const me = useMe();
   const workspaceUrl = me.data?.workspaceUrl ?? null;
   const appSettings = useAppSettings();
+  const dataSources = useDataSources();
   const catalogName = appSettings.data?.settings[CATALOG_SETTING_KEY]?.trim() || null;
   const isOnboardingRoute = matchesPathPrefix(location.pathname, '/onboarding');
   const databricksItems = buildDatabricksItems(catalogName);
@@ -134,6 +135,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [configureOpen, setConfigureOpen] = useState(onConfigureRoute);
   const [optimizeOpen, setOptimizeOpen] = useState(onOptimizeRoute);
   const [theme, setTheme] = useState<ThemeMode>(detectInitialTheme);
+  const syntheticDemoActive = (dataSources.data?.items ?? []).some(
+    (source) => source.enabled && source.config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO,
+  );
 
   useEffect(() => {
     if (onConfigureRoute) {
@@ -304,7 +308,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
         </div>
       </aside>
-      <main className="main">{children}</main>
+      <main className="main">
+        {syntheticDemoActive ? (
+          <div
+            role="status"
+            className="border-warning/40 bg-warning/10 text-foreground mb-4 rounded-md border px-4 py-3 text-sm"
+          >
+            <span className="font-semibold">{t('dataSources.gcp.syntheticDemoBadge')}:</span>{' '}
+            {t('dataSources.gcp.syntheticDemoBanner')}
+          </div>
+        ) : null}
+        {children}
+      </main>
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import {
   GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX,
+  GCP_SOURCE_KIND_FOREIGN,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
   IDENT_RE,
   isGcpDetailedBillingExportTable,
   quoteIdent,
@@ -11,11 +13,19 @@ export function buildGcpFocusSilverPipelineSql(opts: {
   sourceCatalog: string;
   sourceSchema: string;
   sourceTable: string;
+  sourceKind?: string;
 }): string {
   if (!IDENT_RE.test(opts.tableName)) {
     throw new Error(`Invalid table identifier "${opts.tableName}"`);
   }
-  if (!isGcpDetailedBillingExportTable(opts.sourceTable)) {
+  const sourceKind = opts.sourceKind ?? GCP_SOURCE_KIND_FOREIGN;
+  if (sourceKind !== GCP_SOURCE_KIND_FOREIGN && sourceKind !== GCP_SOURCE_KIND_TAGGED_DEMO) {
+    throw new Error(`Unsupported Google Cloud source kind: ${sourceKind}`);
+  }
+  if (
+    sourceKind === GCP_SOURCE_KIND_FOREIGN &&
+    !isGcpDetailedBillingExportTable(opts.sourceTable)
+  ) {
     throw new Error(
       `Google Cloud source table must be the resource-level detailed export table matching ${GCP_DETAILED_BILLING_EXPORT_TABLE_PREFIX}<BILLING_ACCOUNT_ID>`,
     );

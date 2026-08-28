@@ -1,0 +1,15 @@
+resources:
+  pipelines:
+    gcp_billing_demo_bronze:
+      name: finlake-gcp-billing-demo-bronze
+      catalog: ${resources.catalogs.finlake_catalog.name}
+      target: ${resources.schemas.ingest_schema.name}
+      serverless: true
+      channel: CURRENT
+      continuous: false
+      development: false
+      libraries:
+        - file:
+            path: ../src/ingest_bronze.sql
+      configuration:
+        raw_path: /Volumes/${resources.catalogs.finlake_catalog.name}/${resources.schemas.ingest_schema.name}/${var.volume}/gcp_billing_demo/${var.dataset_version}

@@ -20,9 +20,10 @@ import {
   buildDefaultUserExecutor,
   buildUserWorkspaceClient,
   type StatementExecutor,
+  type WorkspaceClient,
 } from './statementExecution.js';
 import { z } from 'zod';
-import { WorkspaceServiceError, isPermissionDenied } from './workspaceClientErrors.js';
+import { WorkspaceServiceError, isNotFound, isPermissionDenied } from './workspaceClientErrors.js';
 
 /** Catalogs hidden from the picker — not user-selectable for FOCUS provisioning. */
 const HIDDEN_CATALOG_NAMES = new Set(['system', 'samples', '__databricks_internal']);
@@ -51,6 +52,26 @@ interface TableInfoLike {
   table_type?: string;
   data_source_format?: string;
   comment?: string;
+}
+
+interface TableTagFilter {
+  tagName: string;
+  tagValue: string;
+}
+
+interface EntityTagAssignmentLike {
+  tag_value?: string;
+}
+
+const TAG_LOOKUP_CONCURRENCY = 8;
+const TAGGABLE_DELTA_TABLE_TYPES = new Set(['MANAGED', 'EXTERNAL', 'STREAMING_TABLE']);
+
+/** Pure eligibility check — exposed for unit tests. */
+export function isTaggableDeltaTable(table: CatalogTableSummary): boolean {
+  return (
+    (table.dataSourceFormat ?? '').toUpperCase() === 'DELTA' &&
+    TAGGABLE_DELTA_TABLE_TYPES.has((table.tableType ?? '').toUpperCase())
+  );
 }
 
 /** Pure filter — exposed for unit tests. */
@@ -136,6 +157,7 @@ export async function listAccessibleTables(
   userToken: string | undefined,
   catalogName: string,
   schemaName: string,
+  tagFilter?: TableTagFilter,
 ): Promise<CatalogTableSummary[]> {
   if (!userToken) throw new CatalogServiceError('OBO access token required', 401);
   const wc = buildUserWorkspaceClient(env, userToken);
@@ -154,12 +176,13 @@ export async function listAccessibleTables(
       if (!t.name) continue;
       collected.push({
         name: t.name,
-        fullName: t.full_name ?? null,
-        catalogName: t.catalog_name ?? null,
-        schemaName: t.schema_name ?? null,
+        fullName: t.full_name ?? `${catalogName}.${schemaName}.${t.name}`,
+        catalogName: t.catalog_name ?? catalogName,
+        schemaName: t.schema_name ?? schemaName,
         tableType: t.table_type ?? null,
         dataSourceFormat: t.data_source_format ?? null,
         comment: t.comment ?? null,
+        tags: {},
       });
     }
   } catch (err) {
@@ -169,8 +192,55 @@ export async function listAccessibleTables(
       isPermissionDenied(err) ? 403 : 502,
     );
   }
-  collected.sort((a, b) => tableSortKey(a).localeCompare(tableSortKey(b)));
-  return collected;
+  let filtered = collected;
+  if (tagFilter) {
+    try {
+      filtered = await filterTablesByTag(wc, collected.filter(isTaggableDeltaTable), tagFilter);
+    } catch (err) {
+      logger.error(
+        { err, catalogName, schemaName, tagName: tagFilter.tagName },
+        'table tag lookup failed',
+      );
+      throw new CatalogServiceError(
+        `Failed to filter tables by tag: ${(err as Error).message}`,
+        isPermissionDenied(err) ? 403 : 502,
+      );
+    }
+  }
+  filtered.sort((a, b) => tableSortKey(a).localeCompare(tableSortKey(b)));
+  return filtered;
+}
+
+async function filterTablesByTag(
+  wc: WorkspaceClient,
+  tables: CatalogTableSummary[],
+  filter: TableTagFilter,
+): Promise<CatalogTableSummary[]> {
+  const matches: CatalogTableSummary[] = [];
+  for (let offset = 0; offset < tables.length; offset += TAG_LOOKUP_CONCURRENCY) {
+    const batch = tables.slice(offset, offset + TAG_LOOKUP_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (table) => {
+        const fullName = table.fullName!;
+        try {
+          const assignment = (await wc.apiClient.request({
+            path: `/api/2.1/unity-catalog/entity-tag-assignments/tables/${encodeURIComponent(fullName)}/tags/${encodeURIComponent(filter.tagName)}`,
+            method: 'GET',
+            headers: new Headers({ Accept: 'application/json' }),
+            raw: false,
+          })) as EntityTagAssignmentLike;
+          return assignment.tag_value === filter.tagValue
+            ? { ...table, tags: { [filter.tagName]: filter.tagValue } }
+            : null;
+        } catch (err) {
+          if (isNotFound(err)) return null;
+          throw err;
+        }
+      }),
+    );
+    matches.push(...results.filter((table): table is CatalogTableSummary => table !== null));
+  }
+  return matches;
 }
 
 export class CatalogServiceError extends WorkspaceServiceError {}

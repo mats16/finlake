@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { Env } from '@finlake/shared';
-import { filterSelectableCatalogs, provisionCatalogWithDeps } from '../src/services/catalogs.js';
+import {
+  filterSelectableCatalogs,
+  isTaggableDeltaTable,
+  provisionCatalogWithDeps,
+} from '../src/services/catalogs.js';
 import type { StatementExecutor } from '../src/services/statementExecution.js';
+import { isNotFound, isPermissionDenied } from '../src/services/workspaceClientErrors.js';
 
 class FakeExecutor {
   readonly sql: string[] = [];
@@ -35,6 +40,29 @@ test('filterSelectableCatalogs keeps foreign catalog entries for source pickers'
       comment: 'Google Cloud BigQuery',
     },
   ]);
+});
+
+test('tag lookup candidates are Delta tables, not views or non-Delta tables', () => {
+  const table = {
+    name: 'gcp_billing_demo',
+    fullName: 'finops.ingest.gcp_billing_demo',
+    catalogName: 'finops',
+    schemaName: 'ingest',
+    tableType: 'STREAMING_TABLE',
+    dataSourceFormat: 'DELTA',
+    comment: null,
+    tags: {},
+  };
+  assert.equal(isTaggableDeltaTable(table), true);
+  assert.equal(isTaggableDeltaTable({ ...table, tableType: 'VIEW' }), false);
+  assert.equal(isTaggableDeltaTable({ ...table, dataSourceFormat: 'JSON' }), false);
+});
+
+test('missing entity tag assignment is treated as tag absence', () => {
+  assert.equal(isNotFound({ errorCode: 'NOT_FOUND' }), true);
+  assert.equal(isNotFound({ errorCode: 'PERMISSION_DENIED' }), false);
+  assert.equal(isPermissionDenied({ statusCode: 403 }), true);
+  assert.equal(isPermissionDenied({ errorCode: 'NOT_FOUND' }), false);
 });
 
 test('provisionCatalog creates pricing schema, downloads volume, and grants', async () => {

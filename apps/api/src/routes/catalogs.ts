@@ -50,11 +50,30 @@ export function catalogsRouter(env: Env): Router {
         res.status(400).json({ error: { message: 'catalogName and schemaName are required' } });
         return;
       }
+      const rawTagName = req.query.tagName;
+      const rawTagValue = req.query.tagValue;
+      if (
+        (rawTagName !== undefined || rawTagValue !== undefined) &&
+        (typeof rawTagName !== 'string' ||
+          typeof rawTagValue !== 'string' ||
+          !rawTagName.trim() ||
+          !rawTagValue.trim())
+      ) {
+        res.status(400).json({
+          error: { message: 'tagName and tagValue must be specified together' },
+        });
+        return;
+      }
+      const tagFilter =
+        typeof rawTagName === 'string' && typeof rawTagValue === 'string'
+          ? { tagName: rawTagName.trim(), tagValue: rawTagValue.trim() }
+          : undefined;
       const tables = await listAccessibleTables(
         env,
         req.user?.accessToken,
         catalogName,
         schemaName,
+        tagFilter,
       );
       res.setHeader('Cache-Control', 'no-store');
       res.json({ tables });

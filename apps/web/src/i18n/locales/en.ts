@@ -1289,26 +1289,34 @@ export const en = {
       },
     },
     gcp: {
-      title: 'BigQuery billing export',
-      description: 'Transforms Google Cloud detailed billing export tables into FOCUS format.',
+      title: 'Google Cloud billing data',
+      description: 'Transforms Google Cloud billing data into FOCUS format.',
       connectTitle: 'Connect Google Cloud billing',
       connectDescription:
-        'Use an existing Databricks Foreign Catalog for the BigQuery dataset that contains the Cloud Billing detailed export.',
-      useExistingForeignCatalog: 'Use existing Foreign Catalog',
-      modalDescription: 'Select the Google Cloud billing data table exported to BigQuery.',
+        'Select either a BigQuery detailed billing export in a Foreign Catalog or a tagged synthetic Delta table in the FinLake catalog.',
+      useExistingForeignCatalog: 'Select billing source',
+      modalDescription:
+        'Select a BigQuery detailed billing export or a tagged synthetic Delta table.',
       catalog: 'Catalog',
-      schema: 'Schema (BigQuery dataset)',
+      schema: 'Schema',
       table: 'Table',
       sourceTable: 'Source table',
-      catalogPlaceholder: 'Select a Foreign Catalog',
+      catalogPlaceholder: 'Select a catalog',
       schemaPlaceholder: 'Select a schema',
-      tablePlaceholder: 'Select gcp_billing_export_resource_v1_*',
+      tablePlaceholder: 'Select a billing source table',
       noTables: 'No tables are visible in this schema.',
       detailedExportRequired:
         'Resource-level detailed export is required for FOCUS conversion. In Google Cloud Billing export settings, enable Detailed usage cost with Enable detailed export, then select the gcp_billing_export_resource_v1_<BILLING_ACCOUNT_ID> table.',
+      syntheticDemoBadge: 'Synthetic demo data',
+      syntheticDemoNotice:
+        'This tagged Delta table contains synthetic demo billing records. FinLake processes it through the same GCP-to-FOCUS pipeline as a real billing export.',
+      syntheticDemoEligibilityRequired:
+        'This table is not an eligible synthetic source. Restore the finlake_source_type=gcp_billing_demo tag and confirm it is a Delta managed, external, or streaming table.',
+      syntheticDemoBanner:
+        'Synthetic billing data is active. If real sources are also enabled, application totals combine demo and real data.',
       resourceProgress: 'Creation progress',
       resourceSteps: {
-        sourceGrants: 'Foreign Catalog grants',
+        sourceGrants: 'Source table grants',
         lakeflowJob: 'Lakeflow Spark Declarative Pipelines',
       },
       resourceStepStatus: {

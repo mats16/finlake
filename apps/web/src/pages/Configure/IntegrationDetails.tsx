@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import {
   CATALOG_SETTING_KEY,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
   dataSourceKeyString,
   isAwsProvider,
   isCustomProvider,
@@ -110,9 +111,13 @@ function isRegisteredAwsSource(row: DataSource): boolean {
 }
 
 function isRegisteredGcpSource(row: DataSource): boolean {
-  return ['sourceCatalog', 'sourceSchema', 'sourceTable', 'billingAccountId'].every(
+  const hasSource = ['sourceCatalog', 'sourceSchema', 'sourceTable'].every(
     (key) => configString(row.config, key).trim().length > 0,
   );
+  if (!hasSource) return false;
+  return configString(row.config, 'sourceKind') === GCP_SOURCE_KIND_TAGGED_DEMO
+    ? configString(row.config, 'sourceId').trim().length > 0
+    : configString(row.config, 'billingAccountId').trim().length > 0;
 }
 
 function isRegisteredSnowflakeSource(row: DataSource): boolean {
@@ -128,7 +133,10 @@ function awsAccountIdFor(row: DataSource): string {
   return configString(row.config, 'awsAccountId') || row.accountId;
 }
 
-function gcpBillingAccountIdFor(row: DataSource): string {
+function gcpSourceIdFor(row: DataSource): string {
+  if (configString(row.config, 'sourceKind') === GCP_SOURCE_KIND_TAGGED_DEMO) {
+    return configString(row.config, 'sourceId') || row.accountId;
+  }
   return normalizeGcpBillingAccountId(
     configString(row.config, 'billingAccountId') || row.accountId,
   );
@@ -564,7 +572,7 @@ export function GcpIntegrationDetail(props: IntegrationDetailProps = {}) {
     ? (gcpRows.find((row) => dataSourceKeyString(row) === selectedKey) ?? null)
     : null;
   const registeredAccountIds = useMemo(
-    () => Array.from(new Set(gcpRows.map(gcpBillingAccountIdFor))),
+    () => Array.from(new Set(gcpRows.map(gcpSourceIdFor))),
     [gcpRows],
   );
 
@@ -740,7 +748,7 @@ function GcpAccountSettingsSheet({ row, onClose }: { row: DataSource; onClose: (
           <div className="min-w-0">
             <h4 id="gcp-account-settings-sheet-title" className="m-0 text-base font-semibold">
               {t('dataSources.detail.gcpSelectedSettings', {
-                account: gcpBillingAccountIdFor(row),
+                account: gcpSourceIdFor(row),
               })}
             </h4>
           </div>
@@ -777,7 +785,7 @@ function GcpAccountsTable({
   const deleteErrorMessage = messageOf(deleteDs.error);
 
   const onRemove = (row: DataSource) => {
-    if (!window.confirm(t('dataSources.confirmDelete', { name: gcpBillingAccountIdFor(row) }))) {
+    if (!window.confirm(t('dataSources.confirmDelete', { name: gcpSourceIdFor(row) }))) {
       return;
     }
     deleteDs.mutate(toDataSourceKey(row), { onSuccess: () => onRemoved(row) });
@@ -821,7 +829,14 @@ function GcpAccountsTable({
                 onClick={() => onConfigure(row)}
               >
                 <TableCell>
-                  <div className="min-w-40 font-medium">{gcpBillingAccountIdFor(row)}</div>
+                  <div className="flex min-w-40 flex-wrap items-center gap-2 font-medium">
+                    {gcpSourceIdFor(row)}
+                    {configString(row.config, 'sourceKind') === GCP_SOURCE_KIND_TAGGED_DEMO ? (
+                      <span className="bg-warning/15 text-warning-foreground rounded px-1.5 py-0.5 text-xs">
+                        {t('dataSources.gcp.syntheticDemoBadge')}
+                      </span>
+                    ) : null}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <span className="text-muted-foreground font-mono text-xs">
@@ -835,7 +850,7 @@ function GcpAccountsTable({
                 </TableCell>
                 <TableCell>{formatUpdatedAt(row.updatedAt, locale)}</TableCell>
                 <TableCell>
-                  {isRegisteredGcpSource(row)
+                  {isRegisteredGcpSource(row) && row.enabled
                     ? t('dataSources.detail.connected')
                     : t('dataSources.badges.setupRequired')}
                 </TableCell>

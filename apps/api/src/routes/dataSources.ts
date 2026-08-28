@@ -12,6 +12,9 @@ import {
   isCustomProvider,
   isDatabricksProvider,
   isGcpProvider,
+  GCP_DEMO_ACCOUNT_ID,
+  GCP_SOURCE_KIND_TAGGED_DEMO,
+  gcpDemoSourceIdFromParts,
   isSnowflakeProvider,
   isSnowflakeUsageInCurrencyDailySource,
   normalizeGcpBillingAccountId,
@@ -50,6 +53,16 @@ const AWS_SOURCE_LOCKED_CONFIG_KEYS = [
 ];
 
 const SNOWFLAKE_SOURCE_LOCKED_CONFIG_KEYS = [
+  'sourceId',
+  'sourceCatalog',
+  'sourceSchema',
+  'sourceTable',
+  'sourceFqn',
+];
+
+const GCP_SOURCE_LOCKED_CONFIG_KEYS = [
+  'billingAccountId',
+  'sourceKind',
   'sourceId',
   'sourceCatalog',
   'sourceSchema',
@@ -121,6 +134,12 @@ export function dataSourcesRouter(
       }
       const isCustomTemplate = parsed.data.templateId === 'custom';
       const pipelineId = parsed.data.pipelineId ?? null;
+      if (isGcpProvider(parsed.data.providerName) && parsed.data.enabled === true) {
+        res.status(409).json({
+          error: { message: 'Google Cloud sources must be enabled through setup validation.' },
+        });
+        return;
+      }
       if (isCustomTemplate && (await customTableAlreadyRegistered(db, parsed.data.tableName))) {
         res.status(409).json({
           error: {
@@ -159,6 +178,9 @@ export function dataSourcesRouter(
         res.status(400).json({ error: { message: 'accountId is required' } });
         return;
       }
+      const isTaggedGcpDemo =
+        isGcpProvider(parsed.data.providerName) &&
+        config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO;
       let created;
       try {
         created = await db.repos.dataSources.create({
@@ -172,6 +194,18 @@ export function dataSourcesRouter(
           config,
         });
       } catch (err) {
+        if (
+          isTaggedGcpDemo &&
+          (await db.repos.dataSources.get({
+            providerName: parsed.data.providerName,
+            accountId: GCP_DEMO_ACCOUNT_ID,
+          }))
+        ) {
+          res.status(409).json({
+            error: { message: 'Only one Google Cloud synthetic demo source can be registered.' },
+          });
+          return;
+        }
         if (isCustomTableUniqueViolation(err)) {
           res.status(409).json({
             error: {
@@ -257,6 +291,16 @@ export function dataSourcesRouter(
       const existing = await db.repos.dataSources.get(key);
       if (!existing) {
         res.status(404).json({ error: { message: 'Not found' } });
+        return;
+      }
+      if (
+        isGcpProvider(existing.providerName) &&
+        parsed.data.enabled === true &&
+        !existing.enabled
+      ) {
+        res.status(409).json({
+          error: { message: 'Google Cloud sources must be enabled through setup validation.' },
+        });
         return;
       }
       const lockedKeys = registeredSourceLockedConfigKeys(existing);
@@ -437,6 +481,9 @@ function accountIdForCreate(
   if (isSnowflakeProvider(providerName)) {
     return nonEmptyConfigString(config, 'sourceId');
   }
+  if (isGcpProvider(providerName) && config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO) {
+    return GCP_DEMO_ACCOUNT_ID;
+  }
   const trimmedAccountId = accountId?.trim();
   if (trimmedAccountId) {
     if (isGcpProvider(providerName)) return normalizeGcpBillingAccountId(trimmedAccountId);
@@ -451,6 +498,20 @@ function configForCreate(
   accountIdFallback: string,
 ): Record<string, unknown> {
   if (isGcpProvider(providerName)) {
+    if (config.sourceKind === GCP_SOURCE_KIND_TAGGED_DEMO) {
+      const sourceCatalog = nonEmptyConfigString(config, 'sourceCatalog');
+      const sourceSchema = nonEmptyConfigString(config, 'sourceSchema');
+      const sourceTable = nonEmptyConfigString(config, 'sourceTable');
+      if (!sourceCatalog || !sourceSchema || !sourceTable) {
+        throw new Error(
+          'Google Cloud demo sourceCatalog, sourceSchema, and sourceTable are required.',
+        );
+      }
+      return {
+        ...config,
+        sourceId: gcpDemoSourceIdFromParts(sourceCatalog, sourceSchema, sourceTable),
+      };
+    }
     const billingAccountId =
       typeof config.billingAccountId === 'string' && config.billingAccountId.trim().length > 0
         ? config.billingAccountId
@@ -509,6 +570,16 @@ function isRegisteredSnowflakeSource(source: {
   return snowflakeSourceConfigError(source.config) === null;
 }
 
+function isRegisteredGcpSource(source: {
+  providerName: string;
+  config: Record<string, unknown>;
+}): boolean {
+  if (!isGcpProvider(source.providerName)) return false;
+  return ['sourceCatalog', 'sourceSchema', 'sourceTable'].every(
+    (key) => nonEmptyConfigString(source.config, key) !== null,
+  );
+}
+
 function snowflakeSourceConfigError(config: Record<string, unknown>): string | null {
   const sourceCatalog = nonEmptyConfigString(config, 'sourceCatalog');
   const sourceSchema = nonEmptyConfigString(config, 'sourceSchema');
@@ -528,12 +599,14 @@ function registeredSourceLockedConfigKeys(source: {
   config: Record<string, unknown>;
 }): string[] {
   if (isRegisteredAwsSource(source)) return AWS_SOURCE_LOCKED_CONFIG_KEYS;
+  if (isRegisteredGcpSource(source)) return GCP_SOURCE_LOCKED_CONFIG_KEYS;
   if (isRegisteredSnowflakeSource(source)) return SNOWFLAKE_SOURCE_LOCKED_CONFIG_KEYS;
   return [];
 }
 
 function sourceProviderLabel(providerName: string): string {
   if (isAwsProvider(providerName)) return 'AWS';
+  if (isGcpProvider(providerName)) return 'Google Cloud';
   if (isSnowflakeProvider(providerName)) return 'Snowflake';
   return providerName;
 }
